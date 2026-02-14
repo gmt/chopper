@@ -474,6 +474,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_rejects_direct_passthrough_nul_after_separator() {
+        let err = parse_invocation(&[
+            "chopper".into(),
+            "demo".into(),
+            "--".into(),
+            "bad\0arg".into(),
+        ])
+        .expect_err("nul bytes should be rejected even after `--`");
+        assert!(
+            err.to_string()
+                .contains("runtime arguments cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_symlink_passthrough_nul_after_separator() {
+        let err = parse_invocation(&["demo".into(), "--".into(), "bad\0arg".into()])
+            .expect_err("nul bytes should be rejected even after `--`");
+        assert!(
+            err.to_string()
+                .contains("runtime arguments cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn rejects_alias_starting_with_dash() {
         let err = validate_alias_name("-alias").expect_err("dash-prefixed alias is invalid");
         assert!(err.to_string().contains("cannot start with `-`"));
