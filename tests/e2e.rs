@@ -714,6 +714,47 @@ stderr = true
 }
 
 #[test]
+fn journal_failure_before_child_spawn_avoids_side_effects() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let side_effect = config_home.path().join("should-not-exist");
+
+    fs::write(
+        aliases_dir.join("journal-no-child.toml"),
+        format!(
+            r#"
+exec = "/bin/sh"
+args = ["-c", "touch \"$1\"", "_", "{}"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+            side_effect.display()
+        ),
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-no-child"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to spawn systemd-cat"), "{stderr}");
+    assert!(
+        !side_effect.exists(),
+        "child command should not run when journal spawn fails"
+    );
+}
+
+#[test]
 fn journal_stderr_false_skips_systemd_cat_dependency() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

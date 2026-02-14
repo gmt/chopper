@@ -22,17 +22,6 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 }
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
-    let mut child_cmd = command_for_invocation(&invocation);
-    child_cmd.stderr(Stdio::piped());
-
-    let mut child = child_cmd
-        .spawn()
-        .with_context(|| format!("failed to spawn {}", invocation.exec.display()))?;
-    let mut child_stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture child stderr"))?;
-
     let mut journal_cmd = Command::new("systemd-cat");
     journal_cmd.arg(format!("--namespace={}", journal.namespace));
     if let Some(identifier) = journal.identifier {
@@ -49,6 +38,27 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
         .stdin
         .take()
         .ok_or_else(|| anyhow!("failed to open systemd-cat stdin"))?;
+
+    let mut child_cmd = command_for_invocation(&invocation);
+    child_cmd.stderr(Stdio::piped());
+
+    let mut child = match child_cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            drop(journal_stdin);
+            let _ = journal_child.wait();
+            return Err(err)
+                .with_context(|| format!("failed to spawn {}", invocation.exec.display()));
+        }
+    };
+    let mut child_stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            drop(journal_stdin);
+            let _ = journal_child.wait();
+            return Err(anyhow!("failed to capture child stderr"));
+        }
+    };
 
     let pump = thread::spawn(move || -> io::Result<()> {
         io::copy(&mut child_stderr, &mut journal_stdin)?;
