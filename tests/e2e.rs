@@ -419,6 +419,48 @@ fn builtin_flags_with_extra_args_via_uppercase_chopper_exe_fall_back_to_alias_va
 }
 
 #[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
 fn print_dir_builtins_report_resolved_override_paths() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -573,6 +615,51 @@ fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_exe() {
     assert!(
         output.status.success(),
         "print-cache-dir via CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);

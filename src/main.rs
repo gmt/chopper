@@ -631,6 +631,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["CHOPPER.EXE".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -652,6 +656,10 @@ mod tests {
     fn detects_print_path_actions_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
         );
         assert_eq!(
