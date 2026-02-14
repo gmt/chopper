@@ -1,4 +1,5 @@
-<h1>chopper</h1><p><em>a helicopter parent for your processes</em></p>
+<h1>chopper</h1>
+<p><em>a helicopter parent for your processes</em></p>
 
 Tired of tediously implementing wrappers in the remarkably performant and familiar bash scripting language and ready to move to an arbitrary and poorly documented DSL full of bugs and footguns for a hypothetical performance boost?
 
