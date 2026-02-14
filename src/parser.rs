@@ -59,6 +59,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec.is_empty() {
         return Err(anyhow!("field `exec` cannot be empty"));
     }
+    if exec == "." || exec == ".." {
+        return Err(anyhow!("field `exec` cannot be `.` or `..`"));
+    }
 
     let exec = resolve_exec_path(&base_dir, exec);
 
@@ -375,6 +378,24 @@ exec = "   "
 
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err.to_string().contains("field `exec` cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_dot_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot be `.` or `..`"));
     }
 
     #[test]
