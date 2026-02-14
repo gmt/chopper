@@ -60,6 +60,8 @@ Mixed-separator launcher paths (for example `C:/tools\CHOPPER.COM` and
 `\\server/tools\CHOPPER.BAT`) are recognized too.
 Nested relative variants with mixed separators (for example
 `./nested\CHOPPER.CMD`) are recognized as direct invocation names as well.
+Trailing path separators on launcher paths (for example
+`C:/tools/CHOPPER.CMD/`) are tolerated for direct invocation detection.
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
