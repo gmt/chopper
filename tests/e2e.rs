@@ -1082,6 +1082,54 @@ CHOPPER_E2E = "from_alias"
 }
 
 #[test]
+fn unicode_alias_name_executes_and_caches_safely() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias = "emoji🚀";
+    fs::write(
+        aliases_dir.join(format!("{alias}.toml")),
+        r#"
+exec = "echo"
+args = ["unicode"]
+"#,
+    )
+    .expect("write alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &[alias, "runtime"]);
+    assert!(
+        first.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.contains("unicode runtime"), "{stdout}");
+
+    let second = run_chopper(&config_home, &cache_home, &[alias, "again"]);
+    assert!(
+        second.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("unicode again"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifest cache dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("emoji_") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 1,
+        "expected one cache entry for unicode alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
 fn direct_invocation_supports_dotted_alias_identifiers() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

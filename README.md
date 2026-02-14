@@ -57,6 +57,8 @@ path separators, whitespace, and dash-prefixed tokens are rejected.
 Dot-separated names like `demo.prod` are valid in both direct and symlink modes.
 Other punctuation tokens (for example `alpha:beta`) are also supported as long as
 they satisfy the direct-mode validation rules above.
+Unicode alias names are also allowed (for example `emoji🚀`) if they satisfy the
+same validation constraints.
 
 ---
 
