@@ -2444,6 +2444,51 @@ mod tests {
     }
 
     #[test]
+    fn stale_primary_hashed_cache_for_unsafe_alias_is_pruned_when_legacy_missing() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let stale_fingerprint = source_fingerprint(&source_file).expect("stale source fingerprint");
+        let alias = "alpha:beta";
+
+        let primary_path = cache_path(alias);
+        let legacy_path = legacy_cache_path(alias);
+        assert_ne!(
+            primary_path, legacy_path,
+            "hashed and legacy paths should differ for unsafe aliases"
+        );
+        store(
+            alias,
+            &stale_fingerprint,
+            &Manifest::simple(PathBuf::from("echo")),
+        )
+        .expect("store stale primary cache");
+        assert!(primary_path.exists(), "stale primary cache should exist");
+        assert!(
+            !legacy_path.exists(),
+            "legacy cache should not exist before fallback check"
+        );
+
+        fs::write(&source_file, "exec = \"printf\"\n").expect("rewrite source");
+        let fresh_fingerprint = source_fingerprint(&source_file).expect("fresh source fingerprint");
+
+        assert!(load(alias, &fresh_fingerprint).is_none());
+        assert!(
+            !primary_path.exists(),
+            "stale primary hashed cache should be pruned on fingerprint mismatch"
+        );
+        assert!(
+            !legacy_path.exists(),
+            "legacy cache should remain absent when no fallback entry exists"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn invalid_legacy_cache_path_for_unsafe_alias_is_pruned_without_migration() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");

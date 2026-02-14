@@ -6437,6 +6437,98 @@ args = ["STALEHASHNEWTOKEN99X"]
 }
 
 #[test]
+fn stale_hashed_cache_entry_without_legacy_is_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["HASHONLYOLDTOKEN01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHONLYOLDTOKEN01 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should not exist before stale-hashed reparse check"
+    );
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["HASHONLYNEWTOKEN99X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale hashed cache and no legacy fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("HASHONLYNEWTOKEN99X second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("HASHONLYOLDTOKEN01 second-run"),
+        "stale hashed payload should not be executed after source changes: {stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should remain absent after stale hashed reparse path"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"HASHONLYNEWTOKEN99X".len())
+            .any(|window| window == b"HASHONLYNEWTOKEN99X"),
+        "rebuilt hashed cache should contain fresh source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"HASHONLYOLDTOKEN01".len())
+            .any(|window| window == b"HASHONLYOLDTOKEN01"),
+        "rebuilt hashed cache should not retain stale hashed payload"
+    );
+}
+
+#[test]
 fn corrupted_hashed_cache_file_falls_back_to_valid_legacy_and_migrates() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
