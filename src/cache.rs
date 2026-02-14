@@ -1248,6 +1248,82 @@ mod tests {
         env::remove_var("XDG_CACHE_HOME");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn store_rejects_manifest_with_nul_exec_path_and_skips_cache_write() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let invalid_exec = PathBuf::from(OsString::from_vec(b"ec\0ho".to_vec()));
+        let invalid_manifest = Manifest::simple(invalid_exec);
+
+        let err = store("invalid-store-nul-exec", &fingerprint, &invalid_manifest)
+            .expect_err("NUL exec path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-exec");
+        assert!(
+            !path.exists(),
+            "NUL exec path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn store_rejects_manifest_with_nul_reconcile_script_path_and_skips_cache_write() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        let invalid_script = PathBuf::from(OsString::from_vec(b"hook\0s/reconcile.rhai".to_vec()));
+        invalid_manifest.reconcile = Some(ReconcileConfig {
+            script: invalid_script,
+            function: "reconcile".to_string(),
+        });
+
+        let err = store(
+            "invalid-store-nul-reconcile-script",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("NUL reconcile script path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-reconcile-script");
+        assert!(
+            !path.exists(),
+            "NUL reconcile script path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
     #[test]
     fn store_rejects_manifest_with_nul_arg_and_skips_cache_write() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
