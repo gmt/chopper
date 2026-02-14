@@ -36,9 +36,25 @@ mod tests {
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", " TRUE ");
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", " YeS ");
+        assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "on");
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "0");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::remove_var("CHOPPER_TEST_FLAG");
+    }
+
+    #[test]
+    fn env_flag_enabled_rejects_falsey_and_unknown_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_TEST_FLAG", "false");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "off");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "  ");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "definitely-not");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::remove_var("CHOPPER_TEST_FLAG");
     }
