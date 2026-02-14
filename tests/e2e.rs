@@ -386,6 +386,48 @@ args = ["override-root"]
 }
 
 #[test]
+fn empty_config_and_cache_overrides_fall_back_to_xdg_roots() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("fallback.toml"),
+        r#"
+exec = "echo"
+args = ["fallback-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallback", "runtime"],
+        [
+            ("CHOPPER_CONFIG_DIR", "   ".to_string()),
+            ("CHOPPER_CACHE_DIR", "   ".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fallback-root runtime"), "{stdout}");
+
+    let default_cache_file = cache_home.path().join("chopper/manifests/fallback.bin");
+    assert!(
+        default_cache_file.exists(),
+        "expected cache file in default XDG cache root: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
 fn cache_can_be_disabled_for_extraordinary_debugging() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
