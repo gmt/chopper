@@ -1,6 +1,7 @@
 use crate::manifest::Manifest;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -79,9 +80,7 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 }
 
 fn cache_path(alias: &str) -> Option<PathBuf> {
-    let cache_dir = directories::ProjectDirs::from("", "", "chopper")
-        .map(|d| d.cache_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".chopper-cache"));
+    let cache_dir = cache_root_dir();
 
     let safe_alias = alias
         .chars()
@@ -98,10 +97,24 @@ fn cache_path(alias: &str) -> Option<PathBuf> {
     )
 }
 
+fn cache_root_dir() -> PathBuf {
+    if let Ok(override_dir) = env::var("CHOPPER_CACHE_DIR") {
+        let trimmed = override_dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    directories::ProjectDirs::from("", "", "chopper")
+        .map(|d| d.cache_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(".chopper-cache"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{load, source_fingerprint, store};
     use crate::manifest::Manifest;
+    use crate::test_support::ENV_LOCK;
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -109,6 +122,7 @@ mod tests {
 
     #[test]
     fn cache_round_trip_and_invalidation() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
         env::set_var("XDG_CACHE_HOME", home.path());
 
@@ -126,10 +140,12 @@ mod tests {
         fs::write(&source_file, "exec = \"printf\"\n").expect("rewrite source");
         let new_fingerprint = source_fingerprint(&source_file).expect("new fingerprint");
         assert!(load("demo", &new_fingerprint).is_none());
+        env::remove_var("XDG_CACHE_HOME");
     }
 
     #[test]
     fn corrupted_cache_entry_is_ignored() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
         env::set_var("XDG_CACHE_HOME", home.path());
 
@@ -148,5 +164,28 @@ mod tests {
         fs::write(&cache_file, [0, 159, 146, 150]).expect("write invalid cache bytes");
 
         assert!(load("broken", &fingerprint).is_none());
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cache_path_honors_chopper_cache_override() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("CHOPPER_CACHE_DIR", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        store("demo", &fingerprint, &manifest).expect("store cache");
+
+        let expected = home.path().join("manifests").join("demo.bin");
+        assert!(
+            expected.exists(),
+            "expected override cache file at {:?}",
+            expected
+        );
+        env::remove_var("CHOPPER_CACHE_DIR");
     }
 }

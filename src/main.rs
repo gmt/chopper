@@ -3,12 +3,21 @@ mod executor;
 mod manifest;
 mod parser;
 mod reconcile;
+#[cfg(test)]
+mod test_support;
 
 use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
 fn config_dir() -> PathBuf {
+    if let Ok(override_dir) = env::var("CHOPPER_CONFIG_DIR") {
+        let trimmed = override_dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
     directories::ProjectDirs::from("", "", "chopper")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".chopper"))
@@ -125,11 +134,10 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_enabled, parse_invocation};
+    use super::{cache_enabled, config_dir, parse_invocation};
+    use crate::test_support::ENV_LOCK;
     use std::env;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use std::path::PathBuf;
 
     #[test]
     fn supports_direct_invocation_mode() {
@@ -213,5 +221,23 @@ mod tests {
         env::set_var("CHOPPER_DISABLE_CACHE", "yes");
         assert!(!cache_enabled());
         env::remove_var("CHOPPER_DISABLE_CACHE");
+    }
+
+    #[test]
+    fn config_dir_honors_chopper_override() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_CONFIG_DIR", "/tmp/chopper-config-override");
+        let path = config_dir();
+        assert_eq!(path, PathBuf::from("/tmp/chopper-config-override"));
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn empty_config_override_falls_back_to_default_logic() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_CONFIG_DIR", "   ");
+        let path = config_dir();
+        assert_ne!(path, PathBuf::from("   "));
+        env::remove_var("CHOPPER_CONFIG_DIR");
     }
 }

@@ -44,6 +44,14 @@ You may also use `kpods -- [args...]` to explicitly separate passthrough args.
 
 Config root is `${XDG_CONFIG_HOME:-~/.config}/chopper`.
 
+For advanced scenarios, you can override config root explicitly:
+
+```bash
+CHOPPER_CONFIG_DIR=/path/to/config-root chopper <alias> [args...]
+```
+
+When this override is set, paths are resolved directly under that root.
+
 Lookup order for alias `foo`:
 
 1. `aliases/foo.toml`
@@ -139,6 +147,12 @@ fn reconcile(ctx) {
 ## Caching
 
 Parsed manifests are cached automatically under `${XDG_CACHE_HOME:-~/.cache}/chopper/manifests`.
+
+For advanced scenarios, cache root can be overridden explicitly:
+
+```bash
+CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias> [args...]
+```
 
 Cache invalidation is automatic and based on source file path + metadata
 (size and mtime). Users do not need to manually manage cache in normal usage.
