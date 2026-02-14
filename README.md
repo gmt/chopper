@@ -104,6 +104,7 @@ function = "reconcile"           # optional, default "reconcile"
 Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
 `env_remove` entries are also trimmed; blank entries are ignored.
+`[env]` keys are trimmed and must remain unique after trimming.
 
 ### Argument merge order
 
