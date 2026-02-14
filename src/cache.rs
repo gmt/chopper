@@ -2213,6 +2213,67 @@ mod tests {
     }
 
     #[test]
+    fn load_falls_back_to_valid_legacy_when_primary_hashed_entry_is_invalid() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let alias = "alpha:beta";
+
+        let primary_path = cache_path(alias);
+        let legacy_path = legacy_cache_path(alias);
+        assert_ne!(
+            primary_path, legacy_path,
+            "hashed and legacy paths should differ for unsafe aliases"
+        );
+        fs::create_dir_all(primary_path.parent().expect("cache parent"))
+            .expect("create cache parent");
+
+        let mut invalid_primary_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_primary_manifest
+            .env
+            .insert("BAD=KEY".to_string(), "value".to_string());
+        let invalid_primary_entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest: invalid_primary_manifest,
+        };
+        fs::write(
+            &primary_path,
+            bincode::serialize(&invalid_primary_entry).expect("serialize invalid primary entry"),
+        )
+        .expect("write invalid primary cache file");
+
+        let valid_legacy_manifest = Manifest::simple(PathBuf::from("echo"));
+        let valid_legacy_entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest: valid_legacy_manifest.clone(),
+        };
+        fs::write(
+            &legacy_path,
+            bincode::serialize(&valid_legacy_entry).expect("serialize valid legacy entry"),
+        )
+        .expect("write valid legacy cache file");
+
+        let loaded = load(alias, &fingerprint).expect("fallback to valid legacy cache");
+        assert_eq!(loaded.exec, valid_legacy_manifest.exec);
+        assert!(
+            primary_path.exists(),
+            "primary hashed cache should be restored from valid legacy entry"
+        );
+        assert!(
+            !legacy_path.exists(),
+            "legacy cache should be pruned after successful migration"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn invalid_legacy_cache_path_for_unsafe_alias_is_pruned_without_migration() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
