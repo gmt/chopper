@@ -287,6 +287,9 @@ fn path_contains_nul(path: &Path) -> bool {
 }
 
 pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) -> Result<()> {
+    validate_cached_manifest(manifest)
+        .context("refusing to store invalid alias cache entry manifest")?;
+
     let path = cache_path(alias);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -626,6 +629,38 @@ mod tests {
     fn cache_alias_sanitization_replaces_unsafe_characters() {
         let safe = sanitize_alias_for_cache("alpha/beta\\gamma:delta space\tnewline\nemoji🚀");
         assert_eq!(safe, "alpha_beta_gamma_delta_space_newline_emoji_");
+    }
+
+    #[test]
+    fn store_rejects_invalid_manifest_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest
+            .env
+            .insert("BAD=KEY".into(), "value".into());
+
+        let err = store("invalid-store", &fingerprint, &invalid_manifest)
+            .expect_err("invalid manifest should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store");
+        assert!(
+            !path.exists(),
+            "invalid manifest should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
     }
 
     #[test]
