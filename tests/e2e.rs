@@ -59,6 +59,22 @@ fn help_flag_prints_usage_without_alias() {
 }
 
 #[test]
+fn no_args_prints_usage_without_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &[]);
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("Built-ins:"), "{stdout}");
+}
+
+#[test]
 fn short_help_flag_prints_usage_without_alias() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

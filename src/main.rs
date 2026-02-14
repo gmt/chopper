@@ -71,6 +71,9 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     if exe_name != "chopper" {
         return None;
     }
+    if args.len() == 1 {
+        return Some(BuiltinAction::Help);
+    }
     if args.len() != 2 {
         return None;
     }
@@ -146,9 +149,9 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
 
     if exe_name == "chopper" {
         if args.len() < 2 {
-            eprintln!("Usage: symlink to chopper with alias name, or chopper <alias>");
-            eprintln!("  chopper <alias> [args...]");
-            std::process::exit(1);
+            return Err(anyhow!(
+                "missing alias name; use `chopper <alias> [args...]` or `chopper --help`"
+            ));
         }
         let alias = args[1].clone();
         validate_alias_name(&alias)?;
@@ -353,6 +356,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["chopper".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["alias-symlink".into(), "--help".into()]),
             None
         );
@@ -396,6 +403,12 @@ mod tests {
             detect_builtin_action(&["chopper".into(), "--version".into(), "extra".into()]),
             None
         );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_missing_alias_without_exiting_process() {
+        let err = parse_invocation(&["chopper".into()]).expect_err("missing alias is invalid");
+        assert!(err.to_string().contains("missing alias name"));
     }
 
     #[test]

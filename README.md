@@ -31,6 +31,7 @@ chopper <alias> -- [args...]
 Built-in flags for direct invocation:
 
 ```bash
+chopper
 chopper --help
 chopper --version
 chopper --print-config-dir
