@@ -3292,6 +3292,53 @@ fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_com() {
 }
 
 #[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create uppercase chopper symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_default_to_xdg_roots() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
