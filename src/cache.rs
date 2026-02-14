@@ -1107,6 +1107,42 @@ mod tests {
     }
 
     #[test]
+    fn store_rejects_manifest_with_equals_env_key_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest
+            .env
+            .insert("BAD=KEY".to_string(), "value".to_string());
+
+        let err = store(
+            "invalid-store-equals-env-key",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("env key containing '=' should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-equals-env-key");
+        assert!(
+            !path.exists(),
+            "env key containing '=' should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn store_rejects_manifest_with_whitespace_reconcile_script_and_skips_cache_write() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
@@ -1763,6 +1799,39 @@ mod tests {
         assert!(
             !path.exists(),
             "dotdot exec path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_dot_component_exec_path_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let invalid_manifest = Manifest::simple(PathBuf::from("bin/.."));
+
+        let err = store(
+            "invalid-store-dot-component-exec",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("dot component exec path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-dot-component-exec");
+        assert!(
+            !path.exists(),
+            "dot component exec path should not produce cache file"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
