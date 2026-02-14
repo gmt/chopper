@@ -51,6 +51,8 @@ kpods [args...]
 In symlink mode, alias name is inferred from executable name (`kpods` above).
 You may also use `kpods -- [args...]` to explicitly separate passthrough args.
 The symlink basename is used verbatim (including dots like `kpods.prod`).
+Built-in flags such as `--help`, `-h`, `--version`, and `-V` are treated as
+normal passthrough arguments in symlink mode.
 
 Alias names in direct mode are logical identifiers (not filesystem paths), so
 path separators, whitespace, NUL bytes, and dash-prefixed tokens are rejected.
