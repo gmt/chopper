@@ -105,6 +105,7 @@ fn help_flag_prints_usage_without_alias() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
     assert!(stdout.contains("CHOPPER_DISABLE_CACHE"), "{stdout}");
+    assert!(stdout.contains("truthy: 1,true,yes,on"), "{stdout}");
 }
 
 #[test]
