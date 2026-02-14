@@ -11,6 +11,9 @@ pub struct SourceFingerprint {
     pub source_path: PathBuf,
     pub source_len: u64,
     pub source_modified_ns: u128,
+    pub source_changed_ns: u128,
+    pub source_device: u64,
+    pub source_inode: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,11 +33,15 @@ pub fn source_fingerprint(path: &Path) -> Result<SourceFingerprint> {
         })
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
+    let (source_changed_ns, source_device, source_inode) = unix_file_signature(&metadata);
 
     Ok(SourceFingerprint {
         source_path: path.to_path_buf(),
         source_len: metadata.len(),
         source_modified_ns: modified,
+        source_changed_ns,
+        source_device,
+        source_inode,
     })
 }
 
@@ -108,6 +115,22 @@ fn cache_root_dir() -> PathBuf {
     directories::ProjectDirs::from("", "", "chopper")
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".chopper-cache"))
+}
+
+#[cfg(unix)]
+fn unix_file_signature(metadata: &fs::Metadata) -> (u128, u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+
+    let changed_ns = (metadata.ctime() as i128)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(metadata.ctime_nsec() as i128)
+        .max(0) as u128;
+    (changed_ns, metadata.dev(), metadata.ino())
+}
+
+#[cfg(not(unix))]
+fn unix_file_signature(_metadata: &fs::Metadata) -> (u128, u64, u64) {
+    (0, 0, 0)
 }
 
 #[cfg(test)]
@@ -187,5 +210,21 @@ mod tests {
             expected
         );
         env::remove_var("CHOPPER_CACHE_DIR");
+    }
+
+    #[test]
+    fn source_fingerprint_captures_unix_signature() {
+        let source_home = TempDir::new().expect("create tempdir");
+        let source_file = source_home.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        assert!(fingerprint.source_len > 0);
+        #[cfg(unix)]
+        {
+            assert!(fingerprint.source_changed_ns > 0);
+            assert!(fingerprint.source_device > 0);
+            assert!(fingerprint.source_inode > 0);
+        }
     }
 }
