@@ -7030,6 +7030,81 @@ args = ["SAFEALIASCACHE01"]
 }
 
 #[test]
+fn stale_safe_alias_cache_entry_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("safealias-stale.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["SAFESTALEOLDTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias-stale", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFESTALEOLDTOKEN1 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/safealias-stale.bin");
+    assert!(cache_file.exists(), "safe alias cache file should exist");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["SAFESTALENEWTOKEN9X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-stale", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("SAFESTALENEWTOKEN9X second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("SAFESTALEOLDTOKEN1 second-run"),
+        "stale safe-alias cache payload should not execute after source change: {stdout}"
+    );
+
+    let rebuilt_cache = fs::read(&cache_file).expect("read rebuilt safe alias cache");
+    assert!(
+        rebuilt_cache
+            .windows(b"SAFESTALENEWTOKEN9X".len())
+            .any(|window| window == b"SAFESTALENEWTOKEN9X"),
+        "safe alias cache should be rewritten with fresh payload"
+    );
+    assert!(
+        !rebuilt_cache
+            .windows(b"SAFESTALEOLDTOKEN1".len())
+            .any(|window| window == b"SAFESTALEOLDTOKEN1"),
+        "safe alias cache should not retain stale payload after reparse"
+    );
+}
+
+#[test]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
