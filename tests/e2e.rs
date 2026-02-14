@@ -1857,3 +1857,31 @@ fn legacy_one_line_alias_remains_supported() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("legacy runtime"), "{stdout}");
 }
+
+#[test]
+fn toml_env_duplicate_keys_after_trim_fail_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dup-env.toml"),
+        r#"
+exec = "echo"
+
+[env]
+FOO = "base"
+" FOO " = "collision"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dup-env"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
