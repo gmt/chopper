@@ -3212,6 +3212,31 @@ env_remove = ["BAD=KEY"]
 }
 
 #[test]
+fn env_remove_entry_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-nul.toml"),
+        r#"
+exec = "echo"
+env_remove = ["BAD\u0000KEY"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_function_name_override_is_honored() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3420,6 +3445,60 @@ exec = "echo"
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("field `env` keys cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_key_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"BAD\u0000KEY" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` keys cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_value_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-env-value.toml"),
+        r#"
+exec = "echo"
+
+[env]
+GOOD_KEY = "bad\u0000value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-env-value"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` values cannot contain NUL bytes"),
         "{stderr}"
     );
 }

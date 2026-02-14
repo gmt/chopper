@@ -1053,6 +1053,67 @@ exec = "echo"
     }
 
     #[test]
+    fn rejects_env_key_with_nul_escape_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+"BAD\u0000KEY" = "value"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `env` keys cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_env_value_with_nul_escape_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+GOOD_KEY = "bad\u0000value"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `env` values cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_env_remove_entry_with_nul_escape_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+env_remove = ["BAD\u0000KEY"]
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `env_remove` entries cannot contain NUL bytes"));
+    }
+
+    #[test]
     fn resolves_reconcile_script_relative_to_symlink_target_directory() -> Result<()> {
         let temp = TempDir::new()?;
         let target_dir = temp.path().join("shared");
