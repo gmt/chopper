@@ -78,4 +78,13 @@ mod tests {
             validate_alias_identifier("bad\0alias").expect_err("nul alias should be rejected");
         assert_eq!(nul, AliasViolation::ContainsNul);
     }
+
+    #[test]
+    fn validator_rejects_empty_and_blank_aliases() {
+        let empty = validate_alias_identifier("").expect_err("empty alias should be rejected");
+        assert_eq!(empty, AliasViolation::Empty);
+
+        let blank = validate_alias_identifier("   ").expect_err("blank alias should be rejected");
+        assert_eq!(blank, AliasViolation::Empty);
+    }
 }

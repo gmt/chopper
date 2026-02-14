@@ -362,6 +362,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_rejects_empty_argv_shape() {
+        let err = parse_invocation(&[]).expect_err("empty argv should be invalid");
+        assert!(err.to_string().contains("missing alias name"), "{err}");
+    }
+
+    #[test]
     fn parse_invocation_rejects_symlink_alias_with_nul_bytes() {
         let err = parse_invocation(&["bad\0alias".to_string()])
             .expect_err("symlink alias with nul should be invalid");
