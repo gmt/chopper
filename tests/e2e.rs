@@ -403,6 +403,100 @@ stderr = true
 }
 
 #[test]
+fn journal_stderr_false_skips_systemd_cat_dependency() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-no-stderr.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = false
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-no-stderr"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("OUT_STREAM"), "{stdout}");
+    assert!(stderr.contains("ERR_STREAM"), "{stderr}");
+}
+
+#[test]
+fn reconcile_can_replace_args_and_remove_env() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("replace.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: [
+      "-c",
+      "printf 'ARGS=%s\n' \"$*\"; printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\"",
+      "_",
+      "replaced"
+    ],
+    remove_env: ["CHOPPER_DROP"],
+    set_env: #{ "CHOPPER_KEEP": "overridden" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("replace.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[env]
+CHOPPER_DROP = "drop-me"
+CHOPPER_KEEP = "from-alias"
+
+[reconcile]
+script = "replace.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["replace", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=replaced"), "{stdout}");
+    assert!(!stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(stdout.contains("KEEP=overridden"), "{stdout}");
+}
+
+#[test]
 fn legacy_one_line_alias_remains_supported() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
