@@ -970,6 +970,52 @@ script = "hooks/reconcile.rhai"
 }
 
 #[test]
+fn alias_config_resolves_parent_relative_reconcile_script_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let hooks_dir = chopper_dir.join("hooks");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_parent_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("parentreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "../hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write parent reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parentreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_parent_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn symlinked_alias_config_resolves_relative_exec_path_to_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
