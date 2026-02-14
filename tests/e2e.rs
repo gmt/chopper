@@ -2142,6 +2142,45 @@ script = "reconcile-dup-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_unsupported_patch_key_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-unsupported-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    bogus_key: "value"
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-unsupported-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-unsupported-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-unsupported-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported reconcile patch key `bogus_key`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn static_env_remove_unsets_inherited_environment_values() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

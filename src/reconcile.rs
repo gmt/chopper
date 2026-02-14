@@ -79,6 +79,7 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
     let map = value
         .try_cast::<Map>()
         .ok_or_else(|| anyhow!("reconcile function must return an object/map"))?;
+    validate_patch_keys(&map)?;
 
     let replace_args = optional_string_array(&map, "replace_args")?;
     let append_args = optional_string_array(&map, "append_args")?.unwrap_or_default();
@@ -93,6 +94,22 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
         set_env,
         remove_env,
     })
+}
+
+fn validate_patch_keys(map: &Map) -> Result<()> {
+    for key in map.keys() {
+        let supported = matches!(
+            key.as_str(),
+            "append_args" | "replace_args" | "set_env" | "remove_env"
+        );
+        if !supported {
+            return Err(anyhow!(
+                "unsupported reconcile patch key `{}`; supported keys: append_args, replace_args, set_env, remove_env",
+                key
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn optional_string_array(map: &Map, key: &str) -> Result<Option<Vec<String>>> {
@@ -401,6 +418,39 @@ fn reconcile(_ctx) {
             .to_string();
         assert!(
             err.contains("`set_env` contains duplicate keys after trimming"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reconcile_rejects_unsupported_patch_keys() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("unsupported-key.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    bogus_key: "value"
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected unsupported key validation error")
+            .to_string();
+        assert!(
+            err.contains("unsupported reconcile patch key `bogus_key`"),
             "{err}"
         );
     }
