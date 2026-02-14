@@ -6338,6 +6338,93 @@ args = ["HASHLEGACYBOTH01"]
 }
 
 #[test]
+fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEPAYLOAD0001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEPAYLOAD0001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["FRESHPAYLOAD0001"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale hashed and legacy entries: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FRESHPAYLOAD0001 second-run"), "{stdout}");
+    assert!(
+        !stdout.contains("STALEPAYLOAD0001 second-run"),
+        "stale payload should not survive stale-cache fallback: {stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale legacy cache should be pruned during stale-cache fallback"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"FRESHPAYLOAD0001".len())
+            .any(|window| window == b"FRESHPAYLOAD0001"),
+        "rebuilt hashed cache should contain fresh source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALEPAYLOAD0001".len())
+            .any(|window| window == b"STALEPAYLOAD0001"),
+        "rebuilt hashed cache should not retain stale source payload"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_nul_arg_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
