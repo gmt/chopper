@@ -591,6 +591,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER".into(), "-h".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["CHOPPER".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -624,6 +628,10 @@ mod tests {
     fn detects_version_action_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER.EXE".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
         assert_eq!(
