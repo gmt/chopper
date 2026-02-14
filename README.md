@@ -274,6 +274,8 @@ NUL bytes, empty/whitespace env/env_remove/journal/reconcile metadata, env keys
 containing `=`, or invalid exec/reconcile script path forms such as `.`, `..`,
 dot-suffixed components, and trailing separators), chopper
 automatically ignores and prunes that entry before reparsing the source config.
+That repaired manifest is then written back into cache during the same
+invocation, so subsequent runs use a clean cache entry again.
 Likewise, chopper refuses to write invalid manifests into cache in the first
 place, so malformed cache state only persists if files are externally altered.
 
