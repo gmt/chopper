@@ -1527,6 +1527,9 @@ mod tests {
         assert!(is_direct_invocation_executable(&["CHOPPER".into()]));
 
         assert!(!is_direct_invocation_executable(&[
+            "/tmp\\not-chopper.exe".into()
+        ]));
+        assert!(!is_direct_invocation_executable(&[
             ".\\not-chopper.exe".into()
         ]));
         assert!(!is_direct_invocation_executable(&["..\\alias".into()]));
@@ -1644,6 +1647,28 @@ mod tests {
     fn parse_invocation_rejects_parent_windows_relative_pathlike_symlink_alias() {
         let err = parse_invocation(&["..\\badalias".into()])
             .expect_err("parent windows-relative path-like symlink alias should be rejected");
+        assert!(
+            err.to_string()
+                .contains("alias name cannot contain path separators"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_mixed_absolute_pathlike_symlink_alias() {
+        let err = parse_invocation(&["/tmp\\badalias".into()])
+            .expect_err("mixed absolute path-like symlink alias should be rejected");
+        assert!(
+            err.to_string()
+                .contains("alias name cannot contain path separators"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_mixed_relative_pathlike_symlink_alias() {
+        let err = parse_invocation(&["./bad\\alias".into()])
+            .expect_err("mixed relative path-like symlink alias should be rejected");
         assert!(
             err.to_string()
                 .contains("alias name cannot contain path separators"),
