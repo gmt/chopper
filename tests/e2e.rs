@@ -2371,6 +2371,29 @@ fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
 }
 
 #[test]
+fn toml_alias_accepts_utf8_bom_prefixed_document() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("bom.toml"),
+        "\u{feff}exec = \"sh\"\nargs = [\"-c\", \"printf '%s\\n' \\\"$*\\\"\", \"_\", \"bom\"]\n",
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["bom", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bom runtime"), "{stdout}");
+}
+
+#[test]
 fn toml_env_duplicate_keys_after_trim_fail_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

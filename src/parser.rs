@@ -10,7 +10,7 @@ pub fn parse(path: &Path) -> Result<Manifest> {
         .with_context(|| format!("failed to read alias config {}", path.display()))?;
 
     if is_toml_path(path) {
-        parse_toml(&content, path)
+        parse_toml(strip_utf8_bom(&content), path)
     } else {
         parse_trivial(&content)
     }
@@ -44,6 +44,10 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
 
 fn normalize_legacy_line(line: &str) -> &str {
     line.trim().trim_start_matches('\u{feff}').trim()
+}
+
+fn strip_utf8_bom(content: &str) -> &str {
+    content.strip_prefix('\u{feff}').unwrap_or(content)
 }
 
 fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
@@ -303,6 +307,24 @@ script = "hooks/reconcile.rhai"
                 .script,
             temp.path().join("hooks/reconcile.rhai")
         );
+    }
+
+    #[test]
+    fn parses_toml_alias_with_utf8_bom() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            "\u{feff}exec = \"echo\"\nargs = [\"hello\", \"toml\"]\n",
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse bom toml");
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        assert_eq!(manifest.args, vec!["hello", "toml"]);
     }
 
     #[test]

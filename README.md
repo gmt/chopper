@@ -82,6 +82,7 @@ Lookup order for alias `foo`:
 
 Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command aliases**.
 For legacy files, `chopper` uses the first non-empty, non-comment (`# ...`) line.
+If that first executable line starts with a UTF-8 BOM, the BOM is ignored.
 
 ---
 
@@ -109,6 +110,7 @@ Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
 `env_remove` entries are also trimmed; blank entries are ignored.
 `[env]` keys are trimmed and must remain unique after trimming.
+TOML documents may optionally start with a UTF-8 BOM.
 
 ### Argument merge order
 
