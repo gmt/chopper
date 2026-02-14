@@ -513,6 +513,24 @@ exec = "./bin/"
     }
 
     #[test]
+    fn rejects_absolute_trailing_separator_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "/usr/bin/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot end with a path separator"));
+    }
+
+    #[test]
     fn rejects_dot_backslash_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -673,6 +691,27 @@ exec = "echo"
 
 [reconcile]
 script = "./hooks/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_absolute_trailing_separator_reconcile_script_field() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "/tmp/"
 "#,
         )
         .expect("write toml");

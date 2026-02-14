@@ -3222,6 +3222,30 @@ exec = "./bin/"
 }
 
 #[test]
+fn toml_exec_absolute_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-exec.toml"),
+        r#"
+exec = "/usr/bin/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["absolute-trailing-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_reconcile_script_dot_path_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3375,6 +3399,33 @@ script = "./hooks/"
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["trailing-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_absolute_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "/tmp/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["absolute-trailing-reconcile"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
