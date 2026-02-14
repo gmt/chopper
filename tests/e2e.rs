@@ -6089,6 +6089,99 @@ args = ["LEGACYMUTATE001"]
 }
 
 #[test]
+fn stale_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALELEGACYOLD01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        output.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALELEGACYOLD01 seed-old"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+    assert!(
+        !hashed_file.exists(),
+        "hashed cache should be absent after renaming to legacy path"
+    );
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALELEGACYNEWTOKEN9"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "fallback-run"]);
+    assert!(
+        output.status.success(),
+        "fallback run failed with stale legacy cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALELEGACYNEWTOKEN9 fallback-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("STALELEGACYOLD01 fallback-run"),
+        "stale legacy payload should not be used after source changes: {stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale legacy cache should be pruned after source fallback"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from fresh source config"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"STALELEGACYNEWTOKEN9".len())
+            .any(|window| window == b"STALELEGACYNEWTOKEN9"),
+        "rebuilt hashed cache should contain fresh payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALELEGACYOLD01".len())
+            .any(|window| window == b"STALELEGACYOLD01"),
+        "rebuilt hashed cache should not retain stale legacy payload"
+    );
+}
+
+#[test]
 fn stale_legacy_cache_entry_is_pruned_when_hashed_cache_hits() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
