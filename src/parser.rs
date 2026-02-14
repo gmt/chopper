@@ -159,7 +159,12 @@ fn resolve_exec_path(config_path: &Path, exec: &str) -> PathBuf {
 
 fn looks_like_relative_exec_path(exec: &str) -> bool {
     let path = Path::new(exec);
-    !path.is_absolute() && path.components().count() > 1
+    !path.is_absolute()
+        && (exec == "."
+            || exec == ".."
+            || exec.contains('/')
+            || exec.contains('\\')
+            || exec.contains(std::path::MAIN_SEPARATOR))
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +580,24 @@ exec = "bin/runner"
 
         let manifest = parse(&config)?;
         assert_eq!(manifest.exec, aliases_dir.join("bin/runner"));
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_dot_prefixed_relative_exec_path_against_config_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir)?;
+        let config = aliases_dir.join("local.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "./bin/runner"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(manifest.exec, aliases_dir.join("./bin/runner"));
         Ok(())
     }
 
