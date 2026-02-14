@@ -54,6 +54,7 @@ The symlink basename is used verbatim (including dots like `kpods.prod`).
 
 Alias names in direct mode are logical identifiers (not filesystem paths), so
 path separators, whitespace, NUL bytes, and dash-prefixed tokens are rejected.
+The same alias-identifier validation rules are applied in symlink mode.
 Dot-separated names like `demo.prod` are valid in both direct and symlink modes.
 Other punctuation tokens (for example `alpha:beta`) are also supported as long as
 they satisfy the direct-mode validation rules above.

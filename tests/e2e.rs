@@ -460,6 +460,30 @@ args = ["symlink-mode"]
 }
 
 #[test]
+fn symlink_invocation_rejects_dash_prefixed_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("-bad-alias");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot start with `-`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn symlink_invocation_without_runtime_args_still_executes_alias() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

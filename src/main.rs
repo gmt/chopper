@@ -166,6 +166,7 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
             passthrough_args,
         })
     } else {
+        validate_alias_name(&exe_name)?;
         let passthrough_args = normalize_passthrough(&args[1..]);
         validate_passthrough_args(&passthrough_args)?;
         Ok(InvocationInput {
@@ -491,6 +492,27 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("runtime arguments cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_dash_prefixed_symlink_alias() {
+        let err = parse_invocation(&["-bad-alias".into()])
+            .expect_err("dash-prefixed symlink alias should be rejected");
+        assert!(
+            err.to_string().contains("alias name cannot start with `-`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_whitespace_symlink_alias() {
+        let err = parse_invocation(&["bad alias".into()])
+            .expect_err("whitespace symlink alias should be rejected");
+        assert!(
+            err.to_string()
+                .contains("alias name cannot contain whitespace"),
             "{err}"
         );
     }
