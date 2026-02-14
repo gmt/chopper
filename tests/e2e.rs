@@ -1192,6 +1192,7 @@ fn short_help_flag_prints_usage_when_invoked_as_chopper_cmd() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("truthy: 1,true,yes,on"), "{stdout}");
 }
 
 #[test]
@@ -1216,6 +1217,7 @@ fn short_help_flag_prints_usage_when_invoked_as_chopper_bat() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("truthy: 1,true,yes,on"), "{stdout}");
 }
 
 #[test]
@@ -1240,6 +1242,7 @@ fn short_help_flag_prints_usage_when_invoked_as_chopper_com() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("truthy: 1,true,yes,on"), "{stdout}");
 }
 
 #[test]
