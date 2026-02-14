@@ -287,8 +287,9 @@ fn path_contains_nul(path: &Path) -> bool {
 }
 
 pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) -> Result<()> {
-    validate_cached_manifest(manifest)
-        .context("refusing to store invalid alias cache entry manifest")?;
+    validate_cached_manifest(manifest).with_context(|| {
+        format!("refusing to store invalid alias cache entry manifest for `{alias}`")
+    })?;
 
     let path = cache_path(alias);
     if let Some(parent) = path.parent() {
@@ -1169,6 +1170,7 @@ mod tests {
             message.contains("refusing to store invalid alias cache entry manifest"),
             "{message}"
         );
+        assert!(message.contains("invalid-store-error-message"), "{message}");
         assert!(
             message.contains("cached manifest env keys cannot contain `=`"),
             "{message}"
