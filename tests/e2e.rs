@@ -2865,6 +2865,87 @@ script = "reconcile-equals-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_set_env_key_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  let bad_key = "BAD" + "\x00" + "KEY";
+  let env = #{};
+  env[bad_key] = "value";
+  #{
+    set_env: env
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-nul-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-nul-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` keys cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_set_env_value_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-value.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "GOOD_KEY": "bad\x00value" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-value.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-nul-value.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-nul-value"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` values cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_remove_env_entry_with_equals_sign_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2899,6 +2980,46 @@ script = "reconcile-remove-equals.reconcile.rhai"
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("`remove_env` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  let bad_key = "BAD" + "\x00" + "KEY";
+  #{
+    remove_env: [bad_key]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain NUL bytes"),
         "{stderr}"
     );
 }
