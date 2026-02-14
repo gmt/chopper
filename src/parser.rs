@@ -59,7 +59,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         return Err(anyhow!("field `exec` cannot be empty"));
     }
 
-    let exec = which::which(exec).unwrap_or_else(|_| exec.into());
+    let exec = resolve_exec_path(path, exec);
 
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
     manifest.env = normalize_env_map(parsed.env)?;
@@ -142,6 +142,24 @@ fn config_base_dir(config_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf()
+}
+
+fn resolve_exec_path(config_path: &Path, exec: &str) -> PathBuf {
+    let exec_path = PathBuf::from(exec);
+    if exec_path.is_absolute() {
+        return exec_path;
+    }
+
+    if looks_like_relative_exec_path(exec) {
+        return config_base_dir(config_path).join(exec_path);
+    }
+
+    which::which(exec).unwrap_or_else(|_| exec.into())
+}
+
+fn looks_like_relative_exec_path(exec: &str) -> bool {
+    let path = Path::new(exec);
+    !path.is_absolute() && path.components().count() > 1
 }
 
 #[derive(Debug, Deserialize)]
@@ -539,6 +557,29 @@ script = "hooks/reconcile.rhai"
                 .script,
             target_dir.join("hooks/reconcile.rhai")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_relative_exec_path_against_symlink_target_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let target_dir = temp.path().join("shared");
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&target_dir)?;
+        fs::create_dir_all(&aliases_dir)?;
+
+        let target_config = target_dir.join("linked.toml");
+        fs::write(
+            &target_config,
+            r#"
+exec = "bin/runner"
+"#,
+        )?;
+        let symlink_config = aliases_dir.join("linked.toml");
+        symlink(&target_config, &symlink_config)?;
+
+        let manifest = parse(&symlink_config)?;
+        assert_eq!(manifest.exec, target_dir.join("bin/runner"));
         Ok(())
     }
 }

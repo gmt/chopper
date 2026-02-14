@@ -890,6 +890,42 @@ script = "hooks/reconcile.rhai"
 }
 
 #[test]
+fn symlinked_alias_config_resolves_relative_exec_path_to_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    let target = shared_dir.join("target-exec.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkexec.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC=base runtime"), "{stdout}");
+}
+
+#[test]
 fn journal_config_forwards_stderr_to_systemd_cat() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
