@@ -58,8 +58,8 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     let exec = which::which(exec).unwrap_or_else(|_| exec.into());
 
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
-    manifest.env = parsed.env;
-    manifest.env_remove = parsed.env_remove;
+    manifest.env = normalize_env_map(parsed.env)?;
+    manifest.env_remove = normalize_env_remove(parsed.env_remove);
 
     if let Some(journal) = parsed.journal {
         let namespace = journal.namespace.trim();
@@ -92,6 +92,26 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     }
 
     Ok(manifest)
+}
+
+fn normalize_env_map(env: HashMap<String, String>) -> Result<HashMap<String, String>> {
+    let mut normalized = HashMap::with_capacity(env.len());
+    for (key, value) in env {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            return Err(anyhow!("field `env` cannot contain empty keys"));
+        }
+        normalized.insert(normalized_key.to_string(), value);
+    }
+    Ok(normalized)
+}
+
+fn normalize_env_remove(env_remove: Vec<String>) -> Vec<String> {
+    env_remove
+        .into_iter()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+        .collect()
 }
 
 fn resolve_script_path(config_path: &Path, script: &str) -> PathBuf {
@@ -320,5 +340,43 @@ function = "  custom_reconcile  "
         assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
         assert_eq!(reconcile.function, "custom_reconcile");
         Ok(())
+    }
+
+    #[test]
+    fn trims_env_remove_entries_and_drops_blank_values() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+env_remove = ["  FOO  ", "   ", "BAR"]
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(manifest.env_remove, vec!["FOO", "BAR"]);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_empty_env_keys_after_trimming() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+"   " = "value"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `env` cannot contain empty keys"));
     }
 }
