@@ -663,6 +663,17 @@ fn direct_invocation_rejects_separator_as_alias_name() {
 }
 
 #[test]
+fn direct_invocation_rejects_pathlike_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["foo/bar", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("path separators"), "{stderr}");
+}
+
+#[test]
 fn explicit_config_and_cache_override_env_vars_are_honored() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");

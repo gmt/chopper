@@ -148,14 +148,7 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
             std::process::exit(1);
         }
         let alias = args[1].clone();
-        if alias.trim().is_empty() {
-            return Err(anyhow!("alias name cannot be empty"));
-        }
-        if alias == "--" {
-            return Err(anyhow!(
-                "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
-            ));
-        }
+        validate_alias_name(&alias)?;
         let passthrough_args = normalize_passthrough(&args[2..]);
         Ok(InvocationInput {
             alias,
@@ -167,6 +160,26 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
             passthrough_args: normalize_passthrough(&args[1..]),
         })
     }
+}
+
+fn validate_alias_name(alias: &str) -> Result<()> {
+    if alias.trim().is_empty() {
+        return Err(anyhow!("alias name cannot be empty"));
+    }
+    if alias == "--" {
+        return Err(anyhow!(
+            "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
+        ));
+    }
+    if alias == "." || alias == ".." {
+        return Err(anyhow!("alias name cannot be `.` or `..`"));
+    }
+    if alias.contains('/') || alias.contains('\\') {
+        return Err(anyhow!(
+            "alias name cannot contain path separators; use symlink mode or command PATH resolution instead"
+        ));
+    }
+    Ok(())
 }
 
 fn invocation_executable_name(args: &[String]) -> String {
@@ -192,7 +205,8 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_enabled, config_dir, detect_builtin_action, parse_invocation, BuiltinAction,
+        cache_enabled, config_dir, detect_builtin_action, parse_invocation, validate_alias_name,
+        BuiltinAction,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -261,6 +275,18 @@ mod tests {
         .expect_err("separator cannot be alias");
 
         assert!(err.to_string().contains("alias name cannot be `--`"));
+    }
+
+    #[test]
+    fn rejects_alias_with_path_separators() {
+        let err = validate_alias_name("foo/bar").expect_err("path separators are invalid");
+        assert!(err.to_string().contains("path separators"));
+    }
+
+    #[test]
+    fn rejects_dot_alias_tokens() {
+        assert!(validate_alias_name(".").is_err());
+        assert!(validate_alias_name("..").is_err());
     }
 
     #[test]
