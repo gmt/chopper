@@ -1,4 +1,5 @@
 use crate::env_util;
+use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{Manifest, RuntimePatch};
 use anyhow::{anyhow, Context, Result};
 use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope};
@@ -151,15 +152,21 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
         if normalized_key.is_empty() {
             return Err(anyhow!("`set_env` cannot contain empty keys"));
         }
-        if normalized_key.contains('=') {
-            return Err(anyhow!(
-                "`set_env` keys cannot contain `=`: `{normalized_key}`"
-            ));
+        match env_validation::validate_env_key(normalized_key) {
+            Ok(()) => {}
+            Err(EnvKeyViolation::ContainsEquals) => {
+                return Err(anyhow!(
+                    "`set_env` keys cannot contain `=`: `{normalized_key}`"
+                ));
+            }
+            Err(EnvKeyViolation::ContainsNul) => {
+                return Err(anyhow!("`set_env` keys cannot contain NUL bytes"));
+            }
         }
-        if normalized_key.contains('\0') {
-            return Err(anyhow!("`set_env` keys cannot contain NUL bytes"));
-        }
-        if value.contains('\0') {
+        if matches!(
+            env_validation::validate_env_value(&value),
+            Err(EnvValueViolation::ContainsNul)
+        ) {
             return Err(anyhow!(
                 "`set_env` values cannot contain NUL bytes for key `{normalized_key}`"
             ));
@@ -182,13 +189,16 @@ fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
         if normalized_key.is_empty() {
             continue;
         }
-        if normalized_key.contains('=') {
-            return Err(anyhow!(
-                "`remove_env` entries cannot contain `=`: `{normalized_key}`"
-            ));
-        }
-        if normalized_key.contains('\0') {
-            return Err(anyhow!("`remove_env` entries cannot contain NUL bytes"));
+        match env_validation::validate_env_key(normalized_key) {
+            Ok(()) => {}
+            Err(EnvKeyViolation::ContainsEquals) => {
+                return Err(anyhow!(
+                    "`remove_env` entries cannot contain `=`: `{normalized_key}`"
+                ));
+            }
+            Err(EnvKeyViolation::ContainsNul) => {
+                return Err(anyhow!("`remove_env` entries cannot contain NUL bytes"));
+            }
         }
         let normalized_key = normalized_key.to_string();
         if seen.insert(normalized_key.clone()) {

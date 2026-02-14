@@ -1,3 +1,4 @@
+use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
 use std::io;
@@ -120,35 +121,37 @@ fn command_for_invocation(invocation: &Invocation) -> Result<Command> {
     cmd.args(&invocation.args);
 
     for (key, val) in &invocation.env {
-        validate_env_key(key)?;
-        validate_env_value(key, val)?;
+        validate_env_key_for_command(key)?;
+        validate_env_value_for_command(key, val)?;
         cmd.env(key, val);
     }
 
     for key in &invocation.env_remove {
-        validate_env_key(key)?;
+        validate_env_key_for_command(key)?;
         cmd.env_remove(key);
     }
     Ok(cmd)
 }
 
-fn validate_env_key(key: &str) -> Result<()> {
-    if key.contains('=') {
-        return Err(anyhow!("environment key `{key}` cannot contain `=`"));
+fn validate_env_key_for_command(key: &str) -> Result<()> {
+    match env_validation::validate_env_key(key) {
+        Ok(()) => Ok(()),
+        Err(EnvKeyViolation::ContainsEquals) => {
+            Err(anyhow!("environment key `{key}` cannot contain `=`"))
+        }
+        Err(EnvKeyViolation::ContainsNul) => {
+            Err(anyhow!("environment key cannot contain NUL bytes"))
+        }
     }
-    if key.contains('\0') {
-        return Err(anyhow!("environment key cannot contain NUL bytes"));
-    }
-    Ok(())
 }
 
-fn validate_env_value(key: &str, value: &str) -> Result<()> {
-    if value.contains('\0') {
-        return Err(anyhow!(
+fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
+    match env_validation::validate_env_value(value) {
+        Ok(()) => Ok(()),
+        Err(EnvValueViolation::ContainsNul) => Err(anyhow!(
             "environment value for `{key}` cannot contain NUL bytes"
-        ));
+        )),
     }
-    Ok(())
 }
 
 fn exit_like_child(status: ExitStatus) -> Result<()> {
