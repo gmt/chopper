@@ -6479,6 +6479,64 @@ args = ["CORRUPTEDLEGACYCACHE1"]
 }
 
 #[test]
+fn malformed_stale_legacy_cache_file_is_pruned_when_hashed_cache_hits() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["STALELEGACYCORRUPT1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALELEGACYCORRUPT1 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::write(&legacy_file, b"stale-legacy-junk").expect("write corrupt stale legacy cache");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale corrupt legacy cache: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALELEGACYCORRUPT1 second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale corrupt legacy cache should be pruned when hashed cache hits"
+    );
+    assert!(hashed_file.exists(), "hashed cache should remain present");
+}
+
+#[test]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
