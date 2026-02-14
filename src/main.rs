@@ -71,8 +71,7 @@ enum BuiltinAction {
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
-    let exe_name = invocation_executable_name(args);
-    if !is_direct_chopper_name(&exe_name) {
+    if !is_direct_invocation_executable(args) {
         return None;
     }
     if args.len() == 1 {
@@ -151,7 +150,7 @@ struct InvocationInput {
 fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
     let exe_name = invocation_executable_name(args);
 
-    if is_direct_chopper_name(&exe_name) {
+    if is_direct_invocation_executable(args) {
         if args.len() < 2 {
             return Err(anyhow!(
                 "missing alias name; use `chopper <alias> [args...]` or `chopper --help`"
@@ -241,16 +240,35 @@ fn invocation_executable_name(args: &[String]) -> String {
         .to_string()
 }
 
+fn is_direct_invocation_executable(args: &[String]) -> bool {
+    if is_direct_chopper_name(&invocation_executable_name(args)) {
+        return true;
+    }
+
+    windows_relative_basename(args.first().map(String::as_str).unwrap_or("chopper"))
+        .map(is_direct_chopper_name)
+        .unwrap_or(false)
+}
+
 fn looks_like_windows_invocation_path(raw: &str) -> bool {
-    raw.starts_with("\\\\")
-        || raw.starts_with(".\\")
-        || raw.starts_with("..\\")
-        || has_windows_drive_prefix(raw)
+    raw.starts_with("\\\\") || has_windows_drive_prefix(raw)
 }
 
 fn has_windows_drive_prefix(raw: &str) -> bool {
     let bytes = raw.as_bytes();
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+fn windows_relative_basename(raw: &str) -> Option<&str> {
+    if !(raw.starts_with(".\\") || raw.starts_with("..\\")) {
+        return None;
+    }
+
+    let trimmed = raw.trim_end_matches(['/', '\\']);
+    trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
 }
 
 fn is_direct_chopper_name(exe_name: &str) -> bool {
@@ -717,6 +735,17 @@ mod tests {
     fn parse_invocation_rejects_pathlike_symlink_alias() {
         let err = parse_invocation(&["bad\\alias".into()])
             .expect_err("path-like symlink alias should be rejected");
+        assert!(
+            err.to_string()
+                .contains("alias name cannot contain path separators"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_windows_relative_pathlike_symlink_alias() {
+        let err = parse_invocation(&[".\\badalias".into()])
+            .expect_err("windows-relative path-like symlink alias should be rejected");
         assert!(
             err.to_string()
                 .contains("alias name cannot contain path separators"),
