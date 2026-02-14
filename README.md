@@ -154,6 +154,9 @@ The function must return a map. Supported keys:
 - `set_env: #{ string: string }`
 - `remove_env: [string]`
 
+For reconcile env mutations, `set_env` keys and `remove_env` entries are
+trimmed; blank keys are rejected and blank remove entries are ignored.
+
 Example:
 
 ```rhai

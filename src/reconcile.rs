@@ -82,8 +82,10 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
 
     let replace_args = optional_string_array(&map, "replace_args")?;
     let append_args = optional_string_array(&map, "append_args")?.unwrap_or_default();
-    let set_env = optional_string_map(&map, "set_env")?.unwrap_or_default();
-    let remove_env = optional_string_array(&map, "remove_env")?.unwrap_or_default();
+    let set_env =
+        normalize_patch_set_env(optional_string_map(&map, "set_env")?.unwrap_or_default())?;
+    let remove_env =
+        normalize_patch_remove_env(optional_string_array(&map, "remove_env")?.unwrap_or_default());
 
     Ok(RuntimePatch {
         replace_args,
@@ -123,6 +125,31 @@ fn optional_string_map(map: &Map, key: &str) -> Result<Option<HashMap<String, St
         out.insert(k.to_string(), dynamic_to_string(v, key)?);
     }
     Ok(Some(out))
+}
+
+fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<String, String>> {
+    let mut normalized = HashMap::with_capacity(values.len());
+    for (key, value) in values {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            return Err(anyhow!("`set_env` cannot contain empty keys"));
+        }
+        if normalized.contains_key(normalized_key) {
+            return Err(anyhow!(
+                "`set_env` contains duplicate keys after trimming: `{normalized_key}`"
+            ));
+        }
+        normalized.insert(normalized_key.to_string(), value);
+    }
+    Ok(normalized)
+}
+
+fn normalize_patch_remove_env(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+        .collect()
 }
 
 fn dynamic_to_string(value: Dynamic, field: &str) -> Result<String> {
@@ -283,5 +310,98 @@ fn reconcile(_ctx) {
         let patch = maybe_reconcile(&manifest, &[]).expect("skip reconcile");
         assert!(patch.is_none());
         env::remove_var("CHOPPER_DISABLE_RECONCILE");
+    }
+
+    #[test]
+    fn reconcile_trims_and_normalizes_remove_env_entries() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("remove-env-trim.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["  FOO  ", "   ", "BAR"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(patch.remove_env, vec!["FOO", "BAR"]);
+    }
+
+    #[test]
+    fn reconcile_rejects_blank_set_env_keys_after_trimming() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("invalid-set-env-key.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "   ": "value" }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected set_env key validation error")
+            .to_string();
+        assert!(err.contains("`set_env` cannot contain empty keys"), "{err}");
+    }
+
+    #[test]
+    fn reconcile_rejects_duplicate_set_env_keys_after_trimming() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("duplicate-set-env-key.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "FOO": "a", " FOO ": "b" }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected set_env duplicate validation error")
+            .to_string();
+        assert!(
+            err.contains("`set_env` contains duplicate keys after trimming"),
+            "{err}"
+        );
     }
 }
