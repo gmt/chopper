@@ -14,8 +14,12 @@ directories = "6"
 bincode = "1"
 which = "7"
 shell-words = "1"
+toml = "1.0.1"
 
 [profile.release]
 opt-level = "z"
 lto = true
 strip = true
+
+[dev-dependencies]
+tempfile = "3.25.0"

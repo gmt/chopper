@@ -1,25 +1,26 @@
-use crate::manifest::Manifest;
-use anyhow::{anyhow, Result};
+use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
+use anyhow::{anyhow, Context, Result};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn parse(path: &Path) -> Result<Manifest> {
-    let content = fs::read_to_string(path)?;
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("failed to read alias config {}", path.display()))?;
 
-    if looks_like_rhai(&content) {
-        parse_rhai(&content)
+    if is_toml_path(path) {
+        parse_toml(&content, path)
     } else {
         parse_trivial(&content)
     }
 }
 
-fn looks_like_rhai(content: &str) -> bool {
-    let trimmed = content.trim();
-    trimmed.contains(';')
-        || trimmed.contains("run(")
-        || trimmed.contains("env(")
-        || trimmed.contains("include(")
-        || trimmed.contains("exec(")
+fn is_toml_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false)
 }
 
 fn parse_trivial(content: &str) -> Result<Manifest> {
@@ -45,6 +46,158 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
     Ok(Manifest::simple(exec).with_args(args))
 }
 
-fn parse_rhai(_content: &str) -> Result<Manifest> {
-    todo!("Rhai config parsing not yet implemented")
+fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
+    let parsed: AliasConfig =
+        toml::from_str(content).with_context(|| format!("invalid TOML in {}", path.display()))?;
+
+    if parsed.exec.trim().is_empty() {
+        return Err(anyhow!("field `exec` cannot be empty"));
+    }
+
+    let exec = which::which(&parsed.exec).unwrap_or_else(|_| parsed.exec.clone().into());
+
+    let mut manifest = Manifest::simple(exec).with_args(parsed.args);
+    manifest.env = parsed.env;
+    manifest.env_remove = parsed.env_remove;
+
+    if let Some(journal) = parsed.journal {
+        if journal.namespace.trim().is_empty() {
+            return Err(anyhow!("field `journal.namespace` cannot be empty"));
+        }
+        manifest = manifest.with_journal(JournalConfig {
+            namespace: journal.namespace,
+            stderr: journal.stderr,
+            identifier: journal.identifier,
+        });
+    }
+
+    if let Some(reconcile) = parsed.reconcile {
+        if reconcile.script.trim().is_empty() {
+            return Err(anyhow!("field `reconcile.script` cannot be empty"));
+        }
+        let script = resolve_script_path(path, &reconcile.script);
+        let function = reconcile
+            .function
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or_else(|| "reconcile".to_string());
+        manifest = manifest.with_reconcile(ReconcileConfig { script, function });
+    }
+
+    Ok(manifest)
+}
+
+fn resolve_script_path(config_path: &Path, script: &str) -> PathBuf {
+    let script_path = PathBuf::from(script);
+    if script_path.is_absolute() {
+        script_path
+    } else {
+        config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(script_path)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AliasConfig {
+    exec: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+    #[serde(default)]
+    env_remove: Vec<String>,
+    journal: Option<JournalConfigInput>,
+    reconcile: Option<ReconcileConfigInput>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JournalConfigInput {
+    namespace: String,
+    #[serde(default = "default_true")]
+    stderr: bool,
+    identifier: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReconcileConfigInput {
+    script: String,
+    function: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn parses_trivial_legacy_alias() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "echo hello world").expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        assert_eq!(manifest.args, vec!["hello", "world"]);
+        assert!(manifest.journal.is_none());
+    }
+
+    #[test]
+    fn parses_toml_alias_with_journal_and_reconcile() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+args = ["base"]
+env_remove = ["REMOVE_ME"]
+
+[env]
+FOO = "bar"
+
+[journal]
+namespace = "ops"
+stderr = true
+identifier = "svc"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+"#,
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse toml config");
+        assert_eq!(manifest.args, vec!["base"]);
+        assert_eq!(manifest.env.get("FOO"), Some(&"bar".to_string()));
+        assert_eq!(manifest.env_remove, vec!["REMOVE_ME"]);
+        assert_eq!(
+            manifest.journal.as_ref().map(|j| j.namespace.as_str()),
+            Some("ops")
+        );
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .map(|r| r.function.as_str())
+                .unwrap_or(""),
+            "reconcile"
+        );
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .expect("reconcile config")
+                .script,
+            temp.path().join("hooks/reconcile.rhai")
+        );
+    }
 }
