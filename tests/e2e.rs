@@ -2693,6 +2693,61 @@ script = "reconcile-trim.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_remove_env_duplicates_are_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-dedup.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["CHOPPER_DROP", " CHOPPER_DROP ", "CHOPPER_DROP"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-dedup.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+
+[reconcile]
+script = "reconcile-remove-dedup.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-dedup"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
 fn reconcile_blank_set_env_key_after_trim_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2953,6 +3008,47 @@ CHOPPER_KEEP = "from_alias"
         &config_home,
         &cache_home,
         &["envremove-trimmed"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn env_remove_duplicates_are_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-dedup.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+env_remove = ["CHOPPER_DROP", " CHOPPER_DROP ", "CHOPPER_DROP"]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["envremove-dedup"],
         [
             ("CHOPPER_DROP", "from_runtime".to_string()),
             ("CHOPPER_KEEP", "from_runtime".to_string()),
