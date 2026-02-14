@@ -1110,6 +1110,145 @@ mod tests {
     }
 
     #[test]
+    fn store_rejects_manifest_with_nul_env_key_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest
+            .env
+            .insert("BAD\0KEY".to_string(), "value".to_string());
+
+        let err = store("invalid-store-nul-env-key", &fingerprint, &invalid_manifest)
+            .expect_err("NUL env key should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-env-key");
+        assert!(!path.exists(), "NUL env key should not produce cache file");
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_nul_env_remove_key_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.env_remove = vec!["BAD\0REMOVE".to_string()];
+
+        let err = store(
+            "invalid-store-nul-env-remove-key",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("NUL env_remove key should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-env-remove-key");
+        assert!(
+            !path.exists(),
+            "NUL env_remove key should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_nul_journal_namespace_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.journal = Some(JournalConfig {
+            namespace: "ops\0prod".to_string(),
+            stderr: true,
+            identifier: None,
+        });
+
+        let err = store(
+            "invalid-store-nul-journal-namespace",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("NUL journal namespace should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-journal-namespace");
+        assert!(
+            !path.exists(),
+            "NUL journal namespace should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_nul_journal_identifier_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.journal = Some(JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some("ident\0log".to_string()),
+        });
+
+        let err = store(
+            "invalid-store-nul-journal-identifier",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("NUL journal identifier should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-nul-journal-identifier");
+        assert!(
+            !path.exists(),
+            "NUL journal identifier should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
         let alias_a = "demo/prod";
         let alias_b = "demo:prod";
