@@ -184,7 +184,8 @@ CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias> [args...]
 Blank values are ignored and fall back to XDG/default resolution.
 
 Cache invalidation is automatic and based on source file path + metadata
-(size and mtime). Users do not need to manually manage cache in normal usage.
+(size, mtime, and on Unix also ctime/device/inode). Users do not need to
+manually manage cache in normal usage.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 
