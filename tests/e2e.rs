@@ -10092,6 +10092,108 @@ args = ["cache-bypass"]
 }
 
 #[test]
+fn cache_disable_flag_bypasses_existing_cache_without_rewriting_it() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-existing.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEOLDPAYLOAD001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["nocache-existing", "seed"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("CACHEOLDPAYLOAD001 seed"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-existing.bin");
+    let cached_before_disable = fs::read(&cache_file).expect("read seeded cache bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHENEWPAYLOADLONGTOK01"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-existing", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("CACHENEWPAYLOADLONGTOK01 disabled-run"),
+        "{disabled_stdout}"
+    );
+    assert!(
+        !disabled_stdout.contains("CACHEOLDPAYLOAD001 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let cached_after_disable = fs::read(&cache_file).expect("read cache after disabled run");
+    assert_eq!(
+        cached_after_disable, cached_before_disable,
+        "cache bytes should remain untouched while CHOPPER_DISABLE_CACHE is enabled"
+    );
+
+    let enabled = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-existing", "enabled-run"],
+    );
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("CACHENEWPAYLOADLONGTOK01 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    let cached_after_enabled = fs::read(&cache_file).expect("read cache after enabled run");
+    assert!(
+        cached_after_enabled
+            .windows(b"CACHENEWPAYLOADLONGTOK01".len())
+            .any(|window| window == b"CACHENEWPAYLOADLONGTOK01"),
+        "cache should refresh once cache is re-enabled"
+    );
+    assert!(
+        !cached_after_enabled
+            .windows(b"CACHEOLDPAYLOAD001".len())
+            .any(|window| window == b"CACHEOLDPAYLOAD001"),
+        "cache should no longer contain stale payload after re-enabled run"
+    );
+}
+
+#[test]
 fn cache_disable_flag_is_case_insensitive_in_e2e_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
