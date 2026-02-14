@@ -349,6 +349,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_rejects_symlink_alias_with_nul_bytes() {
+        let err = parse_invocation(&["bad\0alias".to_string()])
+            .expect_err("symlink alias with nul should be invalid");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn cache_enabled_by_default() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_CACHE");
