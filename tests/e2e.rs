@@ -77,6 +77,20 @@ fn replace_bytes_once(haystack: &mut [u8], needle: &[u8], replacement: &[u8]) ->
     false
 }
 
+fn replace_bytes_once_resizing(haystack: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let Some(idx) = haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+    else {
+        return false;
+    };
+    haystack.splice(idx..idx + needle.len(), replacement.iter().copied());
+    true
+}
+
 #[test]
 fn help_flag_prints_usage_without_alias() {
     let config_home = TempDir::new().expect("create config home");
@@ -6303,6 +6317,63 @@ args = ["-c", "printf 'DOTEXECPATHHEAL %s\n' \"$*\"", "_"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_dot_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-dot-token-heal.toml"),
+        r#"
+exec = "echo"
+args = ["DOTTOKENEXECPATHHEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-token-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("DOTTOKENEXECPATHHEAL first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-dot-token-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"echo", b".");
+    assert!(replaced, "expected to mutate cached exec path to dot token");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-token-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-token exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("DOTTOKENEXECPATHHEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_dotdot_exec_path_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7488,6 +7559,86 @@ function = "DOTSCRIPTFUNC001"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("RECONCILEDOTSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-token-script-reconcile-heal.rhai"),
+        r#"
+fn DOTTOKRECFUNC01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-dot-token-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEDOTTOKSCRIPTHEAL"]
+
+[reconcile]
+script = "dot-token-script-reconcile-heal.rhai"
+function = "DOTTOKRECFUNC01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-token-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTTOKSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-dot-token-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(
+        &mut cache_bytes,
+        b"dot-token-script-reconcile-heal.rhai",
+        b".",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to dot token form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-token-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-token reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTTOKSCRIPTHEAL second-run reconciled"),
         "{stdout}"
     );
 }
