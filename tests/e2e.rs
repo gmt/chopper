@@ -6087,6 +6087,60 @@ args = ["EXECPATHHEAL"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_dot_component_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-dot-heal.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'DOTEXECPATHHEAL %s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTEXECPATHHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-dot-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"/bin/sh", b"/bin/..");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to dot-component form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed exec-dot cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTEXECPATHHEAL second-run"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_blank_journal_identifier_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -6494,6 +6548,83 @@ function = "PATHHEALFUNC001"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("RECONCILESCRIPTPATHHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_component_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(aliases_dir.join("hooks/s1")).expect("create hooks/s1 dir");
+
+    fs::write(
+        aliases_dir.join("hooks/s1/ok"),
+        r#"
+fn DOTSCRIPTFUNC001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-dot-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEDOTSCRIPTHEAL"]
+
+[reconcile]
+script = "hooks/s1/ok"
+function = "DOTSCRIPTFUNC001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-dot-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"hooks/s1/ok", b"hooks/s1/..");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to dot-component form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-component reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTSCRIPTHEAL second-run reconciled"),
         "{stdout}"
     );
 }
