@@ -142,3 +142,9 @@ Parsed manifests are cached automatically under `${XDG_CACHE_HOME:-~/.cache}/cho
 
 Cache invalidation is automatic and based on source file path + metadata
 (size and mtime). Users do not need to manually manage cache in normal usage.
+
+For extraordinary debugging scenarios, cache can be bypassed per-invocation:
+
+```bash
+CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
+```

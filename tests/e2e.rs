@@ -266,6 +266,45 @@ fn direct_invocation_rejects_separator_as_alias_name() {
 }
 
 #[test]
+fn cache_can_be_disabled_for_extraordinary_debugging() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass runtime"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn reconcile_script_can_append_args_and_override_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

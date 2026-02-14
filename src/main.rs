@@ -47,6 +47,10 @@ fn main() -> Result<()> {
 }
 
 fn load_manifest(alias: &str, path: &std::path::Path) -> Result<manifest::Manifest> {
+    if !cache_enabled() {
+        return parser::parse(path);
+    }
+
     let fingerprint = cache::source_fingerprint(path)?;
     if let Some(cached) = cache::load(alias, &fingerprint) {
         return Ok(cached);
@@ -55,6 +59,15 @@ fn load_manifest(alias: &str, path: &std::path::Path) -> Result<manifest::Manife
     let manifest = parser::parse(path)?;
     cache::store(alias, &fingerprint, &manifest)?;
     Ok(manifest)
+}
+
+fn cache_enabled() -> bool {
+    let Ok(value) = env::var("CHOPPER_DISABLE_CACHE") else {
+        return true;
+    };
+
+    let normalized = value.trim().to_ascii_lowercase();
+    !matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -112,7 +125,11 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_invocation;
+    use super::{cache_enabled, parse_invocation};
+    use std::env;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn supports_direct_invocation_mode() {
@@ -177,5 +194,24 @@ mod tests {
         .expect_err("separator cannot be alias");
 
         assert!(err.to_string().contains("alias name cannot be `--`"));
+    }
+
+    #[test]
+    fn cache_enabled_by_default() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_CACHE");
+        assert!(cache_enabled());
+    }
+
+    #[test]
+    fn cache_can_be_disabled_via_env() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_DISABLE_CACHE", "true");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "1");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "yes");
+        assert!(!cache_enabled());
+        env::remove_var("CHOPPER_DISABLE_CACHE");
     }
 }
