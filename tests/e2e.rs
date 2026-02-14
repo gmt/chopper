@@ -3478,6 +3478,45 @@ fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
 }
 
 #[test]
+fn legacy_one_line_alias_with_nul_in_command_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-nul-command"), b"ec\0ho legacy")
+        .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-nul-command", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_nul_in_args_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-nul-args"), b"echo ok\0bad").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-nul-args", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias args entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_alias_accepts_utf8_bom_prefixed_document() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
