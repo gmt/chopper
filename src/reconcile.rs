@@ -2,7 +2,7 @@ use crate::env_util;
 use crate::manifest::{Manifest, RuntimePatch};
 use anyhow::{anyhow, Context, Result};
 use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 
 pub fn maybe_reconcile(
@@ -167,6 +167,7 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
 }
 
 fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
+    let mut seen = HashSet::with_capacity(values.len());
     let mut normalized = Vec::with_capacity(values.len());
     for key in values {
         let normalized_key = key.trim();
@@ -178,7 +179,10 @@ fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
                 "`remove_env` entries cannot contain `=`: `{normalized_key}`"
             ));
         }
-        normalized.push(normalized_key.to_string());
+        let normalized_key = normalized_key.to_string();
+        if seen.insert(normalized_key.clone()) {
+            normalized.push(normalized_key);
+        }
     }
     Ok(normalized)
 }
@@ -354,7 +358,7 @@ fn reconcile(_ctx) {
             r#"
 fn reconcile(_ctx) {
   #{
-    remove_env: ["  FOO  ", "   ", "BAR"]
+    remove_env: ["  FOO  ", "FOO", "   ", "BAR", " BAR "]
   }
 }
 "#,

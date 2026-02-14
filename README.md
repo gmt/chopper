@@ -114,7 +114,7 @@ function = "reconcile"           # optional, default "reconcile"
 
 Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
-`env_remove` entries are also trimmed; blank entries are ignored.
+`env_remove` entries are trimmed, deduplicated (first-seen order), and blank entries are ignored.
 `env_remove` entries cannot contain `=`.
 `[env]` keys are trimmed and must remain unique after trimming.
 `[env]` keys cannot contain `=`.
@@ -179,7 +179,8 @@ The function must return a map. Supported keys:
 Unknown keys are rejected to catch script typos early.
 
 For reconcile env mutations, `set_env` keys and `remove_env` entries are
-trimmed; blank keys are rejected and blank remove entries are ignored.
+trimmed; blank keys are rejected, and `remove_env` entries are deduplicated (first-seen order)
+while blank remove entries are ignored.
 `set_env` keys cannot contain `=`.
 `remove_env` entries cannot contain `=`.
 Relative `reconcile.script` paths are resolved against the alias config file's

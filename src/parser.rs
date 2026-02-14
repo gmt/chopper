@@ -1,7 +1,7 @@
 use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -156,6 +156,7 @@ fn normalize_env_map(env: HashMap<String, String>) -> Result<HashMap<String, Str
 }
 
 fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
+    let mut seen = HashSet::with_capacity(env_remove.len());
     let mut normalized = Vec::with_capacity(env_remove.len());
     for key in env_remove {
         let normalized_key = key.trim();
@@ -167,7 +168,10 @@ fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
                 "field `env_remove` entries cannot contain `=`: `{normalized_key}`"
             ));
         }
-        normalized.push(normalized_key.to_string());
+        let normalized_key = normalized_key.to_string();
+        if seen.insert(normalized_key.clone()) {
+            normalized.push(normalized_key);
+        }
     }
     Ok(normalized)
 }
@@ -892,6 +896,23 @@ function = "  custom_reconcile  "
             r#"
 exec = "echo"
 env_remove = ["  FOO  ", "   ", "BAR"]
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(manifest.env_remove, vec!["FOO", "BAR"]);
+        Ok(())
+    }
+
+    #[test]
+    fn dedupes_env_remove_entries_after_trimming() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+env_remove = ["  FOO  ", "FOO", "BAR", " BAR "]
 "#,
         )?;
 
