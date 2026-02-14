@@ -1004,6 +1004,20 @@ mod tests {
     }
 
     #[test]
+    fn cache_disable_flag_falsey_or_blank_values_keep_cache_enabled() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_DISABLE_CACHE", "0");
+        assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "false");
+        assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "no");
+        assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "   ");
+        assert!(cache_enabled());
+        env::remove_var("CHOPPER_DISABLE_CACHE");
+    }
+
+    #[test]
     fn config_dir_honors_chopper_override() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::set_var("CHOPPER_CONFIG_DIR", "/tmp/chopper-config-override");
