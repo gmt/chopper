@@ -882,6 +882,32 @@ CHOPPER_E2E = "from_alias"
 }
 
 #[test]
+fn direct_invocation_supports_dotted_alias_identifiers() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("demo.prod.toml"),
+        r#"
+exec = "echo"
+args = ["direct-dot-alias"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["demo.prod", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct-dot-alias runtime"), "{stdout}");
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
