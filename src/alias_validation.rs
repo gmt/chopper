@@ -65,4 +65,17 @@ mod tests {
             .expect_err("dash-prefixed aliases should be rejected");
         assert_eq!(flaglike, AliasViolation::StartsWithDash);
     }
+
+    #[test]
+    fn validator_rejects_dot_and_nul_aliases() {
+        let dot = validate_alias_identifier(".").expect_err("dot alias should be rejected");
+        assert_eq!(dot, AliasViolation::IsDotToken);
+
+        let parent = validate_alias_identifier("..").expect_err("parent alias should be rejected");
+        assert_eq!(parent, AliasViolation::IsDotToken);
+
+        let nul =
+            validate_alias_identifier("bad\0alias").expect_err("nul alias should be rejected");
+        assert_eq!(nul, AliasViolation::ContainsNul);
+    }
 }
