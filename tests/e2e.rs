@@ -6072,6 +6072,20 @@ args = ["LEGACYMUTATE001"]
         !legacy_file.exists(),
         "invalid legacy cache file should be pruned after run"
     );
+
+    let rebuilt_cache = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_cache
+            .windows(b"LEGACYMUTATE001".len())
+            .any(|window| window == b"LEGACYMUTATE001"),
+        "rebuilt hashed cache should contain original source payload"
+    );
+    assert!(
+        !rebuilt_cache
+            .windows(b"LEGACY\0UTATE001".len())
+            .any(|window| window == b"LEGACY\0UTATE001"),
+        "rebuilt hashed cache should not retain corrupted legacy payload"
+    );
 }
 
 #[test]
