@@ -142,6 +142,12 @@ fn reconcile(ctx) {
 }
 ```
 
+For extraordinary debugging scenarios, reconcile can be bypassed per-invocation:
+
+```bash
+CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
+```
+
 ---
 
 ## Caching

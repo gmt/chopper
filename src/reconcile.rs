@@ -8,6 +8,10 @@ pub fn maybe_reconcile(
     manifest: &Manifest,
     runtime_args: &[String],
 ) -> Result<Option<RuntimePatch>> {
+    if reconcile_disabled() {
+        return Ok(None);
+    }
+
     let Some(reconcile) = manifest.reconcile.as_ref() else {
         return Ok(None);
     };
@@ -35,6 +39,14 @@ pub fn maybe_reconcile(
         })?;
 
     parse_patch(response).map(Some)
+}
+
+fn reconcile_disabled() -> bool {
+    let Ok(value) = env::var("CHOPPER_DISABLE_RECONCILE") else {
+        return false;
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
 }
 
 fn build_context(manifest: &Manifest, runtime_args: &[String]) -> Map {
@@ -128,8 +140,10 @@ fn dynamic_to_string(value: Dynamic, field: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::maybe_reconcile;
+    use super::{maybe_reconcile, reconcile_disabled};
     use crate::manifest::{Manifest, ReconcileConfig};
+    use crate::test_support::ENV_LOCK;
+    use std::env;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -221,5 +235,49 @@ fn reconcile(_ctx) {
             .expect_err("expected reconcile field validation error")
             .to_string();
         assert!(err.contains("all values in `set_env` must be strings"));
+    }
+
+    #[test]
+    fn reconcile_disable_flag_is_optional_and_case_insensitive() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        assert!(!reconcile_disabled());
+
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "TRUE");
+        assert!(reconcile_disabled());
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "on");
+        assert!(reconcile_disabled());
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "0");
+        assert!(!reconcile_disabled());
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+    }
+
+    #[test]
+    fn reconcile_can_be_disabled_to_skip_scripts() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("patch.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["never-applied"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "1");
+        let patch = maybe_reconcile(&manifest, &[]).expect("skip reconcile");
+        assert!(patch.is_none());
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
     }
 }

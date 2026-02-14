@@ -476,6 +476,59 @@ script = "hook.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_can_be_disabled_for_extraordinary_debugging() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile"],
+    set_env: #{ "CHOPPER_E2E": "from_reconcile" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"; printf 'ENV=%s\n' \"$CHOPPER_E2E\"", "_", "base"]
+
+[env]
+CHOPPER_E2E = "from_alias"
+
+[reconcile]
+script = "toggle.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "1".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_reconcile"), "{stdout}");
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
 fn journal_config_surfaces_systemd_cat_failure_with_hint() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
