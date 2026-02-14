@@ -6338,6 +6338,147 @@ args = ["HASHLEGACYBOTH01"]
 }
 
 #[test]
+fn malformed_hashed_cache_file_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-corrupt-heal.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTEDHASHEDCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-corrupt-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDHASHEDCACHE01 first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-corrupt-heal.bin");
+    fs::write(&cache_file, b"not-bincode").expect("overwrite cache file with corrupt bytes");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-corrupt-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt hashed cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDHASHEDCACHE01 second-run"),
+        "{stdout}"
+    );
+
+    let healed_cache = fs::read(&cache_file).expect("read healed cache file");
+    assert!(
+        healed_cache
+            .windows(b"CORRUPTEDHASHEDCACHE01".len())
+            .any(|window| window == b"CORRUPTEDHASHEDCACHE01"),
+        "healed cache should contain original source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"not-bincode".len())
+            .any(|w| w == b"not-bincode"),
+        "healed cache should not retain corrupt serialized payload"
+    );
+}
+
+#[test]
+fn malformed_legacy_cache_file_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTEDLEGACYCACHE1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDLEGACYCACHE1 first-run"),
+        "{stdout}"
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("move hashed cache to legacy filename");
+    fs::write(&legacy_file, b"legacy-not-bincode").expect("overwrite legacy cache with junk");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt legacy cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDLEGACYCACHE1 second-run"),
+        "{stdout}"
+    );
+
+    assert!(
+        !legacy_file.exists(),
+        "corrupt legacy cache should be pruned after source fallback"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"CORRUPTEDLEGACYCACHE1".len())
+            .any(|window| window == b"CORRUPTEDLEGACYCACHE1"),
+        "rebuilt hashed cache should contain source payload"
+    );
+}
+
+#[test]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
