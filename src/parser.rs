@@ -489,6 +489,27 @@ script = "."
     }
 
     #[test]
+    fn rejects_parent_reconcile_script_field() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = ".."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot be `.` or `..`"));
+    }
+
+    #[test]
     fn trims_exec_and_journal_fields() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("trimmed.toml");

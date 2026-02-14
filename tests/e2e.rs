@@ -3061,3 +3061,30 @@ script = "."
         "{stderr}"
     );
 }
+
+#[test]
+fn toml_reconcile_script_parent_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("parent-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = ".."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parent-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
