@@ -96,7 +96,7 @@ If that first executable line starts with a UTF-8 BOM, the BOM is ignored.
 
 ```toml
 exec = "kubectl"                 # required
-args = ["get", "pods", "-A"]     # optional, default []
+args = ["get", "pods", "-A"]     # optional, default [] (NUL bytes rejected)
 env_remove = ["AWS_PROFILE"]     # optional, default []
 
 [env]                            # optional map<string,string>
@@ -115,6 +115,7 @@ function = "reconcile"           # optional, default "reconcile"
 Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
 Those string fields cannot contain NUL bytes.
+`args` entries cannot contain NUL bytes.
 `env_remove` entries are trimmed, deduplicated (first-seen order), and blank entries are ignored.
 `env_remove` entries cannot contain `=` or NUL bytes.
 `[env]` keys are trimmed and must remain unique after trimming.
@@ -183,6 +184,7 @@ Unknown keys are rejected to catch script typos early.
 For reconcile env mutations, `set_env` keys and `remove_env` entries are
 trimmed; blank keys are rejected, and `remove_env` entries are deduplicated (first-seen order)
 while blank remove entries are ignored.
+`append_args` and `replace_args` entries cannot contain NUL bytes.
 `set_env` keys cannot contain `=`.
 `set_env` values cannot contain NUL bytes.
 `set_env` keys cannot contain NUL bytes.

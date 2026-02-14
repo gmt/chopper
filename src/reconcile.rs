@@ -82,8 +82,13 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
         .ok_or_else(|| anyhow!("reconcile function must return an object/map"))?;
     validate_patch_keys(&map)?;
 
-    let replace_args = optional_string_array(&map, "replace_args")?;
-    let append_args = optional_string_array(&map, "append_args")?.unwrap_or_default();
+    let replace_args = optional_string_array(&map, "replace_args")?
+        .map(|values| normalize_patch_args(values, "replace_args"))
+        .transpose()?;
+    let append_args = normalize_patch_args(
+        optional_string_array(&map, "append_args")?.unwrap_or_default(),
+        "append_args",
+    )?;
     let set_env =
         normalize_patch_set_env(optional_string_map(&map, "set_env")?.unwrap_or_default())?;
     let remove_env =
@@ -179,6 +184,13 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
         normalized.insert(normalized_key.to_string(), value);
     }
     Ok(normalized)
+}
+
+fn normalize_patch_args(values: Vec<String>, field: &str) -> Result<Vec<String>> {
+    if values.iter().any(|value| value.contains('\0')) {
+        return Err(anyhow!("`{field}` entries cannot contain NUL bytes"));
+    }
+    Ok(values)
 }
 
 fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
@@ -324,6 +336,72 @@ fn reconcile(_ctx) {
             .expect_err("expected reconcile field validation error")
             .to_string();
         assert!(err.contains("all values in `set_env` must be strings"));
+    }
+
+    #[test]
+    fn reconcile_rejects_append_args_entries_containing_nul_bytes() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("invalid-append-args.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected append_args validation error")
+            .to_string();
+        assert!(
+            err.contains("`append_args` entries cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reconcile_rejects_replace_args_entries_containing_nul_bytes() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("invalid-replace-args.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected replace_args validation error")
+            .to_string();
+        assert!(
+            err.contains("`replace_args` entries cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 
     #[test]

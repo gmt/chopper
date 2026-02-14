@@ -3001,6 +3001,84 @@ script = "reconcile-nul-value.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_append_args_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-append-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-append-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-append-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-append-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`append_args` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_replace_args_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-replace-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-replace-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-replace-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-replace-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`replace_args` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_remove_env_entry_with_equals_sign_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3554,6 +3632,31 @@ GOOD_KEY = "bad\u0000value"
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("field `env` values cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_args_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-args.toml"),
+        r#"
+exec = "echo"
+args = ["ok", "bad\u0000arg"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-args"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `args` entries cannot contain NUL bytes"),
         "{stderr}"
     );
 }

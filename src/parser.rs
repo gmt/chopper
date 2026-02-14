@@ -35,6 +35,10 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
     if parts.is_empty() {
         return Err(anyhow!("no command found"));
     }
+    if parts[0].contains('\0') {
+        return Err(anyhow!("legacy alias command cannot contain NUL bytes"));
+    }
+    validate_arg_values(&parts[1..], "legacy alias args")?;
 
     let exec = which::which(&parts[0]).unwrap_or_else(|_| parts[0].clone().into());
 
@@ -79,6 +83,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             "field `exec` must include a path segment when using relative path notation"
         ));
     }
+    validate_arg_values(&parsed.args, "field `args`")?;
 
     let exec = resolve_exec_path(&base_dir, exec);
 
@@ -229,6 +234,13 @@ fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
         }
     }
     Ok(normalized)
+}
+
+fn validate_arg_values(values: &[String], field: &str) -> Result<()> {
+    if values.iter().any(|value| value.contains('\0')) {
+        return Err(anyhow!("{field} entries cannot contain NUL bytes"));
+    }
+    Ok(())
 }
 
 fn resolve_script_path(base_dir: &Path, script: &str) -> PathBuf {
@@ -398,6 +410,30 @@ echo hello world
     }
 
     #[test]
+    fn rejects_legacy_alias_args_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "echo ok\0bad").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias args entries cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_legacy_alias_command_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "ec\0ho ok").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot contain NUL bytes"));
+    }
+
+    #[test]
     fn rejects_trivial_legacy_alias_with_only_bom_and_comments() {
         let temp = TempDir::new().expect("create tempdir");
         let alias = temp.path().join("legacy");
@@ -506,6 +542,25 @@ exec = "   "
         assert!(err
             .to_string()
             .contains("field `exec` cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_args_field_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+args = ["ok", "bad\u0000arg"]
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `args` entries cannot contain NUL bytes"));
     }
 
     #[test]
