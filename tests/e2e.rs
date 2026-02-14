@@ -7077,6 +7077,99 @@ CACHE_ENV_KEY = "from-config"
 }
 
 #[test]
+fn malformed_cached_manifest_with_equals_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-equals-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHEENVKEY001 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-equals-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVKEY001=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-equals-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEENVKEY001", b"CACHE=NVKEY001");
+    assert!(replaced, "expected to mutate cached env key to include '='");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-equals-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed equals env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVKEY001=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_env_value_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-nul-value-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHEENVVALUE01 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-value-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVVALUE01=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-nul-value-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"from-config", b"from\0config");
+    assert!(
+        replaced,
+        "expected to mutate cached env value to include embedded NUL"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-value-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env value cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVVALUE01=from-config"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_env_remove_key_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7195,6 +7288,64 @@ env_remove = ["DUPREMKEYTOK001", "DUPREMKEYTOK002"]
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("DUPREMKEYTOK001=first"), "{stdout}");
     assert!(!stdout.contains("DUPREMKEYTOK002=second"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_equals_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-equals-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["REMOVETOKEN001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-equals-heal"],
+        std::iter::once(("REMOVETOKEN001", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("REMOVETOKEN001=present"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-equals-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"REMOVETOKEN001", b"REMOVE=OKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to include '='"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-equals-heal"],
+        std::iter::once(("REMOVETOKEN001", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed equals env_remove cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("REMOVETOKEN001=present"), "{stdout}");
 }
 
 #[test]
