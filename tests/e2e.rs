@@ -6486,6 +6486,124 @@ identifier = "CACHEID00000001"
 }
 
 #[test]
+fn malformed_cached_manifest_with_nul_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNSNULHEAL"]
+
+[journal]
+namespace = "NULNSTOKEN001"
+stderr = false
+identifier = "CACHEID00000011"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSNULHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULNSTOKEN001", b"NULN\0TOKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached journal namespace to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSNULHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-identifier-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALIDNULHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "NULIDTOKEN001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-identifier-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDNULHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-identifier-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULIDTOKEN001", b"NULI\0TOKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached journal identifier to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-identifier-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDNULHEAL second-run"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_blank_reconcile_function_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -6630,6 +6748,82 @@ function = "FUNC_TOKEN_ABC1"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("RECONCILEWSFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-func-heal.rhai"),
+        r#"
+fn NULFUNCTOKEN01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-func-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILENULFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-nul-func-heal.rhai"
+function = "NULFUNCTOKEN01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-func-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILENULFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-nul-func-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULFUNCTOKEN01", b"NULF\0NCTOKEN01");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-func-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL reconcile-function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILENULFUNCHEAL second-run reconciled"),
         "{stdout}"
     );
 }
