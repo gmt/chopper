@@ -54,6 +54,8 @@ Drive-letter launcher paths like `C:\tools\CHOPPER.EXE` are likewise treated
 as direct invocation names.
 Unix-relative launcher paths such as `./CHOPPER.COM` and `../CHOPPER.CMD`
 are also treated as direct invocation names.
+Equivalent forward-slash Windows spellings (for example `C:/tools/CHOPPER.CMD`
+and `//server/tools/CHOPPER.COM`) are recognized as well.
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
