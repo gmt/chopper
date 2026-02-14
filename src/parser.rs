@@ -50,35 +50,43 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     let parsed: AliasConfig =
         toml::from_str(content).with_context(|| format!("invalid TOML in {}", path.display()))?;
 
-    if parsed.exec.trim().is_empty() {
+    let exec = parsed.exec.trim();
+    if exec.is_empty() {
         return Err(anyhow!("field `exec` cannot be empty"));
     }
 
-    let exec = which::which(&parsed.exec).unwrap_or_else(|_| parsed.exec.clone().into());
+    let exec = which::which(exec).unwrap_or_else(|_| exec.into());
 
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
     manifest.env = parsed.env;
     manifest.env_remove = parsed.env_remove;
 
     if let Some(journal) = parsed.journal {
-        if journal.namespace.trim().is_empty() {
+        let namespace = journal.namespace.trim();
+        if namespace.is_empty() {
             return Err(anyhow!("field `journal.namespace` cannot be empty"));
         }
+        let identifier = journal
+            .identifier
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         manifest = manifest.with_journal(JournalConfig {
-            namespace: journal.namespace,
+            namespace: namespace.to_string(),
             stderr: journal.stderr,
-            identifier: journal.identifier,
+            identifier,
         });
     }
 
     if let Some(reconcile) = parsed.reconcile {
-        if reconcile.script.trim().is_empty() {
+        let script = reconcile.script.trim();
+        if script.is_empty() {
             return Err(anyhow!("field `reconcile.script` cannot be empty"));
         }
-        let script = resolve_script_path(path, &reconcile.script);
+        let script = resolve_script_path(path, script);
         let function = reconcile
             .function
-            .filter(|f| !f.trim().is_empty())
+            .map(|f| f.trim().to_string())
+            .filter(|f| !f.is_empty())
             .unwrap_or_else(|| "reconcile".to_string());
         manifest = manifest.with_reconcile(ReconcileConfig { script, function });
     }
@@ -264,5 +272,53 @@ namespace = "  "
         assert!(err
             .to_string()
             .contains("field `journal.namespace` cannot be empty"));
+    }
+
+    #[test]
+    fn trims_exec_and_journal_fields() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "  echo  "
+
+[journal]
+namespace = "  ops  "
+identifier = "   "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        let journal = manifest.journal.expect("journal config");
+        assert_eq!(journal.namespace, "ops");
+        assert_eq!(journal.identifier, None);
+        Ok(())
+    }
+
+    #[test]
+    fn trims_reconcile_script_and_function() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "  hooks/reconcile.rhai  "
+function = "  custom_reconcile  "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let reconcile = manifest.reconcile.expect("reconcile config");
+        assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
+        assert_eq!(reconcile.function, "custom_reconcile");
+        Ok(())
     }
 }

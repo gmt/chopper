@@ -93,12 +93,15 @@ KUBECONFIG = "/home/me/.kube/config"
 [journal]                        # optional
 namespace = "ops"                # required when [journal] is present
 stderr = true                    # optional, default true
-identifier = "kpods"             # optional
+identifier = "kpods"             # optional (blank values are treated as unset)
 
 [reconcile]                      # optional
 script = "kpods.reconcile.rhai"  # required
 function = "reconcile"           # optional, default "reconcile"
 ```
+
+Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
+`journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
 
 ### Argument merge order
 
