@@ -245,6 +245,9 @@ fn validate_cached_command_path(path: &Path, field: &str) -> Result<()> {
     if value.is_empty() {
         return Err(anyhow!("{field} cannot be empty"));
     }
+    if value.trim() != value {
+        return Err(anyhow!("{field} cannot include surrounding whitespace"));
+    }
     if value == "." || value == ".." {
         return Err(anyhow!("{field} cannot be `.` or `..`"));
     }
@@ -867,6 +870,40 @@ mod tests {
     }
 
     #[test]
+    fn cached_manifest_with_whitespace_exec_path_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let manifest = Manifest::simple(PathBuf::from(" echo"));
+
+        let path = cache_path("unsafe-whitespace-exec-path");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-whitespace-exec-path", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached whitespace exec path should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cached_manifest_with_blank_journal_identifier_is_pruned() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
@@ -1131,6 +1168,44 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached reconcile script dot-token path should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_whitespace_reconcile_script_path_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from(" hooks/reconcile.rhai"),
+            function: "reconcile".to_string(),
+        });
+
+        let path = cache_path("unsafe-whitespace-reconcile-script-path");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-whitespace-reconcile-script-path", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached whitespace reconcile script path should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
