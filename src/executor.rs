@@ -17,7 +17,7 @@ pub fn run(invocation: Invocation) -> Result<()> {
 }
 
 fn run_direct(invocation: Invocation) -> Result<()> {
-    let mut cmd = command_for_invocation(&invocation);
+    let mut cmd = command_for_invocation(&invocation)?;
     let err = cmd.exec();
     Err(anyhow!("exec failed: {}", err))
 }
@@ -44,7 +44,7 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
         return Err(err);
     }
 
-    let mut child_cmd = command_for_invocation(&invocation);
+    let mut child_cmd = command_for_invocation(&invocation)?;
     child_cmd.stderr(Stdio::piped());
 
     let mut child = match child_cmd.spawn() {
@@ -115,18 +115,40 @@ fn ensure_journal_sink_startup(journal_child: &mut std::process::Child) -> Resul
     Ok(())
 }
 
-fn command_for_invocation(invocation: &Invocation) -> Command {
+fn command_for_invocation(invocation: &Invocation) -> Result<Command> {
     let mut cmd = Command::new(&invocation.exec);
     cmd.args(&invocation.args);
 
     for (key, val) in &invocation.env {
+        validate_env_key(key)?;
+        validate_env_value(key, val)?;
         cmd.env(key, val);
     }
 
     for key in &invocation.env_remove {
+        validate_env_key(key)?;
         cmd.env_remove(key);
     }
-    cmd
+    Ok(cmd)
+}
+
+fn validate_env_key(key: &str) -> Result<()> {
+    if key.contains('=') {
+        return Err(anyhow!("environment key `{key}` cannot contain `=`"));
+    }
+    if key.contains('\0') {
+        return Err(anyhow!("environment key cannot contain NUL bytes"));
+    }
+    Ok(())
+}
+
+fn validate_env_value(key: &str, value: &str) -> Result<()> {
+    if value.contains('\0') {
+        return Err(anyhow!(
+            "environment value for `{key}` cannot contain NUL bytes"
+        ));
+    }
+    Ok(())
 }
 
 fn exit_like_child(status: ExitStatus) -> Result<()> {
@@ -140,4 +162,82 @@ fn exit_like_child(status: ExitStatus) -> Result<()> {
         std::process::exit(128 + signal);
     }
     Err(anyhow!("child process terminated without a code/signal"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_for_invocation;
+    use crate::manifest::Invocation;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn invocation() -> Invocation {
+        Invocation {
+            exec: PathBuf::from("echo"),
+            args: vec!["ok".to_string()],
+            env: HashMap::new(),
+            env_remove: Vec::new(),
+            journal: None,
+        }
+    }
+
+    #[test]
+    fn command_builder_rejects_env_key_with_equals_sign() {
+        let mut invocation = invocation();
+        invocation
+            .env
+            .insert("BAD=KEY".to_string(), "value".to_string());
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(err.to_string().contains("cannot contain `=`"), "{err}");
+    }
+
+    #[test]
+    fn command_builder_rejects_env_key_with_nul_byte() {
+        let mut invocation = invocation();
+        invocation
+            .env
+            .insert("BAD\0KEY".to_string(), "value".to_string());
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn command_builder_rejects_env_value_with_nul_byte() {
+        let mut invocation = invocation();
+        invocation
+            .env
+            .insert("GOOD_KEY".to_string(), "bad\0value".to_string());
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn command_builder_rejects_env_remove_key_with_nul_byte() {
+        let mut invocation = invocation();
+        invocation.env_remove = vec!["BAD\0KEY".to_string()];
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn command_builder_rejects_env_remove_key_with_equals_sign() {
+        let mut invocation = invocation();
+        invocation.env_remove = vec!["BAD=KEY".to_string()];
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(err.to_string().contains("cannot contain `=`"), "{err}");
+    }
 }
