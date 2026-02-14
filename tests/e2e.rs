@@ -510,7 +510,7 @@ args = ["alias=question"]
     symlink(chopper_bin(), &alias_question).expect("create question symlink");
 
     let output = run_chopper_with(
-        alias_colon,
+        alias_colon.clone(),
         &config_home,
         &cache_home,
         &["runtime-a"],
@@ -538,6 +538,21 @@ args = ["alias=question"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("alias=question runtime-b"), "{stdout}");
+
+    let output = run_chopper_with(
+        alias_colon,
+        &config_home,
+        &cache_home,
+        &["runtime-c"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "second colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=colon runtime-c"), "{stdout}");
 
     let manifests_dir = cache_home.path().join("chopper/manifests");
     let matching_cache_entries = fs::read_dir(&manifests_dir)
@@ -948,6 +963,15 @@ args = ["direct=question"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("direct=question runtime-b"), "{stdout}");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "runtime-c"]);
+    assert!(
+        output.status.success(),
+        "second colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=colon runtime-c"), "{stdout}");
 
     let manifests_dir = cache_home.path().join("chopper/manifests");
     let matching_cache_entries = fs::read_dir(&manifests_dir)
