@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub fn run(invocation: Invocation) -> Result<()> {
     if let Some(journal) = invocation.journal.clone() {
@@ -39,15 +39,9 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
         .stdin
         .take()
         .ok_or_else(|| anyhow!("failed to open systemd-cat stdin"))?;
-    thread::sleep(Duration::from_millis(1));
-    if let Some(status) = journal_child
-        .try_wait()
-        .context("failed checking initial systemd-cat status")?
-    {
+    if let Err(err) = ensure_journal_sink_startup(&mut journal_child) {
         drop(journal_stdin);
-        return Err(anyhow!(
-            "systemd-cat exited before child spawn with status {status}; journal namespace requires systemd-cat --namespace support"
-        ));
+        return Err(err);
     }
 
     let mut child_cmd = command_for_invocation(&invocation);
@@ -100,6 +94,25 @@ fn journal_status_error(status: ExitStatus) -> anyhow::Error {
     anyhow!(
         "systemd-cat failed with status {status}; journal namespace requires systemd-cat --namespace support"
     )
+}
+
+fn ensure_journal_sink_startup(journal_child: &mut std::process::Child) -> Result<()> {
+    const STARTUP_GRACE: Duration = Duration::from_millis(10);
+    const POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+    let start = Instant::now();
+    while start.elapsed() < STARTUP_GRACE {
+        if let Some(status) = journal_child
+            .try_wait()
+            .context("failed checking initial systemd-cat status")?
+        {
+            return Err(anyhow!(
+                "systemd-cat exited before child spawn with status {status}; journal namespace requires systemd-cat --namespace support"
+            ));
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    Ok(())
 }
 
 fn command_for_invocation(invocation: &Invocation) -> Command {

@@ -460,6 +460,42 @@ args = ["symlink-mode"]
 }
 
 #[test]
+fn symlink_invocation_without_runtime_args_still_executes_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-noargs.toml"),
+        r#"
+exec = "echo"
+args = ["symlink-noargs"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods-noargs");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("symlink-noargs"), "{stdout}");
+}
+
+#[test]
 fn symlink_invocation_preserves_alias_name_with_dots() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
