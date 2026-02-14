@@ -440,6 +440,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_uppercase_chopper_name_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "CHOPPER".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_windows_style_chopper_exe_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "C:\\tools\\chopper.exe".to_string(),
@@ -562,6 +575,10 @@ mod tests {
     fn detects_help_action_only_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
         assert_eq!(
