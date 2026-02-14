@@ -3151,6 +3151,147 @@ fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_cmd() {
 }
 
 #[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_default_to_xdg_roots() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
