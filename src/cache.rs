@@ -238,6 +238,30 @@ mod tests {
     }
 
     #[test]
+    fn blank_cache_override_falls_back_to_xdg_cache_root() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+        env::set_var("CHOPPER_CACHE_DIR", "   ");
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        store("demo-blank", &fingerprint, &manifest).expect("store cache");
+
+        let expected = home.path().join("chopper/manifests/demo-blank.bin");
+        assert!(
+            expected.exists(),
+            "blank override should fall back to XDG cache root: {:?}",
+            expected
+        );
+        env::remove_var("CHOPPER_CACHE_DIR");
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn source_fingerprint_captures_unix_signature() {
         let source_home = TempDir::new().expect("create tempdir");
         let source_file = source_home.path().join("a.toml");

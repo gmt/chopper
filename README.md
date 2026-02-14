@@ -66,6 +66,7 @@ CHOPPER_CONFIG_DIR=/path/to/config-root chopper <alias> [args...]
 ```
 
 When this override is set, paths are resolved directly under that root.
+Blank values are ignored and fall back to XDG/default resolution.
 
 Lookup order for alias `foo`:
 
@@ -177,6 +178,7 @@ For advanced scenarios, cache root can be overridden explicitly:
 ```bash
 CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias> [args...]
 ```
+Blank values are ignored and fall back to XDG/default resolution.
 
 Cache invalidation is automatic and based on source file path + metadata
 (size and mtime). Users do not need to manually manage cache in normal usage.

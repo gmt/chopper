@@ -220,6 +220,48 @@ fn print_dir_builtins_default_to_xdg_roots() {
 }
 
 #[test]
+fn print_dir_builtins_ignore_blank_overrides() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [("CHOPPER_CONFIG_DIR", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [("CHOPPER_CACHE_DIR", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
 fn symlink_mode_does_not_treat_help_as_builtin() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
