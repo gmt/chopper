@@ -1,3 +1,4 @@
+use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
@@ -145,8 +146,13 @@ fn validate_exec_path_for_command(invocation: &Invocation) -> Result<()> {
 }
 
 fn validate_args_for_command(invocation: &Invocation) -> Result<()> {
-    if invocation.args.iter().any(|arg| arg.contains('\0')) {
-        return Err(anyhow!("command arguments cannot contain NUL bytes"));
+    for arg in &invocation.args {
+        if matches!(
+            arg_validation::validate_arg_value(arg),
+            Err(ArgViolation::ContainsNul)
+        ) {
+            return Err(anyhow!("command arguments cannot contain NUL bytes"));
+        }
     }
     Ok(())
 }

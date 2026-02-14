@@ -1,3 +1,4 @@
+mod arg_validation;
 mod cache;
 mod env_util;
 mod env_validation;

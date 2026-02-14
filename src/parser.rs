@@ -1,3 +1,4 @@
+use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
 use anyhow::{anyhow, Context, Result};
@@ -237,8 +238,13 @@ fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
 }
 
 fn validate_arg_values(values: &[String], field: &str) -> Result<()> {
-    if values.iter().any(|value| value.contains('\0')) {
-        return Err(anyhow!("{field} entries cannot contain NUL bytes"));
+    for value in values {
+        if matches!(
+            arg_validation::validate_arg_value(value),
+            Err(ArgViolation::ContainsNul)
+        ) {
+            return Err(anyhow!("{field} entries cannot contain NUL bytes"));
+        }
     }
     Ok(())
 }
