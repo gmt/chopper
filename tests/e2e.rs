@@ -6141,6 +6141,60 @@ args = ["BS_EXECPATH_HEAL"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_nul_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["NUL_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NUL_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"/echo", b"/ec\0h");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NUL_EXECPATH_HEAL second-run"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_exec_path_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -6736,6 +6790,86 @@ function = "BSSCRIPTFUNC0001"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("BS_RECONCILE_SCRIPT_HEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("NULSCRIPTPATHTOKEN01.rhai"),
+        r#"
+fn NULSCRIPTFUNC0001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["NUL_RECONCILE_SCRIPT_HEAL"]
+
+[reconcile]
+script = "NULSCRIPTPATHTOKEN01.rhai"
+function = "NULSCRIPTFUNC0001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NUL_RECONCILE_SCRIPT_HEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-nul-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"NULSCRIPTPATHTOKEN01.rhai",
+        b"NULSCRIPTPATHTOKEN01.rha\0",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NUL_RECONCILE_SCRIPT_HEAL second-run reconciled"),
         "{stdout}"
     );
 }
