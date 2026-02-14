@@ -6092,6 +6092,71 @@ identifier = "CACHEIDENT12345"
 }
 
 #[test]
+fn malformed_cached_manifest_with_whitespace_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-id-whitespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALIDWHITESPACEHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "CACHEID00000003"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-whitespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALIDWHITESPACEHEAL first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-id-whitespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEID00000003", b" CACHEID0000000");
+    assert!(
+        replaced,
+        "expected to mutate cached journal identifier with whitespace"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-whitespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALIDWHITESPACEHEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_journal_namespace_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -6222,6 +6287,82 @@ function = "CACHEFUNCABCDE"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("RECONCILECACHEHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-whitespace-heal.rhai"),
+        r#"
+fn FUNC_TOKEN_ABC1(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-whitespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEWSFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-whitespace-heal.rhai"
+function = "FUNC_TOKEN_ABC1"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEWSFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-whitespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"FUNC_TOKEN_ABC1", b" FUNC_TOKEN_ABC");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function with whitespace"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEWSFUNCHEAL second-run reconciled"),
         "{stdout}"
     );
 }
