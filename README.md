@@ -28,6 +28,9 @@ You may insert `--` to separate chopper parsing from alias args:
 chopper <alias> -- [args...]
 ```
 
+Only one leading `--` separator is consumed; additional `--` tokens are passed
+through as normal runtime arguments.
+
 Built-in flags for direct invocation:
 
 ```bash

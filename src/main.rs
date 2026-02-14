@@ -274,6 +274,21 @@ mod tests {
     }
 
     #[test]
+    fn direct_invocation_separator_strips_only_leading_marker() {
+        let invocation = parse_invocation(&[
+            "chopper".to_string(),
+            "kpods".to_string(),
+            "--".to_string(),
+            "--".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--", "--tail=100"]);
+    }
+
+    #[test]
     fn strips_double_dash_separator_for_symlink_invocation() {
         let invocation = parse_invocation(&[
             "kubectl-prod".to_string(),
@@ -284,6 +299,20 @@ mod tests {
 
         assert_eq!(invocation.alias, "kubectl-prod");
         assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn symlink_invocation_separator_strips_only_leading_marker() {
+        let invocation = parse_invocation(&[
+            "kubectl-prod".to_string(),
+            "--".to_string(),
+            "--".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl-prod");
+        assert_eq!(invocation.passthrough_args, vec!["--", "--tail=100"]);
     }
 
     #[test]
