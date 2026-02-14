@@ -2771,6 +2771,45 @@ script = "reconcile-dup-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_set_env_key_with_equals_sign_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-equals-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "BAD=KEY": "value" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-equals-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-equals-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-equals-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` keys cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_unsupported_patch_key_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3073,6 +3112,33 @@ exec = "echo"
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("field `env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_key_with_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("equals-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"BAD=KEY" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["equals-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` keys cannot contain `=`"),
         "{stderr}"
     );
 }

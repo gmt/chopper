@@ -140,6 +140,11 @@ fn normalize_env_map(env: HashMap<String, String>) -> Result<HashMap<String, Str
         if normalized_key.is_empty() {
             return Err(anyhow!("field `env` cannot contain empty keys"));
         }
+        if normalized_key.contains('=') {
+            return Err(anyhow!(
+                "field `env` keys cannot contain `=`: `{normalized_key}`"
+            ));
+        }
         if normalized.contains_key(normalized_key) {
             return Err(anyhow!(
                 "field `env` contains duplicate keys after trimming: `{normalized_key}`"
@@ -927,6 +932,25 @@ FOO = "base"
         assert!(err
             .to_string()
             .contains("contains duplicate keys after trimming"));
+    }
+
+    #[test]
+    fn rejects_env_keys_containing_equals_sign() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+"BAD=KEY" = "value"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err.to_string().contains("keys cannot contain `=`"));
     }
 
     #[test]

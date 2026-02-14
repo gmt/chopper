@@ -151,6 +151,11 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
         if normalized_key.is_empty() {
             return Err(anyhow!("`set_env` cannot contain empty keys"));
         }
+        if normalized_key.contains('=') {
+            return Err(anyhow!(
+                "`set_env` keys cannot contain `=`: `{normalized_key}`"
+            ));
+        }
         if normalized.contains_key(normalized_key) {
             return Err(anyhow!(
                 "`set_env` contains duplicate keys after trimming: `{normalized_key}`"
@@ -420,6 +425,36 @@ fn reconcile(_ctx) {
             err.contains("`set_env` contains duplicate keys after trimming"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn reconcile_rejects_set_env_keys_containing_equals_sign() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("equals-set-env-key.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "BAD=KEY": "value" }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected set_env key validation error")
+            .to_string();
+        assert!(err.contains("keys cannot contain `=`"), "{err}");
     }
 
     #[test]
