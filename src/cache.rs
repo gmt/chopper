@@ -56,6 +56,10 @@ pub fn source_fingerprint(path: &Path) -> Result<SourceFingerprint> {
 pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     let primary_path = cache_path(alias);
     if let Some(manifest) = load_from_path(&primary_path, fingerprint) {
+        let legacy_path = legacy_cache_path(alias);
+        if legacy_path != primary_path {
+            delete_cache_file_best_effort(&legacy_path);
+        }
         return Some(manifest);
     }
 
@@ -2135,6 +2139,50 @@ mod tests {
             !legacy_path.exists(),
             "expected legacy cache file to be pruned after successful migration"
         );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn load_from_hashed_cache_prunes_stale_legacy_path_for_unsafe_aliases() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let alias = "alpha:beta";
+
+        let hashed_manifest = Manifest::simple(PathBuf::from("echo"));
+        store(alias, &fingerprint, &hashed_manifest).expect("store hashed cache");
+
+        let legacy_path = legacy_cache_path(alias);
+        let hashed_path = cache_path(alias);
+        assert_ne!(
+            legacy_path, hashed_path,
+            "legacy and hashed paths should differ"
+        );
+        let legacy_manifest = Manifest::simple(PathBuf::from("printf"));
+        let legacy_entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest: legacy_manifest,
+        };
+        fs::write(
+            &legacy_path,
+            bincode::serialize(&legacy_entry).expect("serialize legacy cache entry"),
+        )
+        .expect("write stale legacy cache file");
+        assert!(legacy_path.exists(), "stale legacy cache file should exist");
+
+        let loaded = load(alias, &fingerprint).expect("load from hashed cache");
+        assert_eq!(loaded.exec, PathBuf::from("echo"));
+        assert!(
+            !legacy_path.exists(),
+            "stale legacy cache file should be pruned when hashed cache is used"
+        );
+        assert!(hashed_path.exists(), "hashed cache file should remain");
         env::remove_var("XDG_CACHE_HOME");
     }
 
