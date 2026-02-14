@@ -10451,6 +10451,47 @@ args = ["cache-bypass-case"]
 }
 
 #[test]
+fn cache_disable_flag_trims_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-trimmed.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-trimmed"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "  on  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-trimmed runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-trimmed.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with trimmed truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_disable_flag_falsey_value_keeps_cache_enabled() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -10957,6 +10998,57 @@ script = "toggle-unknown.reconcile.rhai"
     assert!(
         stdout.contains("ARGS=base runtime from_reconcile_unknown"),
         "unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_trims_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-trimmed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_trimmed_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-trimmed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "  TRUE  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_trimmed_truthy"),
+        "trimmed truthy values should disable reconcile hooks: {stdout}"
     );
 }
 
