@@ -6036,6 +6036,135 @@ args = ["MAGICPAYLOAD1234"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_blank_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALCACHEHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "CACHEIDENT12345"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALCACHEHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEIDENT12345", b"               ");
+    assert!(replaced, "expected to mutate cached journal identifier");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALCACHEHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_blank_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-heal.rhai"),
+        r#"
+fn CACHEFUNCABCDE(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILECACHEHEAL"]
+
+[reconcile]
+script = "cache-reconcile-heal.rhai"
+function = "CACHEFUNCABCDE"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILECACHEHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEFUNCABCDE", b"              ");
+    assert!(replaced, "expected to mutate cached reconcile function");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILECACHEHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
