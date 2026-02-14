@@ -168,4 +168,58 @@ fn reconcile(ctx) {
         assert_eq!(patch.set_env.get("RUNTIME_MODE"), Some(&"true".to_string()));
         assert_eq!(patch.remove_env, vec!["OLD_VAR"]);
     }
+
+    #[test]
+    fn reconcile_requires_map_return_type() {
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("invalid-return.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  "not-a-map"
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected reconcile return shape error")
+            .to_string();
+        assert!(err.contains("reconcile function must return an object/map"));
+    }
+
+    #[test]
+    fn reconcile_rejects_non_string_env_values() {
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("invalid-env.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "BROKEN": 42 }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected reconcile field validation error")
+            .to_string();
+        assert!(err.contains("all values in `set_env` must be strings"));
+    }
 }

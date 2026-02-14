@@ -127,4 +127,26 @@ mod tests {
         let new_fingerprint = source_fingerprint(&source_file).expect("new fingerprint");
         assert!(load("demo", &new_fingerprint).is_none());
     }
+
+    #[test]
+    fn corrupted_cache_entry_is_ignored() {
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("fingerprint");
+
+        let cache_file = home.path().join("chopper/manifests/broken.bin");
+        fs::create_dir_all(
+            cache_file
+                .parent()
+                .expect("cache file should have a parent directory"),
+        )
+        .expect("create cache dir");
+        fs::write(&cache_file, [0, 159, 146, 150]).expect("write invalid cache bytes");
+
+        assert!(load("broken", &fingerprint).is_none());
+    }
 }

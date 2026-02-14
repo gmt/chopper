@@ -132,6 +132,7 @@ fn default_true() -> bool {
 #[cfg(test)]
 mod tests {
     use super::parse;
+    use anyhow::Result;
     use std::fs;
     use tempfile::TempDir;
 
@@ -199,5 +200,69 @@ script = "hooks/reconcile.rhai"
                 .script,
             temp.path().join("hooks/reconcile.rhai")
         );
+    }
+
+    #[test]
+    fn rejects_empty_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "   "
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err.to_string().contains("field `exec` cannot be empty"));
+    }
+
+    #[test]
+    fn defaults_reconcile_function_when_blank() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+function = "   "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .map(|r| r.function.as_str())
+                .unwrap_or_default(),
+            "reconcile"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_empty_journal_namespace() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[journal]
+namespace = "  "
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `journal.namespace` cannot be empty"));
     }
 }
