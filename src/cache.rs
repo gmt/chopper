@@ -1000,6 +1000,116 @@ mod tests {
     }
 
     #[test]
+    fn store_rejects_manifest_with_whitespace_env_remove_key_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.env_remove = vec![" CACHE_DROP".to_string()];
+
+        let err = store(
+            "invalid-store-whitespace-env-remove-key",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("whitespace env_remove key should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-whitespace-env-remove-key");
+        assert!(
+            !path.exists(),
+            "whitespace env_remove key should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_whitespace_journal_namespace_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.journal = Some(JournalConfig {
+            namespace: " ops ".to_string(),
+            stderr: true,
+            identifier: None,
+        });
+
+        let err = store(
+            "invalid-store-whitespace-journal-namespace",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("whitespace journal namespace should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-whitespace-journal-namespace");
+        assert!(
+            !path.exists(),
+            "whitespace journal namespace should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_whitespace_journal_identifier_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.journal = Some(JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some(" ident ".to_string()),
+        });
+
+        let err = store(
+            "invalid-store-whitespace-journal-identifier",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("whitespace journal identifier should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-whitespace-journal-identifier");
+        assert!(
+            !path.exists(),
+            "whitespace journal identifier should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
         let alias_a = "demo/prod";
         let alias_b = "demo:prod";
