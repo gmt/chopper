@@ -6985,6 +6985,20 @@ args = ["STALELEGACYCORRUPT1"]
         "stale corrupt legacy cache should be pruned when hashed cache hits"
     );
     assert!(hashed_file.exists(), "hashed cache should remain present");
+
+    let hashed_bytes = fs::read(&hashed_file).expect("read hashed cache after legacy prune");
+    assert!(
+        hashed_bytes
+            .windows(b"STALELEGACYCORRUPT1".len())
+            .any(|window| window == b"STALELEGACYCORRUPT1"),
+        "hashed cache should retain expected payload after stale legacy prune"
+    );
+    assert!(
+        !hashed_bytes
+            .windows(b"stale-legacy-junk".len())
+            .any(|window| window == b"stale-legacy-junk"),
+        "hashed cache should not absorb stale legacy junk bytes"
+    );
 }
 
 #[test]
@@ -7026,6 +7040,14 @@ args = ["SAFEALIASCACHE01"]
     assert!(
         cache_file.exists(),
         "safe alias cache file should persist after cache hit"
+    );
+
+    let cache_bytes = fs::read(&cache_file).expect("read safe alias cache bytes");
+    assert!(
+        cache_bytes
+            .windows(b"SAFEALIASCACHE01".len())
+            .any(|window| window == b"SAFEALIASCACHE01"),
+        "safe alias cache should retain expected payload after cache hit"
     );
 }
 
