@@ -26,6 +26,8 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 }
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
+    validate_journal_config_for_command(&journal)?;
+
     let mut journal_cmd = Command::new("systemd-cat");
     journal_cmd.arg(format!("--namespace={}", journal.namespace));
     if let Some(identifier) = journal.identifier {
@@ -178,6 +180,26 @@ fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
     }
 }
 
+fn validate_journal_config_for_command(journal: &JournalConfig) -> Result<()> {
+    let namespace = journal.namespace.trim();
+    if namespace.is_empty() {
+        return Err(anyhow!("journal namespace cannot be empty"));
+    }
+    if namespace.contains('\0') {
+        return Err(anyhow!("journal namespace cannot contain NUL bytes"));
+    }
+    if let Some(identifier) = &journal.identifier {
+        let identifier = identifier.trim();
+        if identifier.is_empty() {
+            return Err(anyhow!("journal identifier cannot be blank when provided"));
+        }
+        if identifier.contains('\0') {
+            return Err(anyhow!("journal identifier cannot contain NUL bytes"));
+        }
+    }
+    Ok(())
+}
+
 fn exit_like_child(status: ExitStatus) -> Result<()> {
     if status.success() {
         return Ok(());
@@ -194,7 +216,7 @@ fn exit_like_child(status: ExitStatus) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::command_for_invocation;
-    use crate::manifest::Invocation;
+    use crate::manifest::{Invocation, JournalConfig};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -290,6 +312,70 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("execution path cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn journal_validation_rejects_empty_namespace() {
+        let journal = JournalConfig {
+            namespace: "   ".to_string(),
+            stderr: true,
+            identifier: None,
+        };
+
+        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        assert!(
+            err.to_string()
+                .contains("journal namespace cannot be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn journal_validation_rejects_nul_namespace() {
+        let journal = JournalConfig {
+            namespace: "ops\0prod".to_string(),
+            stderr: true,
+            identifier: None,
+        };
+
+        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        assert!(
+            err.to_string()
+                .contains("journal namespace cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn journal_validation_rejects_blank_identifier() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some("   ".to_string()),
+        };
+
+        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        assert!(
+            err.to_string()
+                .contains("journal identifier cannot be blank when provided"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn journal_validation_rejects_nul_identifier() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some("svc\0id".to_string()),
+        };
+
+        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        assert!(
+            err.to_string()
+                .contains("journal identifier cannot contain NUL bytes"),
             "{err}"
         );
     }
