@@ -107,8 +107,8 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
             println!("  CHOPPER_CACHE_DIR=/path/to/cache-root");
-            println!("  CHOPPER_DISABLE_CACHE=1   # truthy: 1,true,yes,on");
-            println!("  CHOPPER_DISABLE_RECONCILE=1   # truthy: 1,true,yes,on");
+            println!("  CHOPPER_DISABLE_CACHE=<truthy>   # 1,true,yes,on");
+            println!("  CHOPPER_DISABLE_RECONCILE=<truthy>   # 1,true,yes,on");
         }
         BuiltinAction::Version => {
             println!("chopper {}", env!("CARGO_PKG_VERSION"));
