@@ -10020,6 +10020,68 @@ args = ["override-root"]
 }
 
 #[test]
+fn whitespace_wrapped_config_and_cache_overrides_are_trimmed_and_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let override_config_root = TempDir::new().expect("create override config root");
+    let override_cache_root = TempDir::new().expect("create override cache root");
+
+    let aliases_dir = override_config_root.path().join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("trimmed-override.toml"),
+        r#"
+exec = "echo"
+args = ["trimmed-override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["trimmed-override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("  {}  ", override_config_root.path().display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("  {}  ", override_cache_root.path().display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("trimmed-override-root runtime"), "{stdout}");
+
+    let override_cache_file = override_cache_root
+        .path()
+        .join("manifests")
+        .join("trimmed-override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at trimmed override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/trimmed-override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when CHOPPER_CACHE_DIR is whitespace-wrapped: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
 fn empty_config_and_cache_overrides_fall_back_to_xdg_roots() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");
