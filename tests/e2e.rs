@@ -2326,6 +2326,33 @@ fn legacy_one_line_alias_remains_supported() {
 }
 
 #[test]
+fn legacy_one_line_alias_ignores_blank_and_comment_lines() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-comments"),
+        r#"
+
+# heading comment
+   # indented comment
+echo legacy-commented
+"#,
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-comments", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("legacy-commented runtime"), "{stdout}");
+}
+
+#[test]
 fn toml_env_duplicate_keys_after_trim_fail_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

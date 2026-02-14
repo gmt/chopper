@@ -81,6 +81,7 @@ Lookup order for alias `foo`:
 5. `foo.rhai`
 
 Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command aliases**.
+For legacy files, `chopper` uses the first non-empty, non-comment (`# ...`) line.
 
 ---
 

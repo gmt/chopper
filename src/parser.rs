@@ -26,13 +26,9 @@ fn is_toml_path(path: &Path) -> bool {
 fn parse_trivial(content: &str) -> Result<Manifest> {
     let line = content
         .lines()
-        .next()
-        .ok_or_else(|| anyhow!("empty config file"))?
-        .trim();
-
-    if line.is_empty() {
-        return Err(anyhow!("empty config file"));
-    }
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .ok_or_else(|| anyhow!("empty config file"))?;
 
     let parts = shell_words::split(line)?;
     if parts.is_empty() {
@@ -182,6 +178,48 @@ mod tests {
         );
         assert_eq!(manifest.args, vec!["hello", "world"]);
         assert!(manifest.journal.is_none());
+    }
+
+    #[test]
+    fn parses_trivial_legacy_alias_after_blank_and_comment_lines() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(
+            &alias,
+            r#"
+
+# heading comment
+    # indented comment
+echo hello world
+"#,
+        )
+        .expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        assert_eq!(manifest.args, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn rejects_trivial_legacy_alias_with_only_blank_and_comment_lines() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(
+            &alias,
+            r#"
+
+# heading comment
+    # indented comment
+
+"#,
+        )
+        .expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err.to_string().contains("empty config file"));
     }
 
     #[test]
