@@ -6736,6 +6736,83 @@ function = "CACHEFUNCABCDE"
 }
 
 #[test]
+fn malformed_cached_manifest_with_empty_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-func-heal.rhai"),
+        r#"
+fn EMPTYFUNCTOK01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-func-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEEMPTYFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-empty-func-heal.rhai"
+function = "EMPTYFUNCTOK01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-func-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-empty-func-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYFUNCTOK01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYFUNCTOK01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-func-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty reconcile-function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_reconcile_function_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7128,6 +7205,83 @@ function = "NULSCRIPTFUNC0001"
 }
 
 #[test]
+fn malformed_cached_manifest_with_empty_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("emptyscrpt01.rhai"),
+        r#"
+fn EMPTYSCRIPTFN01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEEMPTYSCRIPTHEAL"]
+
+[reconcile]
+script = "emptyscrpt01.rhai"
+function = "EMPTYSCRIPTFN01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-empty-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"emptyscrpt01.rhai".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"emptyscrpt01.rhai", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_reconcile_script_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7471,6 +7625,55 @@ NULENVKEYTOKEN1 = "from-config"
 }
 
 #[test]
+fn malformed_cached_manifest_with_empty_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-empty-key-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+EMPTYENVKEY01 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-empty-key-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTYENVKEY01=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-empty-key-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYENVKEY01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYENVKEY01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached env key to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-empty-key-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTYENVKEY01=from-config"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_env_remove_key_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7523,6 +7726,65 @@ env_remove = ["RMKEYTOKENABCD1"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("RMKEYTOKENABCD1=from-runtime"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-empty-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["EMPTYRMKEY01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-empty-heal"],
+        std::iter::once(("EMPTYRMKEY01", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("EMPTYRMKEY01=from-runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYRMKEY01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYRMKEY01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-empty-heal"],
+        std::iter::once(("EMPTYRMKEY01", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty env_remove key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("EMPTYRMKEY01=from-runtime"), "{stdout}");
 }
 
 #[test]
