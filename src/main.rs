@@ -1018,6 +1018,18 @@ mod tests {
     }
 
     #[test]
+    fn cache_disable_flag_truthy_values_are_case_insensitive() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_DISABLE_CACHE", "TRUE");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "YeS");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "On");
+        assert!(!cache_enabled());
+        env::remove_var("CHOPPER_DISABLE_CACHE");
+    }
+
+    #[test]
     fn config_dir_honors_chopper_override() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::set_var("CHOPPER_CONFIG_DIR", "/tmp/chopper-config-override");
