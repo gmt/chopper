@@ -621,6 +621,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp/chopper.cmd".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["CHOPPER.BAT".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -715,6 +719,10 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["/tmp/chopper.cmd".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
             detect_builtin_action(&["/tmp/chopper.bat".into(), "--print-cache-dir".into()]),
