@@ -602,6 +602,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_mixed_unix_windows_absolute_chopper_with_trailing_separator_as_direct_mode(
+    ) {
+        let invocation = parse_invocation(&[
+            "/tmp\\CHOPPER/".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_mixed_separator_drive_chopper_cmd_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "C:/tools\\CHOPPER.CMD".to_string(),
@@ -1126,6 +1140,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp\\CHOPPER/".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.exe".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -1250,6 +1268,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp\\CHOPPER/".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["../CHOPPER.CMD".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -1371,6 +1393,10 @@ mod tests {
             Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp\\CHOPPER/".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
+        );
+        assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-cache-dir".into()]),
             Some(BuiltinAction::PrintCacheDir)
         );
@@ -1488,6 +1514,10 @@ mod tests {
         );
         assert_eq!(
             detect_builtin_action(&["/tmp\\CHOPPER".into(), "--help".into(), "extra".into()]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&["/tmp\\CHOPPER/".into(), "--help".into(), "extra".into()]),
             None
         );
     }
