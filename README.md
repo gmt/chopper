@@ -281,6 +281,9 @@ place, so malformed cache state only persists if files are externally altered.
 For aliases whose names require filename sanitization, legacy cache filenames
 are migrated automatically; malformed legacy entries are pruned instead of being
 migrated, then rebuilt from source on successful invocation.
+When a valid hashed entry already exists, stale legacy files are cleaned up on
+cache hit. If hashed and legacy entries are both unusable, chopper falls back
+to source parsing and rewrites a fresh hashed entry.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 
