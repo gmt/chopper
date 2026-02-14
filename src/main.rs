@@ -71,6 +71,9 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     if exe_name != "chopper" {
         return None;
     }
+    if args.len() != 2 {
+        return None;
+    }
 
     match args.get(1).map(String::as_str) {
         Some("-h" | "--help") => Some(BuiltinAction::Help),
@@ -169,6 +172,11 @@ fn validate_alias_name(alias: &str) -> Result<()> {
     if alias == "--" {
         return Err(anyhow!(
             "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
+        ));
+    }
+    if alias.starts_with('-') {
+        return Err(anyhow!(
+            "alias name cannot start with `-`; choose a non-flag alias name"
         ));
     }
     if alias == "." || alias == ".." {
@@ -364,5 +372,23 @@ mod tests {
             detect_builtin_action(&["symlink-alias".into(), "--print-config-dir".into()]),
             None
         );
+    }
+
+    #[test]
+    fn builtin_detection_requires_exact_argument_shape() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--help".into(), "extra".into()]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--version".into(), "extra".into()]),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_alias_starting_with_dash() {
+        let err = validate_alias_name("-alias").expect_err("dash-prefixed alias is invalid");
+        assert!(err.to_string().contains("cannot start with `-`"));
     }
 }

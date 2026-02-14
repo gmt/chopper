@@ -37,6 +37,9 @@ chopper --print-config-dir
 chopper --print-cache-dir
 ```
 
+Built-ins are single-action commands; additional positional tokens are treated
+as regular alias parsing input and therefore should not be provided.
+
 2. **Symlinked alias**:
 
 ```bash
@@ -48,7 +51,7 @@ In symlink mode, alias name is inferred from executable name (`kpods` above).
 You may also use `kpods -- [args...]` to explicitly separate passthrough args.
 
 Alias names in direct mode are logical identifiers (not filesystem paths), so
-path separators are rejected.
+path separators and dash-prefixed tokens are rejected.
 
 ---
 
