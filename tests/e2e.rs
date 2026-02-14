@@ -154,6 +154,36 @@ fn print_dir_builtins_report_resolved_override_paths() {
 }
 
 #[test]
+fn print_dir_builtins_default_to_xdg_roots() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-config-dir"]);
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-cache-dir"]);
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
 fn symlink_mode_does_not_treat_help_as_builtin() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -224,6 +254,42 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ARGS=--print-config-dir"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_print_cache_dir_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("printcachecheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("printcachecheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--print-cache-dir"), "{stdout}");
 }
 
 #[test]

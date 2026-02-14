@@ -147,6 +147,8 @@ mod tests {
 
     #[test]
     fn reconcile_patch_is_applied_from_rhai_script() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
         let dir = TempDir::new().expect("tempdir");
         let script_path = dir.path().join("patch.rhai");
         fs::write(
@@ -182,6 +184,8 @@ fn reconcile(ctx) {
 
     #[test]
     fn reconcile_requires_map_return_type() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
         let dir = TempDir::new().expect("tempdir");
         let script_path = dir.path().join("invalid-return.rhai");
         fs::write(
@@ -208,6 +212,8 @@ fn reconcile(_ctx) {
 
     #[test]
     fn reconcile_rejects_non_string_env_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
         let dir = TempDir::new().expect("tempdir");
         let script_path = dir.path().join("invalid-env.rhai");
         fs::write(
@@ -252,6 +258,7 @@ fn reconcile(_ctx) {
     #[test]
     fn reconcile_can_be_disabled_to_skip_scripts() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
         let dir = TempDir::new().expect("tempdir");
         let script_path = dir.path().join("patch.rhai");
         fs::write(
