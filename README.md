@@ -273,6 +273,8 @@ If a cache entry is corrupted or contains invalid runtime strings (for example
 NUL bytes, non-canonical env/env_remove/journal/reconcile fields, or invalid
 exec/reconcile script path forms such as trailing separators), chopper
 automatically ignores and prunes that entry before reparsing the source config.
+Likewise, chopper refuses to write invalid manifests into cache in the first
+place, so malformed cache state only persists if files are externally altered.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 
