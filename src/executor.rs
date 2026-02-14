@@ -1,5 +1,6 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
+use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
 use std::io;
@@ -26,11 +27,11 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 }
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
-    validate_journal_config_for_command(&journal)?;
+    let (namespace, identifier) = normalize_journal_config_for_command(&journal)?;
 
     let mut journal_cmd = Command::new("systemd-cat");
-    journal_cmd.arg(format!("--namespace={}", journal.namespace));
-    if let Some(identifier) = journal.identifier {
+    journal_cmd.arg(format!("--namespace={namespace}"));
+    if let Some(identifier) = identifier {
         journal_cmd.arg(format!("--identifier={identifier}"));
     }
     journal_cmd.stdin(Stdio::piped());
@@ -180,24 +181,30 @@ fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
     }
 }
 
-fn validate_journal_config_for_command(journal: &JournalConfig) -> Result<()> {
-    let namespace = journal.namespace.trim();
-    if namespace.is_empty() {
-        return Err(anyhow!("journal namespace cannot be empty"));
-    }
-    if namespace.contains('\0') {
-        return Err(anyhow!("journal namespace cannot contain NUL bytes"));
-    }
-    if let Some(identifier) = &journal.identifier {
-        let identifier = identifier.trim();
-        if identifier.is_empty() {
+fn normalize_journal_config_for_command(
+    journal: &JournalConfig,
+) -> Result<(String, Option<String>)> {
+    let namespace = match journal_validation::normalize_namespace(&journal.namespace) {
+        Ok(namespace) => namespace,
+        Err(JournalNamespaceViolation::Empty) => {
+            return Err(anyhow!("journal namespace cannot be empty"));
+        }
+        Err(JournalNamespaceViolation::ContainsNul) => {
+            return Err(anyhow!("journal namespace cannot contain NUL bytes"));
+        }
+    };
+    let identifier = match journal_validation::normalize_optional_identifier_for_invocation(
+        journal.identifier.as_deref(),
+    ) {
+        Ok(identifier) => identifier,
+        Err(JournalIdentifierViolation::Blank) => {
             return Err(anyhow!("journal identifier cannot be blank when provided"));
         }
-        if identifier.contains('\0') {
+        Err(JournalIdentifierViolation::ContainsNul) => {
             return Err(anyhow!("journal identifier cannot contain NUL bytes"));
         }
-    }
-    Ok(())
+    };
+    Ok((namespace, identifier))
 }
 
 fn exit_like_child(status: ExitStatus) -> Result<()> {
@@ -324,7 +331,8 @@ mod tests {
             identifier: None,
         };
 
-        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        let err =
+            super::normalize_journal_config_for_command(&journal).expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("journal namespace cannot be empty"),
@@ -340,7 +348,8 @@ mod tests {
             identifier: None,
         };
 
-        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        let err =
+            super::normalize_journal_config_for_command(&journal).expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("journal namespace cannot contain NUL bytes"),
@@ -356,7 +365,8 @@ mod tests {
             identifier: Some("   ".to_string()),
         };
 
-        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        let err =
+            super::normalize_journal_config_for_command(&journal).expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("journal identifier cannot be blank when provided"),
@@ -372,7 +382,8 @@ mod tests {
             identifier: Some("svc\0id".to_string()),
         };
 
-        let err = super::validate_journal_config_for_command(&journal).expect_err("expected error");
+        let err =
+            super::normalize_journal_config_for_command(&journal).expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("journal identifier cannot contain NUL bytes"),

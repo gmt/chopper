@@ -1,5 +1,6 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
+use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
@@ -96,32 +97,32 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     manifest.env_remove = normalize_env_remove(parsed.env_remove)?;
 
     if let Some(journal) = parsed.journal {
-        let namespace = journal.namespace.trim();
-        if namespace.is_empty() {
-            return Err(anyhow!("field `journal.namespace` cannot be empty"));
-        }
-        if namespace.contains('\0') {
-            return Err(anyhow!(
-                "field `journal.namespace` cannot contain NUL bytes"
-            ));
-        }
-        let identifier = if let Some(value) = journal.identifier {
-            let identifier = value.trim();
-            if identifier.is_empty() {
-                None
-            } else {
-                if identifier.contains('\0') {
-                    return Err(anyhow!(
-                        "field `journal.identifier` cannot contain NUL bytes"
-                    ));
-                }
-                Some(identifier.to_string())
+        let namespace = match journal_validation::normalize_namespace(&journal.namespace) {
+            Ok(namespace) => namespace,
+            Err(JournalNamespaceViolation::Empty) => {
+                return Err(anyhow!("field `journal.namespace` cannot be empty"));
             }
-        } else {
-            None
+            Err(JournalNamespaceViolation::ContainsNul) => {
+                return Err(anyhow!(
+                    "field `journal.namespace` cannot contain NUL bytes"
+                ));
+            }
+        };
+        let identifier = match journal_validation::normalize_optional_identifier_for_config(
+            journal.identifier.as_deref(),
+        ) {
+            Ok(identifier) => identifier,
+            Err(JournalIdentifierViolation::ContainsNul) => {
+                return Err(anyhow!(
+                    "field `journal.identifier` cannot contain NUL bytes"
+                ));
+            }
+            Err(JournalIdentifierViolation::Blank) => {
+                unreachable!("blank identifiers are normalized to None for config parsing")
+            }
         };
         manifest = manifest.with_journal(JournalConfig {
-            namespace: namespace.to_string(),
+            namespace,
             stderr: journal.stderr,
             identifier,
         });
