@@ -65,6 +65,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec.ends_with('/') || exec.ends_with('\\') {
         return Err(anyhow!("field `exec` cannot end with a path separator"));
     }
+    if ends_with_dot_component(exec) {
+        return Err(anyhow!(
+            "field `exec` cannot end with `.` or `..` path components"
+        ));
+    }
     if looks_like_relative_exec_path(exec) && !has_meaningful_relative_segment(exec) {
         return Err(anyhow!(
             "field `exec` must include a path segment when using relative path notation"
@@ -104,6 +109,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         if script.ends_with('/') || script.ends_with('\\') {
             return Err(anyhow!(
                 "field `reconcile.script` cannot end with a path separator"
+            ));
+        }
+        if ends_with_dot_component(script) {
+            return Err(anyhow!(
+                "field `reconcile.script` cannot end with `.` or `..` path components"
             ));
         }
         if !Path::new(script).is_absolute() && !has_meaningful_relative_segment(script) {
@@ -196,6 +206,11 @@ fn has_meaningful_relative_segment(value: &str) -> bool {
     value
         .split(['/', '\\'])
         .any(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+}
+
+fn ends_with_dot_component(value: &str) -> bool {
+    let trimmed = value.trim_end_matches(['/', '\\']);
+    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
 }
 
 #[derive(Debug, Deserialize)]
@@ -444,6 +459,24 @@ exec = ".."
     }
 
     #[test]
+    fn rejects_exec_field_ending_in_dot_component() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "bin/.."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot end with `.` or `..` path components"));
+    }
+
+    #[test]
     fn rejects_dot_slash_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -585,6 +618,27 @@ script = ".."
         assert!(err
             .to_string()
             .contains("field `reconcile.script` cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_reconcile_script_field_ending_in_dot_component() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/.."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot end with `.` or `..` path components"));
     }
 
     #[test]
