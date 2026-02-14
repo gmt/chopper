@@ -714,6 +714,18 @@ mod tests {
             detect_builtin_action(&["chopper".into(), "--version".into(), "extra".into()]),
             None
         );
+        assert_eq!(
+            detect_builtin_action(&[".\\chopper.exe".into(), "-h".into(), "extra".into()]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&[
+                "/tmp/chopper.exe".into(),
+                "--print-cache-dir".into(),
+                "extra".into()
+            ]),
+            None
+        );
     }
 
     #[test]
