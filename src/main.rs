@@ -219,12 +219,15 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_enabled, config_dir, detect_builtin_action, parse_invocation, validate_alias_name,
-        BuiltinAction,
+        cache_enabled, config_dir, detect_builtin_action, find_config, parse_invocation,
+        validate_alias_name, BuiltinAction,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
+    use std::fs;
+    use std::os::unix::fs::symlink;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     #[test]
     fn supports_direct_invocation_mode() {
@@ -421,5 +424,38 @@ mod tests {
     fn rejects_alias_with_whitespace() {
         let err = validate_alias_name("foo bar").expect_err("whitespace aliases are invalid");
         assert!(err.to_string().contains("cannot contain whitespace"));
+    }
+
+    #[test]
+    fn find_config_ignores_directory_candidates() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let temp = TempDir::new().expect("create temp config dir");
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+        fs::create_dir_all(aliases_dir.join("demo.toml")).expect("create directory candidate");
+        let root_toml = temp.path().join("demo.toml");
+        fs::write(&root_toml, "exec = \"echo\"\n").expect("write fallback config");
+
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+        let found = find_config("demo").expect("expected fallback config");
+        assert_eq!(found, root_toml);
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn find_config_accepts_symlinked_file_candidates() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let temp = TempDir::new().expect("create temp config dir");
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+        let target = temp.path().join("target.toml");
+        fs::write(&target, "exec = \"echo\"\n").expect("write symlink target");
+        let alias_symlink = aliases_dir.join("demo.toml");
+        symlink(&target, &alias_symlink).expect("create alias symlink");
+
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+        let found = find_config("demo").expect("expected symlinked config");
+        assert_eq!(found, alias_symlink);
+        env::remove_var("CHOPPER_CONFIG_DIR");
     }
 }
