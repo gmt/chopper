@@ -1,8 +1,9 @@
 use crate::env_util;
 use crate::manifest::Manifest;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -84,21 +85,7 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
         manifest: manifest.clone(),
     };
     let bytes = bincode::serialize(&entry).context("failed to serialize alias cache entry")?;
-
-    let tmp_path = path.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&tmp_path, bytes).with_context(|| {
-        format!(
-            "failed to write temporary alias cache file {}",
-            tmp_path.display()
-        )
-    })?;
-    fs::rename(&tmp_path, &path).with_context(|| {
-        format!(
-            "failed to finalize alias cache file {}",
-            path.as_path().display()
-        )
-    })?;
-    Ok(())
+    write_atomically(&path, &bytes)
 }
 
 fn cache_path(alias: &str) -> Option<PathBuf> {
@@ -133,6 +120,58 @@ fn delete_cache_file_best_effort(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    const MAX_TMP_NAME_ATTEMPTS: usize = 32;
+
+    for attempt in 0..MAX_TMP_NAME_ATTEMPTS {
+        let tmp_path = cache_temp_path(path, attempt);
+        let mut tmp_file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to create temporary alias cache file {}",
+                        tmp_path.display()
+                    )
+                });
+            }
+        };
+
+        if let Err(err) = tmp_file.write_all(bytes) {
+            delete_cache_file_best_effort(&tmp_path);
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to write temporary alias cache file {}",
+                    tmp_path.display()
+                )
+            });
+        }
+
+        if let Err(err) = fs::rename(&tmp_path, path) {
+            delete_cache_file_best_effort(&tmp_path);
+            return Err(err).with_context(|| {
+                format!("failed to finalize alias cache file {}", path.display())
+            });
+        }
+
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "failed to create temporary alias cache file for {}; too many filename collisions",
+        path.display()
+    ))
+}
+
+fn cache_temp_path(path: &Path, attempt: usize) -> PathBuf {
+    path.with_extension(format!("tmp-{}-{attempt}", std::process::id()))
+}
+
 #[cfg(unix)]
 fn unix_file_signature(metadata: &fs::Metadata) -> (u128, u64, u64) {
     use std::os::unix::fs::MetadataExt;
@@ -151,7 +190,10 @@ fn unix_file_signature(_metadata: &fs::Metadata) -> (u128, u64, u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_path, load, source_fingerprint, store, CacheEntry, CACHE_ENTRY_VERSION};
+    use super::{
+        cache_path, cache_temp_path, load, source_fingerprint, store, CacheEntry,
+        CACHE_ENTRY_VERSION,
+    };
     use crate::manifest::Manifest;
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -305,6 +347,31 @@ mod tests {
             !path.exists(),
             "version-mismatched cache file should be pruned"
         );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_survives_preexisting_temporary_filename_collision() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+
+        let path = cache_path("demo").expect("cache path");
+        let parent = path.parent().expect("cache path parent");
+        fs::create_dir_all(parent).expect("create cache parent");
+        let colliding_tmp = cache_temp_path(&path, 0);
+        fs::write(&colliding_tmp, b"stale").expect("write colliding temp file");
+
+        store("demo", &fingerprint, &manifest).expect("store cache despite collision");
+        assert!(path.exists(), "final cache file should exist");
+        let loaded = load("demo", &fingerprint).expect("load stored cache");
+        assert_eq!(loaded.exec, PathBuf::from("echo"));
         env::remove_var("XDG_CACHE_HOME");
     }
 }
