@@ -666,6 +666,75 @@ identifier = "journal-test"
 }
 
 #[test]
+fn journal_parser_trimming_uses_trimmed_namespace_and_drops_blank_identifier() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops-e2e  "
+stderr = true
+identifier = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_err = fake_bin.path().join("captured-stderr.log");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat > \"{}\"\n",
+            captured_args.display(),
+            captured_err.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-trimmed"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_err_text =
+        fs::read_to_string(&captured_err).expect("read captured systemd-cat stdin");
+    assert!(
+        captured_err_text.contains("ERR_STREAM"),
+        "{captured_err_text}"
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "captured args: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier="),
+        "blank identifier should be omitted: {captured_args_text}"
+    );
+}
+
+#[test]
 fn direct_invocation_with_alias_name_still_works() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -699,6 +768,51 @@ CHOPPER_E2E = "from_alias"
         cache_entry.exists(),
         "expected cache entry at {:?}",
         cache_entry
+    );
+}
+
+#[test]
+fn parser_trimming_is_applied_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("trimmed.reconcile.rhai"),
+        r#"
+fn trimmed_reconcile(_ctx) {
+  #{
+    append_args: ["from_trimmed_reconcile"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("trimmed.toml"),
+        r#"
+exec = "  sh  "
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "  trimmed.reconcile.rhai  "
+function = "  trimmed_reconcile  "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["trimmed", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_trimmed_reconcile"),
+        "{stdout}"
     );
 }
 
