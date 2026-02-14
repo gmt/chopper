@@ -812,6 +812,35 @@ args = ["source=root-toml"]
 }
 
 #[test]
+fn alias_lookup_accepts_symlinked_toml_file_candidate() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target = chopper_dir.join("symlink-target.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "sh"
+args = ["-c", "printf 'SYMLINKED_CONFIG=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkcfg.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkcfg", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SYMLINKED_CONFIG=base runtime"), "{stdout}");
+}
+
+#[test]
 fn journal_config_forwards_stderr_to_systemd_cat() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

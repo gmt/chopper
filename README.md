@@ -82,6 +82,7 @@ Lookup order for alias `foo`:
 5. `foo.rhai`
 
 Only regular files are considered valid alias configs in this lookup.
+Symlinks that resolve to regular files are accepted.
 
 Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command aliases**.
 For legacy files, `chopper` uses the first non-empty, non-comment (`# ...`) line.
