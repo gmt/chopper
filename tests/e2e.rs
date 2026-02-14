@@ -1844,6 +1844,45 @@ script = "reconcile-bad-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_duplicate_set_env_keys_after_trim_fail_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "CHOPPER_DUP": "a", " CHOPPER_DUP ": "b" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-dup-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-dup-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn static_env_remove_unsets_inherited_environment_values() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
