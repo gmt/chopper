@@ -497,6 +497,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_uppercase_chopper_bat_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "/tmp/bin/CHOPPER.BAT".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_chopper_bat_as_direct_mode() {
         let invocation = parse_invocation(&[
             "/tmp/bin/chopper.bat".to_string(),
@@ -721,6 +734,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER.CMD".into(), "-h".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.cmd".into(), "-h".into()]),
             Some(BuiltinAction::Help)
         );
@@ -805,6 +822,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER.BAT".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.cmd".into(), "--version".into()]),
             Some(BuiltinAction::Version)
         );
@@ -866,6 +887,10 @@ mod tests {
         );
         assert_eq!(
             detect_builtin_action(&["CHOPPER.COM".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER.CMD".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
         );
         assert_eq!(
