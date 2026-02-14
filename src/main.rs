@@ -31,7 +31,7 @@ fn find_config(name: &str) -> Option<PathBuf> {
         cfg.join(format!("{name}.rhai")),
     ]
     .into_iter()
-    .find(|path| path.exists())
+    .find(|path| path.is_file())
 }
 
 fn main() -> Result<()> {

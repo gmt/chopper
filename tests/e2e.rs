@@ -653,6 +653,44 @@ fn missing_alias_config_falls_back_to_path_command_resolution() {
 }
 
 #[test]
+fn alias_lookup_ignores_directory_candidates_and_falls_back_to_path() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(aliases_dir.join("fallbackcmd.toml")).expect("create directory candidate");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let command_path = fake_bin.path().join("fallbackcmd");
+    write_executable_script(
+        &command_path,
+        "#!/usr/bin/env bash\nprintf 'PATH_FALLBACK_DIR_SHADOW=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("PATH_FALLBACK_DIR_SHADOW=runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn missing_alias_config_reports_clear_exec_failure_when_command_missing() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
