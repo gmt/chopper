@@ -1,3 +1,4 @@
+mod alias_validation;
 mod arg_validation;
 mod cache;
 mod env_util;
@@ -187,34 +188,28 @@ fn validate_passthrough_args(args: &[String]) -> Result<()> {
 }
 
 fn validate_alias_name(alias: &str) -> Result<()> {
-    if alias.trim().is_empty() {
-        return Err(anyhow!("alias name cannot be empty"));
-    }
-    if alias.contains('\0') {
-        return Err(anyhow!("alias name cannot contain NUL bytes"));
-    }
-    if alias == "--" {
-        return Err(anyhow!(
+    use crate::alias_validation::AliasViolation;
+
+    match crate::alias_validation::validate_alias_identifier(alias) {
+        Ok(()) => Ok(()),
+        Err(AliasViolation::Empty) => Err(anyhow!("alias name cannot be empty")),
+        Err(AliasViolation::ContainsNul) => {
+            Err(anyhow!("alias name cannot contain NUL bytes"))
+        }
+        Err(AliasViolation::IsSeparator) => Err(anyhow!(
             "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
-        ));
-    }
-    if alias.starts_with('-') {
-        return Err(anyhow!(
+        )),
+        Err(AliasViolation::StartsWithDash) => Err(anyhow!(
             "alias name cannot start with `-`; choose a non-flag alias name"
-        ));
-    }
-    if alias.chars().any(char::is_whitespace) {
-        return Err(anyhow!("alias name cannot contain whitespace"));
-    }
-    if alias == "." || alias == ".." {
-        return Err(anyhow!("alias name cannot be `.` or `..`"));
-    }
-    if alias.contains('/') || alias.contains('\\') {
-        return Err(anyhow!(
+        )),
+        Err(AliasViolation::ContainsWhitespace) => {
+            Err(anyhow!("alias name cannot contain whitespace"))
+        }
+        Err(AliasViolation::IsDotToken) => Err(anyhow!("alias name cannot be `.` or `..`")),
+        Err(AliasViolation::ContainsPathSeparator) => Err(anyhow!(
             "alias name cannot contain path separators; use symlink mode or command PATH resolution instead"
-        ));
+        )),
     }
-    Ok(())
 }
 
 fn invocation_executable_name(args: &[String]) -> String {
