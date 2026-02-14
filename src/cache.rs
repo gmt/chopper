@@ -1143,6 +1143,46 @@ mod tests {
     }
 
     #[test]
+    fn store_rejection_error_includes_specific_validation_reason() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest
+            .env
+            .insert("BAD=KEY".to_string(), "value".to_string());
+
+        let err = store(
+            "invalid-store-error-message",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("invalid manifest should be rejected on store");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("refusing to store invalid alias cache entry manifest"),
+            "{message}"
+        );
+        assert!(
+            message.contains("cached manifest env keys cannot contain `=`"),
+            "{message}"
+        );
+
+        let path = cache_path("invalid-store-error-message");
+        assert!(
+            !path.exists(),
+            "store rejection should not create cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn store_rejects_manifest_with_whitespace_reconcile_script_and_skips_cache_write() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
