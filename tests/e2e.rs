@@ -6413,6 +6413,61 @@ CACHE_ENV_KEY = "from-config"
 }
 
 #[test]
+fn malformed_cached_manifest_with_whitespace_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["RMKEYTOKENABCD1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-heal"],
+        std::iter::once(("RMKEYTOKENABCD1", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("RMKEYTOKENABCD1=from-runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"RMKEYTOKENABCD1", b" RMKEYTOKENABCD");
+    assert!(replaced, "expected to mutate cached env_remove key");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-heal"],
+        std::iter::once(("RMKEYTOKENABCD1", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed env_remove cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("RMKEYTOKENABCD1=from-runtime"), "{stdout}");
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

@@ -901,4 +901,39 @@ mod tests {
         );
         env::remove_var("XDG_CACHE_HOME");
     }
+
+    #[test]
+    fn cached_manifest_with_whitespace_env_remove_key_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.env_remove = vec![" CACHE_REMOVE_KEY".to_string()];
+
+        let path = cache_path("unsafe-env-remove");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-env-remove", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached env_remove key should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
 }
