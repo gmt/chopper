@@ -1595,6 +1595,142 @@ mod tests {
     }
 
     #[test]
+    fn store_rejects_manifest_with_dotdot_exec_path_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let invalid_manifest = Manifest::simple(PathBuf::from(".."));
+
+        let err = store("invalid-store-dotdot-exec", &fingerprint, &invalid_manifest)
+            .expect_err("dotdot exec path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-dotdot-exec");
+        assert!(
+            !path.exists(),
+            "dotdot exec path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_dotdot_reconcile_script_path_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from(".."),
+            function: "reconcile".to_string(),
+        });
+
+        let err = store(
+            "invalid-store-dotdot-reconcile-script",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("dotdot reconcile script path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-dotdot-reconcile-script");
+        assert!(
+            !path.exists(),
+            "dotdot reconcile script path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_trailing_slash_reconcile_script_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from("hooks/reconcile/"),
+            function: "reconcile".to_string(),
+        });
+
+        let err = store(
+            "invalid-store-reconcile-script-trailing-slash",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("trailing slash reconcile script path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-reconcile-script-trailing-slash");
+        assert!(
+            !path.exists(),
+            "trailing slash reconcile script path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_trailing_backslash_exec_path_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let invalid_manifest = Manifest::simple(PathBuf::from("echo\\"));
+
+        let err = store(
+            "invalid-store-exec-trailing-backslash",
+            &fingerprint,
+            &invalid_manifest,
+        )
+        .expect_err("trailing backslash exec path should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-exec-trailing-backslash");
+        assert!(
+            !path.exists(),
+            "trailing backslash exec path should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
         let alias_a = "demo/prod";
         let alias_b = "demo:prod";
