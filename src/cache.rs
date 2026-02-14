@@ -55,15 +55,13 @@ pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
         return Some(manifest);
     }
 
-    if needs_hashed_cache_name(alias) {
-        let legacy_path = legacy_cache_path(alias);
-        if legacy_path != primary_path {
-            if let Some(manifest) = load_from_path(&legacy_path, fingerprint) {
-                if store(alias, fingerprint, &manifest).is_ok() {
-                    delete_cache_file_best_effort(&legacy_path);
-                }
-                return Some(manifest);
+    let legacy_path = legacy_cache_path(alias);
+    if legacy_path != primary_path {
+        if let Some(manifest) = load_from_path(&legacy_path, fingerprint) {
+            if store(alias, fingerprint, &manifest).is_ok() {
+                delete_cache_file_best_effort(&legacy_path);
             }
+            return Some(manifest);
         }
     }
 
@@ -109,8 +107,8 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 
 fn cache_path(alias: &str) -> PathBuf {
     let cache_dir = cache_dir();
-    let safe_alias = sanitize_alias_for_cache(alias);
-    let filename = if !needs_hashed_cache_name(alias) {
+    let (safe_alias, needs_hash_suffix) = sanitized_alias(alias);
+    let filename = if !needs_hash_suffix {
         format!("{safe_alias}.bin")
     } else {
         format!("{safe_alias}-{:016x}.bin", alias_cache_hash(alias))
@@ -127,8 +125,10 @@ fn legacy_cache_path(alias: &str) -> PathBuf {
         .join(format!("{safe_alias}.bin"))
 }
 
-fn needs_hashed_cache_name(alias: &str) -> bool {
-    sanitize_alias_for_cache(alias) != alias
+fn sanitized_alias(alias: &str) -> (String, bool) {
+    let safe_alias = sanitize_alias_for_cache(alias);
+    let needs_hash_suffix = safe_alias != alias;
+    (safe_alias, needs_hash_suffix)
 }
 
 fn sanitize_alias_for_cache(alias: &str) -> String {
@@ -454,6 +454,16 @@ mod tests {
         assert!(file_b.starts_with("demo_prod-"), "{file_b}");
         assert!(file_a.ends_with(".bin"), "{file_a}");
         assert!(file_b.ends_with(".bin"), "{file_b}");
+    }
+
+    #[test]
+    fn safe_alias_cache_path_remains_unhashed() {
+        let path = cache_path("demo-prod");
+        let file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache filename should be utf-8");
+        assert_eq!(file, "demo-prod.bin");
     }
 
     #[test]
