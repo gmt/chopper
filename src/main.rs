@@ -471,6 +471,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_uppercase_chopper_com_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "/tmp/bin/CHOPPER.COM".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_uppercase_chopper_cmd_as_direct_mode() {
         let invocation = parse_invocation(&[
             "/tmp/bin/CHOPPER.CMD".to_string(),
@@ -777,6 +790,10 @@ mod tests {
         );
         assert_eq!(
             detect_builtin_action(&["CHOPPER.COM".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER.COM".into(), "--version".into()]),
             Some(BuiltinAction::Version)
         );
         assert_eq!(
