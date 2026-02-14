@@ -6486,6 +6486,65 @@ identifier = "CACHEID00000001"
 }
 
 #[test]
+fn malformed_cached_manifest_with_blank_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-blank-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNSBLANKHEAL"]
+
+[journal]
+namespace = "NSBLANKTOKEN1"
+stderr = false
+identifier = "CACHEID00000021"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-blank-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSBLANKHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-blank-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NSBLANKTOKEN1", b"             ");
+    assert!(
+        replaced,
+        "expected to mutate cached journal namespace to blank form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-blank-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed blank journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSBLANKHEAL second-run"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_nul_journal_namespace_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
