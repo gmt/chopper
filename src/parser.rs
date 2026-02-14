@@ -399,6 +399,24 @@ exec = "."
     }
 
     #[test]
+    fn rejects_parent_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = ".."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot be `.` or `..`"));
+    }
+
+    #[test]
     fn defaults_reconcile_function_when_blank() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("svc.toml");
