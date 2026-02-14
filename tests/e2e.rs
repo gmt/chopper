@@ -1971,6 +1971,65 @@ args = ["after-change"]
 }
 
 #[test]
+fn cache_invalidation_applies_when_symlinked_alias_target_changes() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&shared_dir).expect("create shared dir");
+
+    let target_path = shared_dir.join("mutable-target.toml");
+    fs::write(
+        &target_path,
+        r#"
+exec = "echo"
+args = ["before-symlink-change"]
+"#,
+    )
+    .expect("write target alias config");
+    symlink(&target_path, aliases_dir.join("mutable-link.toml")).expect("create alias symlink");
+
+    let first = run_chopper(&config_home, &cache_home, &["mutable-link"]);
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("before-symlink-change"),
+        "{first_stdout}"
+    );
+
+    fs::write(
+        &target_path,
+        r#"
+exec = "echo"
+args = ["after-symlink-change"]
+"#,
+    )
+    .expect("rewrite target alias config");
+
+    let second = run_chopper(&config_home, &cache_home, &["mutable-link"]);
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("after-symlink-change"),
+        "{second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains("before-symlink-change"),
+        "{second_stdout}"
+    );
+}
+
+#[test]
 fn reconcile_script_can_append_args_and_override_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
