@@ -269,6 +269,10 @@ Blank values are ignored and fall back to XDG/default resolution.
 Cache invalidation is automatic and based on source file path + metadata
 (size, mtime, and on Unix also ctime/device/inode). Users do not need to
 manually manage cache in normal usage.
+If a cache entry is corrupted or contains invalid runtime strings (for example
+NUL bytes, blank journal identifiers, or non-canonical reconcile function
+names), chopper automatically ignores and prunes that entry before reparsing
+the source config.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 

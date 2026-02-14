@@ -1,9 +1,13 @@
+use crate::arg_validation::{self, ArgViolation};
 use crate::env_util;
+use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
+use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::Manifest;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -82,11 +86,147 @@ fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manife
         return None;
     }
     if entry.fingerprint == *fingerprint {
-        Some(entry.manifest)
+        if validate_cached_manifest(&entry.manifest).is_ok() {
+            Some(entry.manifest)
+        } else {
+            delete_cache_file_best_effort(path);
+            None
+        }
     } else {
         delete_cache_file_best_effort(path);
         None
     }
+}
+
+fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
+    if manifest.exec.as_os_str().as_bytes().contains(&0) {
+        return Err(anyhow!(
+            "cached manifest exec path cannot contain NUL bytes"
+        ));
+    }
+
+    for arg in &manifest.args {
+        if matches!(
+            arg_validation::validate_arg_value(arg),
+            Err(ArgViolation::ContainsNul)
+        ) {
+            return Err(anyhow!("cached manifest args cannot contain NUL bytes"));
+        }
+    }
+
+    for (key, value) in &manifest.env {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            return Err(anyhow!(
+                "cached manifest env keys cannot be empty or whitespace-only"
+            ));
+        }
+        if normalized_key != key {
+            return Err(anyhow!(
+                "cached manifest env keys cannot include surrounding whitespace"
+            ));
+        }
+        match env_validation::validate_env_key(normalized_key) {
+            Ok(()) => {}
+            Err(EnvKeyViolation::ContainsEquals) => {
+                return Err(anyhow!("cached manifest env keys cannot contain `=`"));
+            }
+            Err(EnvKeyViolation::ContainsNul) => {
+                return Err(anyhow!("cached manifest env keys cannot contain NUL bytes"));
+            }
+        }
+        if matches!(
+            env_validation::validate_env_value(value),
+            Err(EnvValueViolation::ContainsNul)
+        ) {
+            return Err(anyhow!(
+                "cached manifest env values cannot contain NUL bytes"
+            ));
+        }
+    }
+
+    for key in &manifest.env_remove {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            return Err(anyhow!(
+                "cached manifest env_remove keys cannot be empty or whitespace-only"
+            ));
+        }
+        if normalized_key != key {
+            return Err(anyhow!(
+                "cached manifest env_remove keys cannot include surrounding whitespace"
+            ));
+        }
+        match env_validation::validate_env_key(normalized_key) {
+            Ok(()) => {}
+            Err(EnvKeyViolation::ContainsEquals) => {
+                return Err(anyhow!(
+                    "cached manifest env_remove keys cannot contain `=`"
+                ));
+            }
+            Err(EnvKeyViolation::ContainsNul) => {
+                return Err(anyhow!(
+                    "cached manifest env_remove keys cannot contain NUL bytes"
+                ));
+            }
+        }
+    }
+
+    if let Some(journal) = &manifest.journal {
+        match journal_validation::normalize_namespace(&journal.namespace) {
+            Ok(_) => {}
+            Err(JournalNamespaceViolation::Empty) => {
+                return Err(anyhow!("cached manifest journal namespace cannot be empty"));
+            }
+            Err(JournalNamespaceViolation::ContainsNul) => {
+                return Err(anyhow!(
+                    "cached manifest journal namespace cannot contain NUL bytes"
+                ));
+            }
+        }
+        match journal_validation::normalize_optional_identifier_for_invocation(
+            journal.identifier.as_deref(),
+        ) {
+            Ok(_) => {}
+            Err(JournalIdentifierViolation::Blank) => {
+                return Err(anyhow!(
+                    "cached manifest journal identifier cannot be blank when provided"
+                ));
+            }
+            Err(JournalIdentifierViolation::ContainsNul) => {
+                return Err(anyhow!(
+                    "cached manifest journal identifier cannot contain NUL bytes"
+                ));
+            }
+        }
+    }
+
+    if let Some(reconcile) = &manifest.reconcile {
+        if reconcile.script.as_os_str().as_bytes().contains(&0) {
+            return Err(anyhow!(
+                "cached manifest reconcile script cannot contain NUL bytes"
+            ));
+        }
+
+        let function = reconcile.function.trim();
+        if function.is_empty() {
+            return Err(anyhow!(
+                "cached manifest reconcile function cannot be empty or whitespace-only"
+            ));
+        }
+        if function != reconcile.function {
+            return Err(anyhow!(
+                "cached manifest reconcile function cannot include surrounding whitespace"
+            ));
+        }
+        if function.contains('\0') {
+            return Err(anyhow!(
+                "cached manifest reconcile function cannot contain NUL bytes"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) -> Result<()> {
@@ -244,7 +384,7 @@ mod tests {
         cache_path, cache_temp_path, legacy_cache_path, load, sanitize_alias_for_cache,
         source_fingerprint, store, CacheEntry, CACHE_ENTRY_VERSION,
     };
-    use crate::manifest::Manifest;
+    use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
     use crate::test_support::ENV_LOCK;
     use std::env;
     use std::fs;
@@ -504,6 +644,118 @@ mod tests {
         assert!(
             !legacy_path.exists(),
             "expected legacy cache file to be pruned after successful migration"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_invalid_runtime_strings_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.args = vec!["ok".to_string(), "bad\0arg".to_string()];
+
+        let path = cache_path("unsafe");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached manifest should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_blank_journal_identifier_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.journal = Some(JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some("   ".to_string()),
+        });
+
+        let path = cache_path("unsafe-journal");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-journal", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached journal config should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_whitespace_reconcile_function_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from("hooks/reconcile.rhai"),
+            function: " reconcile ".to_string(),
+        });
+
+        let path = cache_path("unsafe-reconcile");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-reconcile", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached reconcile function should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
