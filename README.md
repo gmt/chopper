@@ -28,6 +28,13 @@ You may insert `--` to separate chopper parsing from alias args:
 chopper <alias> -- [args...]
 ```
 
+Built-in flags for direct invocation:
+
+```bash
+chopper --help
+chopper --version
+```
+
 2. **Symlinked alias**:
 
 ```bash

@@ -36,6 +36,11 @@ fn find_config(name: &str) -> Option<PathBuf> {
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
+    if let Some(action) = detect_builtin_action(&args) {
+        run_builtin_action(action);
+        return Ok(());
+    }
+
     let invocation = parse_invocation(&args)?;
 
     let config_path = find_config(&invocation.alias);
@@ -51,6 +56,49 @@ fn main() -> Result<()> {
     let patch = reconcile::maybe_reconcile(&manifest, &invocation.passthrough_args)?;
     let resolved = manifest.build_invocation(&invocation.passthrough_args, patch);
     executor::run(resolved)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltinAction {
+    Help,
+    Version,
+}
+
+fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
+    let exe_name = invocation_executable_name(args);
+    if exe_name != "chopper" {
+        return None;
+    }
+
+    match args.get(1).map(String::as_str) {
+        Some("-h" | "--help") => Some(BuiltinAction::Help),
+        Some("-V" | "--version") => Some(BuiltinAction::Version),
+        _ => None,
+    }
+}
+
+fn run_builtin_action(action: BuiltinAction) {
+    match action {
+        BuiltinAction::Help => {
+            println!("Usage:");
+            println!("  chopper <alias> [args...]");
+            println!("  chopper <alias> -- [args...]");
+            println!("  <symlinked-alias> [args...]");
+            println!();
+            println!("Built-ins:");
+            println!("  -h, --help       Show this help");
+            println!("  -V, --version    Show version");
+            println!();
+            println!("Environment overrides:");
+            println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
+            println!("  CHOPPER_CACHE_DIR=/path/to/cache-root");
+            println!("  CHOPPER_DISABLE_CACHE=1");
+            println!("  CHOPPER_DISABLE_RECONCILE=1");
+        }
+        BuiltinAction::Version => {
+            println!("chopper {}", env!("CARGO_PKG_VERSION"));
+        }
+    }
 }
 
 fn load_manifest(alias: &str, path: &std::path::Path) -> Result<manifest::Manifest> {
@@ -79,15 +127,7 @@ struct InvocationInput {
 }
 
 fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
-    let exe_name = PathBuf::from(
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| "chopper".to_string()),
-    )
-    .file_stem()
-    .and_then(|s| s.to_str())
-    .unwrap_or("chopper")
-    .to_string();
+    let exe_name = invocation_executable_name(args);
 
     if exe_name == "chopper" {
         if args.len() < 2 {
@@ -117,6 +157,18 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
     }
 }
 
+fn invocation_executable_name(args: &[String]) -> String {
+    PathBuf::from(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| "chopper".to_string()),
+    )
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or("chopper")
+    .to_string()
+}
+
 fn normalize_passthrough(args: &[String]) -> Vec<String> {
     if args.first().map(String::as_str) == Some("--") {
         args[1..].to_vec()
@@ -127,7 +179,9 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_enabled, config_dir, parse_invocation};
+    use super::{
+        cache_enabled, config_dir, detect_builtin_action, parse_invocation, BuiltinAction,
+    };
     use crate::test_support::ENV_LOCK;
     use std::env;
     use std::path::PathBuf;
@@ -232,5 +286,29 @@ mod tests {
         let path = config_dir();
         assert_ne!(path, PathBuf::from("   "));
         env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn detects_help_action_only_for_direct_chopper_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
+            detect_builtin_action(&["alias-symlink".into(), "--help".into()]),
+            None
+        );
+    }
+
+    #[test]
+    fn detects_version_action_for_direct_chopper_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
     }
 }
