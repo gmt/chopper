@@ -518,6 +518,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_rejects_separator_symlink_alias() {
+        let err = parse_invocation(&["--".into()])
+            .expect_err("separator symlink alias should be rejected");
+        assert!(
+            err.to_string().contains("alias name cannot be `--`"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn rejects_alias_starting_with_dash() {
         let err = validate_alias_name("-alias").expect_err("dash-prefixed alias is invalid");
         assert!(err.to_string().contains("cannot start with `-`"));
