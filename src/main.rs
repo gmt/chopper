@@ -62,6 +62,8 @@ fn main() -> Result<()> {
 enum BuiltinAction {
     Help,
     Version,
+    PrintConfigDir,
+    PrintCacheDir,
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -73,6 +75,8 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     match args.get(1).map(String::as_str) {
         Some("-h" | "--help") => Some(BuiltinAction::Help),
         Some("-V" | "--version") => Some(BuiltinAction::Version),
+        Some("--print-config-dir") => Some(BuiltinAction::PrintConfigDir),
+        Some("--print-cache-dir") => Some(BuiltinAction::PrintCacheDir),
         _ => None,
     }
 }
@@ -88,6 +92,8 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("Built-ins:");
             println!("  -h, --help       Show this help");
             println!("  -V, --version    Show version");
+            println!("  --print-config-dir  Print resolved config root");
+            println!("  --print-cache-dir   Print resolved cache root");
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -97,6 +103,12 @@ fn run_builtin_action(action: BuiltinAction) {
         }
         BuiltinAction::Version => {
             println!("chopper {}", env!("CARGO_PKG_VERSION"));
+        }
+        BuiltinAction::PrintConfigDir => {
+            println!("{}", config_dir().display());
+        }
+        BuiltinAction::PrintCacheDir => {
+            println!("{}", cache::cache_dir().display());
         }
     }
 }
@@ -309,6 +321,22 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "-V".into()]),
             Some(BuiltinAction::Version)
+        );
+    }
+
+    #[test]
+    fn detects_print_path_actions_for_direct_chopper_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["symlink-alias".into(), "--print-config-dir".into()]),
+            None
         );
     }
 }

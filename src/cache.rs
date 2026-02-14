@@ -101,7 +101,7 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 }
 
 fn cache_path(alias: &str) -> Option<PathBuf> {
-    let cache_dir = cache_root_dir();
+    let cache_dir = cache_dir();
 
     let safe_alias = alias
         .chars()
@@ -118,7 +118,7 @@ fn cache_path(alias: &str) -> Option<PathBuf> {
     )
 }
 
-fn cache_root_dir() -> PathBuf {
+pub fn cache_dir() -> PathBuf {
     if let Some(override_path) = env_util::env_path_override("CHOPPER_CACHE_DIR") {
         return override_path;
     }

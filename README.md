@@ -33,6 +33,8 @@ Built-in flags for direct invocation:
 ```bash
 chopper --help
 chopper --version
+chopper --print-config-dir
+chopper --print-cache-dir
 ```
 
 2. **Symlinked alias**:
