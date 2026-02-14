@@ -480,6 +480,80 @@ args = ["symlink-dot-mode"]
 }
 
 #[test]
+fn symlink_aliases_that_sanitize_to_same_cache_prefix_do_not_collide() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["alias=colon"]
+"#,
+    )
+    .expect("write colon alias config");
+    fs::write(
+        aliases_dir.join("alpha?beta.toml"),
+        r#"
+exec = "echo"
+args = ["alias=question"]
+"#,
+    )
+    .expect("write question alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let alias_colon = bin_dir.path().join("alpha:beta");
+    let alias_question = bin_dir.path().join("alpha?beta");
+    symlink(chopper_bin(), &alias_colon).expect("create colon symlink");
+    symlink(chopper_bin(), &alias_question).expect("create question symlink");
+
+    let output = run_chopper_with(
+        alias_colon,
+        &config_home,
+        &cache_home,
+        &["runtime-a"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=colon runtime-a"), "{stdout}");
+
+    let output = run_chopper_with(
+        alias_question,
+        &config_home,
+        &cache_home,
+        &["runtime-b"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "question command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=question runtime-b"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 2,
+        "expected one cache entry per colliding-sanitization alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
 fn symlink_invocation_strips_double_dash_separator() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
