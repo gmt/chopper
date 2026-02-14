@@ -10542,6 +10542,50 @@ args = ["cache-bypass-yes-trimmed"]
 }
 
 #[test]
+fn cache_disable_flag_trims_numeric_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-numeric-trimmed.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-numeric-trimmed"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-numeric-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "  1  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-numeric-trimmed runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-numeric-trimmed.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with trimmed numeric truthy `1`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_disable_flag_falsey_value_keeps_cache_enabled() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -11488,6 +11532,57 @@ script = "toggle-yes-trimmed.reconcile.rhai"
     assert!(
         !stdout.contains("from_reconcile_yes_trimmed"),
         "trimmed mixed-case `yes` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_trims_numeric_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-numeric-trimmed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_numeric_trimmed"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-numeric-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-numeric-trimmed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-numeric-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "  1  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_numeric_trimmed"),
+        "trimmed numeric truthy `1` should disable reconcile hooks: {stdout}"
     );
 }
 
