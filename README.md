@@ -138,6 +138,8 @@ TOML documents may optionally start with a UTF-8 BOM.
 2. runtime args passed at invocation time
 3. optional Rhai patch (`replace_args`, then `append_args`)
 
+All argument channels reject NUL bytes.
+
 ### Environment merge order
 
 1. process inherits parent environment

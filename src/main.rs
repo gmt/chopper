@@ -158,16 +158,31 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
         let alias = args[1].clone();
         validate_alias_name(&alias)?;
         let passthrough_args = normalize_passthrough(&args[2..]);
+        validate_passthrough_args(&passthrough_args)?;
         Ok(InvocationInput {
             alias,
             passthrough_args,
         })
     } else {
+        let passthrough_args = normalize_passthrough(&args[1..]);
+        validate_passthrough_args(&passthrough_args)?;
         Ok(InvocationInput {
             alias: exe_name,
-            passthrough_args: normalize_passthrough(&args[1..]),
+            passthrough_args,
         })
     }
+}
+
+fn validate_passthrough_args(args: &[String]) -> Result<()> {
+    for arg in args {
+        if matches!(
+            crate::arg_validation::validate_arg_value(arg),
+            Err(crate::arg_validation::ArgViolation::ContainsNul)
+        ) {
+            return Err(anyhow!("runtime arguments cannot contain NUL bytes"));
+        }
+    }
+    Ok(())
 }
 
 fn validate_alias_name(alias: &str) -> Result<()> {
@@ -433,6 +448,28 @@ mod tests {
     fn parse_invocation_rejects_missing_alias_without_exiting_process() {
         let err = parse_invocation(&["chopper".into()]).expect_err("missing alias is invalid");
         assert!(err.to_string().contains("missing alias name"));
+    }
+
+    #[test]
+    fn parse_invocation_rejects_direct_passthrough_args_with_nul_bytes() {
+        let err = parse_invocation(&["chopper".into(), "demo".into(), "bad\0arg".into()])
+            .expect_err("nul bytes should be rejected");
+        assert!(
+            err.to_string()
+                .contains("runtime arguments cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_symlink_passthrough_args_with_nul_bytes() {
+        let err = parse_invocation(&["demo".into(), "bad\0arg".into()])
+            .expect_err("nul bytes should be rejected");
+        assert!(
+            err.to_string()
+                .contains("runtime arguments cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 
     #[test]
