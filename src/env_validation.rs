@@ -31,6 +31,19 @@ mod tests {
     use super::{validate_env_key, validate_env_value, EnvKeyViolation, EnvValueViolation};
 
     #[test]
+    fn env_key_validator_accepts_typical_keys() {
+        assert!(validate_env_key("CHOPPER_KEY").is_ok());
+        assert!(validate_env_key("_chopper42").is_ok());
+    }
+
+    #[test]
+    fn env_value_validator_accepts_empty_and_unicode_values() {
+        assert!(validate_env_value("").is_ok());
+        assert!(validate_env_value("value with spaces").is_ok());
+        assert!(validate_env_value("emoji🚀").is_ok());
+    }
+
+    #[test]
     fn env_key_validator_rejects_equals_sign() {
         let err = validate_env_key("BAD=KEY").expect_err("expected invalid key");
         assert_eq!(err, EnvKeyViolation::ContainsEquals);

@@ -15,6 +15,13 @@ mod tests {
     use super::{validate_arg_value, ArgViolation};
 
     #[test]
+    fn arg_validator_accepts_empty_and_unicode_values() {
+        assert!(validate_arg_value("").is_ok());
+        assert!(validate_arg_value("emoji🚀").is_ok());
+        assert!(validate_arg_value(" spaced value ").is_ok());
+    }
+
+    #[test]
     fn arg_validator_rejects_nul_byte() {
         let err = validate_arg_value("bad\0arg").expect_err("expected invalid arg");
         assert_eq!(err, ArgViolation::ContainsNul);
