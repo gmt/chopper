@@ -255,6 +255,17 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
 }
 
 #[test]
+fn direct_invocation_rejects_separator_as_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("alias name cannot be `--`"), "{stderr}");
+}
+
+#[test]
 fn reconcile_script_can_append_args_and_override_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -303,6 +314,53 @@ script = "hook.reconcile.rhai"
         "{stdout}"
     );
     assert!(stdout.contains("ENV=from_reconcile"), "{stdout}");
+}
+
+#[test]
+fn journal_config_surfaces_systemd_cat_failure_with_hint() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-fail.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        "#!/usr/bin/env bash\ncat >/dev/null\nexit 17\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-fail"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("OUT_STREAM"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("journal namespace requires systemd-cat --namespace support"),
+        "{stderr}"
+    );
 }
 
 #[test]
