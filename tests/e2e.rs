@@ -841,6 +841,55 @@ args = ["-c", "printf 'SYMLINKED_CONFIG=%s\n' \"$*\"", "_", "base"]
 }
 
 #[test]
+fn symlinked_alias_config_resolves_reconcile_script_relative_to_target() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    let hooks_dir = shared_dir.join("hooks");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_target_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    let target = shared_dir.join("target.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkreconcile.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_target_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn journal_config_forwards_stderr_to_systemd_cat() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

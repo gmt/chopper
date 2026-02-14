@@ -128,11 +128,20 @@ fn resolve_script_path(config_path: &Path, script: &str) -> PathBuf {
     if script_path.is_absolute() {
         script_path
     } else {
-        config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(script_path)
+        config_base_dir(config_path).join(script_path)
     }
+}
+
+fn config_base_dir(config_path: &Path) -> PathBuf {
+    if let Ok(canonical) = fs::canonicalize(config_path) {
+        if let Some(parent) = canonical.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,6 +180,7 @@ mod tests {
     use super::parse;
     use anyhow::Result;
     use std::fs;
+    use std::os::unix::fs::symlink;
     use tempfile::TempDir;
 
     #[test]
@@ -497,5 +507,38 @@ FOO = "base"
         assert!(err
             .to_string()
             .contains("contains duplicate keys after trimming"));
+    }
+
+    #[test]
+    fn resolves_reconcile_script_relative_to_symlink_target_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let target_dir = temp.path().join("shared");
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&target_dir)?;
+        fs::create_dir_all(&aliases_dir)?;
+
+        let target_config = target_dir.join("linked.toml");
+        fs::write(
+            &target_config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+"#,
+        )?;
+        let symlink_config = aliases_dir.join("linked.toml");
+        symlink(&target_config, &symlink_config)?;
+
+        let manifest = parse(&symlink_config)?;
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .expect("reconcile config")
+                .script,
+            target_dir.join("hooks/reconcile.rhai")
+        );
+        Ok(())
     }
 }
