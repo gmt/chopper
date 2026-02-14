@@ -908,6 +908,45 @@ args = ["cache-bypass-case"]
 }
 
 #[test]
+fn cache_disable_flag_falsey_value_keeps_cache_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-falsey.toml"),
+        r#"
+exec = "echo"
+args = ["cache-enabled"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-falsey"],
+        [("CHOPPER_DISABLE_CACHE", "0".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-falsey.bin");
+    assert!(
+        cache_file.exists(),
+        "cache file should be written when disable flag is falsey: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_invalidation_applies_updated_alias_config() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -1153,6 +1192,56 @@ script = "toggle-case.reconcile.rhai"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
     assert!(!stdout.contains("from_reconcile_case"), "{stdout}");
+}
+
+#[test]
+fn reconcile_disable_flag_falsey_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-falsey.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_falsey"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-falsey.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-falsey.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-falsey", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "0".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_falsey"),
+        "{stdout}"
+    );
 }
 
 #[test]
