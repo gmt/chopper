@@ -272,7 +272,10 @@ fn windows_relative_basename(raw: &str) -> Option<&str> {
 }
 
 fn is_direct_chopper_name(exe_name: &str) -> bool {
-    exe_name.eq_ignore_ascii_case("chopper") || exe_name.eq_ignore_ascii_case("chopper.exe")
+    exe_name.eq_ignore_ascii_case("chopper")
+        || exe_name.eq_ignore_ascii_case("chopper.exe")
+        || exe_name.eq_ignore_ascii_case("chopper.cmd")
+        || exe_name.eq_ignore_ascii_case("chopper.bat")
 }
 
 fn normalize_passthrough(args: &[String]) -> Vec<String> {
@@ -441,6 +444,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_chopper_cmd_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "/tmp/bin/chopper.cmd".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_uppercase_chopper_name_as_direct_mode() {
         let invocation = parse_invocation(&[
             "CHOPPER".to_string(),
@@ -592,6 +608,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER.BAT".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.exe".into(), "-h".into()]),
             Some(BuiltinAction::Help)
         );
@@ -640,6 +660,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp/chopper.cmd".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.exe".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -673,6 +697,10 @@ mod tests {
     fn detects_print_path_actions_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER.BAT".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
         );
         assert_eq!(
