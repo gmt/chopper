@@ -927,6 +927,35 @@ function = "  trimmed_reconcile  "
 }
 
 #[test]
+fn parser_trimming_applies_to_env_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+"  CHOPPER_E2E  " = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-trim"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
 fn direct_invocation_strips_double_dash_separator() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
