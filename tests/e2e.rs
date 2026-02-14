@@ -10490,6 +10490,70 @@ args = ["cache-enabled"]
 }
 
 #[test]
+fn cache_disable_flag_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNKNOWNSRC01A"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-unknown", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNKNOWNSRC01A seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNKNOWNSRC01A",
+        b"CACHEUNKNOWNHIT99B",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "definitely-not".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNKNOWNHIT99B runtime"),
+        "unknown disable-flag values should keep cache enabled and use cached payload: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNKNOWNSRC01A runtime"),
+        "unknown disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
 fn cache_invalidation_applies_updated_alias_config() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
