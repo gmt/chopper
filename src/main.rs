@@ -199,7 +199,7 @@ fn invocation_executable_name(args: &[String]) -> String {
             .cloned()
             .unwrap_or_else(|| "chopper".to_string()),
     )
-    .file_stem()
+    .file_name()
     .and_then(|s| s.to_str())
     .unwrap_or("chopper")
     .to_string()
@@ -274,6 +274,15 @@ mod tests {
 
         assert_eq!(invocation.alias, "kubectl-prod");
         assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
+    }
+
+    #[test]
+    fn preserves_symlink_aliases_containing_dots() {
+        let invocation = parse_invocation(&["kubectl.prod".to_string(), "get".to_string()])
+            .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl.prod");
+        assert_eq!(invocation.passthrough_args, vec!["get"]);
     }
 
     #[test]
