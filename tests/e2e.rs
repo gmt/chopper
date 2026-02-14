@@ -467,6 +467,52 @@ args = ["cache-bypass"]
 }
 
 #[test]
+fn cache_invalidation_applies_updated_alias_config() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("mutable.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["before-change"]
+"#,
+    )
+    .expect("write alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["mutable"]);
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first_stdout.contains("before-change"), "{first_stdout}");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["after-change"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let second = run_chopper(&config_home, &cache_home, &["mutable"]);
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(second_stdout.contains("after-change"), "{second_stdout}");
+    assert!(!second_stdout.contains("before-change"), "{second_stdout}");
+}
+
+#[test]
 fn reconcile_script_can_append_args_and_override_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -515,6 +561,56 @@ script = "hook.reconcile.rhai"
         "{stdout}"
     );
     assert!(stdout.contains("ENV=from_reconcile"), "{stdout}");
+}
+
+#[test]
+fn reconcile_can_read_runtime_environment_from_context() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("runtime-env.reconcile.rhai"),
+        r#"
+fn reconcile(ctx) {
+  let out = #{};
+  out["set_env"] = #{ "CHOPPER_E2E": ctx.runtime_env["RUNTIME_MARKER"] };
+  out
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("runtime-env.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+CHOPPER_E2E = "from_alias"
+
+[reconcile]
+script = "runtime-env.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["runtime-env"],
+        [("RUNTIME_MARKER", "from_runtime_env".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_runtime_env"), "{stdout}");
 }
 
 #[test]
