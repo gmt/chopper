@@ -86,7 +86,7 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
     let set_env =
         normalize_patch_set_env(optional_string_map(&map, "set_env")?.unwrap_or_default())?;
     let remove_env =
-        normalize_patch_remove_env(optional_string_array(&map, "remove_env")?.unwrap_or_default());
+        normalize_patch_remove_env(optional_string_array(&map, "remove_env")?.unwrap_or_default())?;
 
     Ok(RuntimePatch {
         replace_args,
@@ -166,12 +166,21 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
     Ok(normalized)
 }
 
-fn normalize_patch_remove_env(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty())
-        .collect()
+fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
+    let mut normalized = Vec::with_capacity(values.len());
+    for key in values {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            continue;
+        }
+        if normalized_key.contains('=') {
+            return Err(anyhow!(
+                "`remove_env` entries cannot contain `=`: `{normalized_key}`"
+            ));
+        }
+        normalized.push(normalized_key.to_string());
+    }
+    Ok(normalized)
 }
 
 fn dynamic_to_string(value: Dynamic, field: &str) -> Result<String> {
@@ -362,6 +371,39 @@ fn reconcile(_ctx) {
             .expect("reconcile call")
             .expect("patch present");
         assert_eq!(patch.remove_env, vec!["FOO", "BAR"]);
+    }
+
+    #[test]
+    fn reconcile_rejects_remove_env_entries_containing_equals_sign() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("remove-env-equals.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["BAD=KEY"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected remove_env validation error")
+            .to_string();
+        assert!(
+            err.contains("`remove_env` entries cannot contain `=`"),
+            "{err}"
+        );
     }
 
     #[test]

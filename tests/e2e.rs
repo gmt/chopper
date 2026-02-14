@@ -2810,6 +2810,45 @@ script = "reconcile-equals-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_remove_env_entry_with_equals_sign_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["BAD=KEY"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-equals.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-equals"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_unsupported_patch_key_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2928,6 +2967,31 @@ CHOPPER_KEEP = "from_alias"
     assert!(stdout.contains("DROP="), "{stdout}");
     assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
     assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn env_remove_entry_with_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-invalid.toml"),
+        r#"
+exec = "echo"
+env_remove = ["BAD=KEY"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-invalid"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain `=`"),
+        "{stderr}"
+    );
 }
 
 #[test]

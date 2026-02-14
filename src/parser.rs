@@ -80,7 +80,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
 
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
     manifest.env = normalize_env_map(parsed.env)?;
-    manifest.env_remove = normalize_env_remove(parsed.env_remove);
+    manifest.env_remove = normalize_env_remove(parsed.env_remove)?;
 
     if let Some(journal) = parsed.journal {
         let namespace = journal.namespace.trim();
@@ -155,12 +155,21 @@ fn normalize_env_map(env: HashMap<String, String>) -> Result<HashMap<String, Str
     Ok(normalized)
 }
 
-fn normalize_env_remove(env_remove: Vec<String>) -> Vec<String> {
-    env_remove
-        .into_iter()
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty())
-        .collect()
+fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
+    let mut normalized = Vec::with_capacity(env_remove.len());
+    for key in env_remove {
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            continue;
+        }
+        if normalized_key.contains('=') {
+            return Err(anyhow!(
+                "field `env_remove` entries cannot contain `=`: `{normalized_key}`"
+            ));
+        }
+        normalized.push(normalized_key.to_string());
+    }
+    Ok(normalized)
 }
 
 fn resolve_script_path(base_dir: &Path, script: &str) -> PathBuf {
@@ -889,6 +898,25 @@ env_remove = ["  FOO  ", "   ", "BAR"]
         let manifest = parse(&config)?;
         assert_eq!(manifest.env_remove, vec!["FOO", "BAR"]);
         Ok(())
+    }
+
+    #[test]
+    fn rejects_env_remove_entries_containing_equals_sign() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+env_remove = ["BAD=KEY"]
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `env_remove` entries cannot contain `=`"));
     }
 
     #[test]
