@@ -260,7 +260,11 @@ fn has_windows_drive_prefix(raw: &str) -> bool {
 }
 
 fn windows_relative_basename(raw: &str) -> Option<&str> {
-    if !(raw.starts_with(".\\") || raw.starts_with("..\\")) {
+    if !(raw.starts_with(".\\")
+        || raw.starts_with("..\\")
+        || raw.starts_with("./")
+        || raw.starts_with("../"))
+    {
         return None;
     }
 
@@ -578,6 +582,19 @@ mod tests {
     fn parse_invocation_treats_unix_relative_chopper_cmd_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "./CHOPPER.CMD".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_mixed_relative_separator_chopper_cmd_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "./nested\\CHOPPER.CMD".to_string(),
             "kpods".to_string(),
             "--tail=100".to_string(),
         ])
@@ -1001,6 +1018,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["./nested\\CHOPPER.CMD".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["C:/tools\\CHOPPER.CMD".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -1125,6 +1146,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["../nested/CHOPPER.BAT".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["chopper".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -1215,6 +1240,10 @@ mod tests {
                 "\\\\server\\tools\\CHOPPER.COM".into(),
                 "--print-config-dir".into()
             ]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["./nested\\CHOPPER.COM".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
         );
         assert_eq!(
@@ -1313,6 +1342,14 @@ mod tests {
             ]),
             None
         );
+        assert_eq!(
+            detect_builtin_action(&[
+                "./nested\\CHOPPER.COM".into(),
+                "--help".into(),
+                "extra".into()
+            ]),
+            None
+        );
     }
 
     #[test]
@@ -1338,8 +1375,16 @@ mod tests {
             Some("chopper.com")
         );
         assert_eq!(
+            windows_relative_basename("./nested\\CHOPPER.CMD"),
+            Some("CHOPPER.CMD")
+        );
+        assert_eq!(
             windows_relative_basename("..\\nested\\CHOPPER.CMD"),
             Some("CHOPPER.CMD")
+        );
+        assert_eq!(
+            windows_relative_basename("../nested/CHOPPER.BAT"),
+            Some("CHOPPER.BAT")
         );
         assert_eq!(
             windows_relative_basename("..\\nested\\CHOPPER.BAT"),
@@ -1354,6 +1399,7 @@ mod tests {
     #[test]
     fn windows_relative_basename_does_not_match_other_path_shapes() {
         assert_eq!(windows_relative_basename("bad\\alias"), None);
+        assert_eq!(windows_relative_basename(".nested\\chopper.exe"), None);
         assert_eq!(
             windows_relative_basename("\\\\server\\tools\\chopper.exe"),
             None

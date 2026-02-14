@@ -58,6 +58,8 @@ Equivalent forward-slash Windows spellings (for example `C:/tools/CHOPPER.CMD`
 and `//server/tools/CHOPPER.COM`) are recognized as well.
 Mixed-separator launcher paths (for example `C:/tools\CHOPPER.COM` and
 `\\server/tools\CHOPPER.BAT`) are recognized too.
+Nested relative variants with mixed separators (for example
+`./nested\CHOPPER.CMD`) are recognized as direct invocation names as well.
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
