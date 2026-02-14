@@ -91,12 +91,13 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 fn cache_path(alias: &str) -> Option<PathBuf> {
     let cache_dir = cache_dir();
     let safe_alias = sanitize_alias_for_cache(alias);
+    let filename = if safe_alias == alias {
+        format!("{safe_alias}.bin")
+    } else {
+        format!("{safe_alias}-{:016x}.bin", alias_cache_hash(alias))
+    };
 
-    Some(
-        cache_dir
-            .join("manifests")
-            .join(format!("{safe_alias}.bin")),
-    )
+    Some(cache_dir.join("manifests").join(filename))
 }
 
 fn sanitize_alias_for_cache(alias: &str) -> String {
@@ -110,6 +111,18 @@ fn sanitize_alias_for_cache(alias: &str) -> String {
             }
         })
         .collect()
+}
+
+fn alias_cache_hash(alias: &str) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in alias.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }
 
 pub fn cache_dir() -> PathBuf {
@@ -385,5 +398,30 @@ mod tests {
     fn cache_alias_sanitization_replaces_unsafe_characters() {
         let safe = sanitize_alias_for_cache("alpha/beta\\gamma:delta space\tnewline\nemoji🚀");
         assert_eq!(safe, "alpha_beta_gamma_delta_space_newline_emoji_");
+    }
+
+    #[test]
+    fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
+        let alias_a = "demo/prod";
+        let alias_b = "demo:prod";
+        let path_a = cache_path(alias_a).expect("cache path for alias_a");
+        let path_b = cache_path(alias_b).expect("cache path for alias_b");
+
+        assert_ne!(
+            path_a, path_b,
+            "sanitized collisions should be hash-disambiguated"
+        );
+        let file_a = path_a
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache filename should be utf-8");
+        let file_b = path_b
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache filename should be utf-8");
+        assert!(file_a.starts_with("demo_prod-"), "{file_a}");
+        assert!(file_b.starts_with("demo_prod-"), "{file_b}");
+        assert!(file_a.ends_with(".bin"), "{file_a}");
+        assert!(file_b.ends_with(".bin"), "{file_b}");
     }
 }
