@@ -700,6 +700,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER.COM".into(), "-h".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["CHOPPER.COM".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -772,6 +776,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER.COM".into(), "-V".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.com".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -834,6 +842,10 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["CHOPPER.COM".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
             detect_builtin_action(&["CHOPPER.COM".into(), "--print-config-dir".into()]),
