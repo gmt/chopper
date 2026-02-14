@@ -65,6 +65,7 @@ pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     if entry.fingerprint == *fingerprint {
         Some(entry.manifest)
     } else {
+        delete_cache_file_best_effort(&cache_path);
         None
     }
 }
@@ -178,6 +179,11 @@ mod tests {
         fs::write(&source_file, "exec = \"printf\"\n").expect("rewrite source");
         let new_fingerprint = source_fingerprint(&source_file).expect("new fingerprint");
         assert!(load("demo", &new_fingerprint).is_none());
+        let cache_file = cache_path("demo").expect("cache path");
+        assert!(
+            !cache_file.exists(),
+            "fingerprint-mismatched cache file should be pruned"
+        );
         env::remove_var("XDG_CACHE_HOME");
     }
 
