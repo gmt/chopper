@@ -53,13 +53,14 @@ fn strip_utf8_bom(content: &str) -> &str {
 fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     let parsed: AliasConfig =
         toml::from_str(content).with_context(|| format!("invalid TOML in {}", path.display()))?;
+    let base_dir = config_base_dir(path);
 
     let exec = parsed.exec.trim();
     if exec.is_empty() {
         return Err(anyhow!("field `exec` cannot be empty"));
     }
 
-    let exec = resolve_exec_path(path, exec);
+    let exec = resolve_exec_path(&base_dir, exec);
 
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
     manifest.env = normalize_env_map(parsed.env)?;
@@ -86,7 +87,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         if script.is_empty() {
             return Err(anyhow!("field `reconcile.script` cannot be empty"));
         }
-        let script = resolve_script_path(path, script);
+        let script = resolve_script_path(&base_dir, script);
         let function = reconcile
             .function
             .map(|f| f.trim().to_string())
@@ -123,12 +124,12 @@ fn normalize_env_remove(env_remove: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn resolve_script_path(config_path: &Path, script: &str) -> PathBuf {
+fn resolve_script_path(base_dir: &Path, script: &str) -> PathBuf {
     let script_path = PathBuf::from(script);
     if script_path.is_absolute() {
         script_path
     } else {
-        config_base_dir(config_path).join(script_path)
+        base_dir.join(script_path)
     }
 }
 
@@ -144,14 +145,14 @@ fn config_base_dir(config_path: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn resolve_exec_path(config_path: &Path, exec: &str) -> PathBuf {
+fn resolve_exec_path(base_dir: &Path, exec: &str) -> PathBuf {
     let exec_path = PathBuf::from(exec);
     if exec_path.is_absolute() {
         return exec_path;
     }
 
     if looks_like_relative_exec_path(exec) {
-        return config_base_dir(config_path).join(exec_path);
+        return base_dir.join(exec_path);
     }
 
     which::which(exec).unwrap_or_else(|_| exec.into())
