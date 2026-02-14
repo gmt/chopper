@@ -1755,6 +1755,95 @@ script = "promote.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_env_key_and_remove_entries_are_trimmed_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-trim.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "  CHOPPER_PROMOTE  ": "from_reconcile" },
+    remove_env: ["  CHOPPER_DROP  ", "   "]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'PROMOTE=%s\n' \"$CHOPPER_PROMOTE\"; printf 'DROP=%s\n' \"$CHOPPER_DROP\""]
+
+[reconcile]
+script = "reconcile-trim.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-trim"],
+        [("CHOPPER_DROP", "from_runtime".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PROMOTE=from_reconcile"), "{stdout}");
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+}
+
+#[test]
+fn reconcile_blank_set_env_key_after_trim_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "   ": "bad" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-bad-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-bad-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn static_env_remove_unsets_inherited_environment_values() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
