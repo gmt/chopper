@@ -74,6 +74,12 @@ mod tests {
     }
 
     #[test]
+    fn namespace_normalization_trims_surrounding_whitespace() {
+        let out = normalize_namespace("  ops.ns  ").expect("namespace should normalize");
+        assert_eq!(out, "ops.ns");
+    }
+
+    #[test]
     fn config_identifier_normalization_treats_blank_as_unset() {
         let out = normalize_optional_identifier_for_config(Some("   "))
             .expect("blank identifier should normalize");
@@ -85,6 +91,18 @@ mod tests {
         let err = normalize_optional_identifier_for_invocation(Some("   "))
             .expect_err("blank identifier should be invalid for invocation");
         assert_eq!(err, JournalIdentifierViolation::Blank);
+    }
+
+    #[test]
+    fn identifier_normalization_trims_surrounding_whitespace() {
+        let config_identifier = normalize_optional_identifier_for_config(Some("  chopper  "))
+            .expect("config identifier should normalize");
+        assert_eq!(config_identifier, Some("chopper".to_string()));
+
+        let invocation_identifier =
+            normalize_optional_identifier_for_invocation(Some("  chopper  "))
+                .expect("invocation identifier should normalize");
+        assert_eq!(invocation_identifier, Some("chopper".to_string()));
     }
 
     #[test]
