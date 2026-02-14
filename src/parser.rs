@@ -36,6 +36,9 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
     if parts.is_empty() {
         return Err(anyhow!("no command found"));
     }
+    if parts[0].trim().is_empty() {
+        return Err(anyhow!("legacy alias command cannot be empty"));
+    }
     if parts[0].contains('\0') {
         return Err(anyhow!("legacy alias command cannot contain NUL bytes"));
     }
@@ -451,6 +454,18 @@ echo hello world
 
         let err = parse(&alias).expect_err("expected parse failure");
         assert!(err.to_string().contains("empty config file"));
+    }
+
+    #[test]
+    fn rejects_legacy_alias_with_empty_command_token() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "\"\" runtime").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot be empty"));
     }
 
     #[test]

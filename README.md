@@ -89,6 +89,7 @@ Symlinks that resolve to regular files are accepted.
 Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command aliases**.
 For legacy files, `chopper` uses the first non-empty, non-comment (`# ...`) line.
 If that first executable line starts with a UTF-8 BOM, the BOM is ignored.
+The first executable token must be a non-empty command.
 Legacy command and argument tokens cannot contain NUL bytes.
 
 ---
