@@ -285,6 +285,9 @@ invocation.
 When a valid hashed entry already exists, stale legacy files are cleaned up on
 cache hit. If hashed and legacy entries are both unusable, chopper falls back
 to source parsing and rewrites a fresh hashed entry.
+The same prune/reparse rules also apply to safe aliases that use unhashed cache
+filenames (for example `safealias.bin`): stale or corrupted entries are removed
+and regenerated from source manifests.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 
