@@ -6537,6 +6537,48 @@ args = ["STALELEGACYCORRUPT1"]
 }
 
 #[test]
+fn safe_alias_cache_file_persists_after_cache_hit() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("safealias.toml"),
+        r#"
+exec = "echo"
+args = ["SAFEALIASCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFEALIASCACHE01 first-run"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/safealias.bin");
+    assert!(cache_file.exists(), "safe alias cache file should exist");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFEALIASCACHE01 second-run"), "{stdout}");
+    assert!(
+        cache_file.exists(),
+        "safe alias cache file should persist after cache hit"
+    );
+}
+
+#[test]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
