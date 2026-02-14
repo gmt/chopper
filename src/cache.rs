@@ -50,23 +50,43 @@ pub fn source_fingerprint(path: &Path) -> Result<SourceFingerprint> {
 }
 
 pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
-    let cache_path = cache_path(alias)?;
-    let bytes = fs::read(&cache_path).ok()?;
+    let primary_path = cache_path(alias)?;
+    if let Some(manifest) = load_from_path(&primary_path, fingerprint) {
+        return Some(manifest);
+    }
+
+    if needs_hashed_cache_name(alias) {
+        let legacy_path = legacy_cache_path(alias)?;
+        if legacy_path != primary_path {
+            if let Some(manifest) = load_from_path(&legacy_path, fingerprint) {
+                if store(alias, fingerprint, &manifest).is_ok() {
+                    delete_cache_file_best_effort(&legacy_path);
+                }
+                return Some(manifest);
+            }
+        }
+    }
+
+    None
+}
+
+fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manifest> {
+    let bytes = fs::read(path).ok()?;
     let entry: CacheEntry = match bincode::deserialize(&bytes) {
         Ok(entry) => entry,
         Err(_) => {
-            delete_cache_file_best_effort(&cache_path);
+            delete_cache_file_best_effort(path);
             return None;
         }
     };
     if entry.version != CACHE_ENTRY_VERSION {
-        delete_cache_file_best_effort(&cache_path);
+        delete_cache_file_best_effort(path);
         return None;
     }
     if entry.fingerprint == *fingerprint {
         Some(entry.manifest)
     } else {
-        delete_cache_file_best_effort(&cache_path);
+        delete_cache_file_best_effort(path);
         None
     }
 }
@@ -91,13 +111,27 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 fn cache_path(alias: &str) -> Option<PathBuf> {
     let cache_dir = cache_dir();
     let safe_alias = sanitize_alias_for_cache(alias);
-    let filename = if safe_alias == alias {
+    let filename = if !needs_hashed_cache_name(alias) {
         format!("{safe_alias}.bin")
     } else {
         format!("{safe_alias}-{:016x}.bin", alias_cache_hash(alias))
     };
 
     Some(cache_dir.join("manifests").join(filename))
+}
+
+fn legacy_cache_path(alias: &str) -> Option<PathBuf> {
+    let cache_dir = cache_dir();
+    let safe_alias = sanitize_alias_for_cache(alias);
+    Some(
+        cache_dir
+            .join("manifests")
+            .join(format!("{safe_alias}.bin")),
+    )
+}
+
+fn needs_hashed_cache_name(alias: &str) -> bool {
+    sanitize_alias_for_cache(alias) != alias
 }
 
 fn sanitize_alias_for_cache(alias: &str) -> String {
@@ -210,8 +244,8 @@ fn unix_file_signature(_metadata: &fs::Metadata) -> (u128, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_path, cache_temp_path, load, sanitize_alias_for_cache, source_fingerprint, store,
-        CacheEntry, CACHE_ENTRY_VERSION,
+        cache_path, cache_temp_path, legacy_cache_path, load, sanitize_alias_for_cache,
+        source_fingerprint, store, CacheEntry, CACHE_ENTRY_VERSION,
     };
     use crate::manifest::Manifest;
     use crate::test_support::ENV_LOCK;
@@ -423,5 +457,47 @@ mod tests {
         assert!(file_b.starts_with("demo_prod-"), "{file_b}");
         assert!(file_a.ends_with(".bin"), "{file_a}");
         assert!(file_b.ends_with(".bin"), "{file_b}");
+    }
+
+    #[test]
+    fn load_migrates_legacy_cache_path_for_unsafe_aliases() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        let alias = "alpha:beta";
+
+        let legacy_path = legacy_cache_path(alias).expect("legacy cache path");
+        let hashed_path = cache_path(alias).expect("hashed cache path");
+        assert_ne!(
+            legacy_path, hashed_path,
+            "legacy and hashed paths should differ"
+        );
+        fs::create_dir_all(legacy_path.parent().expect("legacy parent"))
+            .expect("create cache parent");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest: manifest.clone(),
+        };
+        fs::write(
+            &legacy_path,
+            bincode::serialize(&entry).expect("serialize legacy cache entry"),
+        )
+        .expect("write legacy cache file");
+
+        let loaded = load(alias, &fingerprint).expect("load from legacy cache");
+        assert_eq!(loaded.exec, manifest.exec);
+        assert!(hashed_path.exists(), "expected migrated hashed cache file");
+        assert!(
+            !legacy_path.exists(),
+            "expected legacy cache file to be pruned after successful migration"
+        );
+        env::remove_var("XDG_CACHE_HOME");
     }
 }
