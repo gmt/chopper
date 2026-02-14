@@ -90,6 +90,8 @@ Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command ali
 For legacy files, `chopper` uses the first non-empty, non-comment (`# ...`) line.
 If that first executable line starts with a UTF-8 BOM, the BOM is ignored.
 The first executable token must be a non-empty command.
+Legacy command token cannot be `.` or `..`, and cannot end with path separators
+or trailing `.` / `..` path components.
 Legacy command and argument tokens cannot contain NUL bytes.
 
 ---

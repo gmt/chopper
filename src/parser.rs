@@ -37,12 +37,7 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
     if parts.is_empty() {
         return Err(anyhow!("no command found"));
     }
-    if parts[0].trim().is_empty() {
-        return Err(anyhow!("legacy alias command cannot be empty"));
-    }
-    if parts[0].contains('\0') {
-        return Err(anyhow!("legacy alias command cannot contain NUL bytes"));
-    }
+    validate_legacy_command_token(&parts[0])?;
     validate_arg_values(&parts[1..], "legacy alias args")?;
 
     let exec = which::which(&parts[0]).unwrap_or_else(|_| parts[0].clone().into());
@@ -249,6 +244,32 @@ fn validate_arg_values(values: &[String], field: &str) -> Result<()> {
         ) {
             return Err(anyhow!("{field} entries cannot contain NUL bytes"));
         }
+    }
+    Ok(())
+}
+
+fn validate_legacy_command_token(command: &str) -> Result<()> {
+    if command.trim().is_empty() {
+        return Err(anyhow!("legacy alias command cannot be empty"));
+    }
+    if matches!(
+        arg_validation::validate_arg_value(command),
+        Err(ArgViolation::ContainsNul)
+    ) {
+        return Err(anyhow!("legacy alias command cannot contain NUL bytes"));
+    }
+    if command == "." || command == ".." {
+        return Err(anyhow!("legacy alias command cannot be `.` or `..`"));
+    }
+    if command.ends_with('/') || command.ends_with('\\') {
+        return Err(anyhow!(
+            "legacy alias command cannot end with a path separator"
+        ));
+    }
+    if ends_with_dot_component(command) {
+        return Err(anyhow!(
+            "legacy alias command cannot end with `.` or `..` path components"
+        ));
     }
     Ok(())
 }
@@ -467,6 +488,30 @@ echo hello world
         assert!(err
             .to_string()
             .contains("legacy alias command cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_legacy_alias_with_dot_command_token() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, ". runtime").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_legacy_alias_command_with_trailing_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "bin/ runtime").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot end with a path separator"));
     }
 
     #[test]
