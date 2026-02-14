@@ -54,6 +54,10 @@ mod tests {
         let pathlike = validate_alias_identifier("bad/alias")
             .expect_err("path-like aliases should be rejected");
         assert_eq!(pathlike, AliasViolation::ContainsPathSeparator);
+
+        let windows_pathlike = validate_alias_identifier("bad\\alias")
+            .expect_err("backslash path-like aliases should be rejected");
+        assert_eq!(windows_pathlike, AliasViolation::ContainsPathSeparator);
     }
 
     #[test]
