@@ -51,6 +51,14 @@ mod tests {
             .expect_err("whitespace aliases should be rejected");
         assert_eq!(whitespace, AliasViolation::ContainsWhitespace);
 
+        let tabbed = validate_alias_identifier("bad\talias")
+            .expect_err("tab-separated aliases should be rejected");
+        assert_eq!(tabbed, AliasViolation::ContainsWhitespace);
+
+        let multiline = validate_alias_identifier("bad\nalias")
+            .expect_err("newline-containing aliases should be rejected");
+        assert_eq!(multiline, AliasViolation::ContainsWhitespace);
+
         let pathlike = validate_alias_identifier("bad/alias")
             .expect_err("path-like aliases should be rejected");
         assert_eq!(pathlike, AliasViolation::ContainsPathSeparator);
