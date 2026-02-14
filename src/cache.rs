@@ -1,7 +1,7 @@
+use crate::env_util;
 use crate::manifest::Manifest;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -105,11 +105,8 @@ fn cache_path(alias: &str) -> Option<PathBuf> {
 }
 
 fn cache_root_dir() -> PathBuf {
-    if let Ok(override_dir) = env::var("CHOPPER_CACHE_DIR") {
-        let trimmed = override_dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    if let Some(override_path) = env_util::env_path_override("CHOPPER_CACHE_DIR") {
+        return override_path;
     }
 
     directories::ProjectDirs::from("", "", "chopper")

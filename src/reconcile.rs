@@ -1,3 +1,4 @@
+use crate::env_util;
 use crate::manifest::{Manifest, RuntimePatch};
 use anyhow::{anyhow, Context, Result};
 use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope};
@@ -42,11 +43,7 @@ pub fn maybe_reconcile(
 }
 
 fn reconcile_disabled() -> bool {
-    let Ok(value) = env::var("CHOPPER_DISABLE_RECONCILE") else {
-        return false;
-    };
-    let normalized = value.trim().to_ascii_lowercase();
-    matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+    env_util::env_flag_enabled("CHOPPER_DISABLE_RECONCILE")
 }
 
 fn build_context(manifest: &Manifest, runtime_args: &[String]) -> Map {

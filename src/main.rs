@@ -1,4 +1,5 @@
 mod cache;
+mod env_util;
 mod executor;
 mod manifest;
 mod parser;
@@ -11,11 +12,8 @@ use std::env;
 use std::path::PathBuf;
 
 fn config_dir() -> PathBuf {
-    if let Ok(override_dir) = env::var("CHOPPER_CONFIG_DIR") {
-        let trimmed = override_dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    if let Some(override_path) = env_util::env_path_override("CHOPPER_CONFIG_DIR") {
+        return override_path;
     }
 
     directories::ProjectDirs::from("", "", "chopper")
@@ -71,12 +69,7 @@ fn load_manifest(alias: &str, path: &std::path::Path) -> Result<manifest::Manife
 }
 
 fn cache_enabled() -> bool {
-    let Ok(value) = env::var("CHOPPER_DISABLE_CACHE") else {
-        return true;
-    };
-
-    let normalized = value.trim().to_ascii_lowercase();
-    !matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+    !env_util::env_flag_enabled("CHOPPER_DISABLE_CACHE")
 }
 
 #[derive(Debug, PartialEq, Eq)]
