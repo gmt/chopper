@@ -503,6 +503,18 @@ echo hello world
     }
 
     #[test]
+    fn rejects_legacy_alias_with_parent_command_token() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, ".. runtime").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot be `.` or `..`"));
+    }
+
+    #[test]
     fn rejects_legacy_alias_command_with_trailing_separator() {
         let temp = TempDir::new().expect("create tempdir");
         let alias = temp.path().join("legacy");
