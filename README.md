@@ -50,6 +50,8 @@ Windows-relative launcher shapes such as `.\CHOPPER.CMD` and `..\CHOPPER.BAT`
 are also treated as direct invocation names.
 UNC-style launcher paths such as `\\server\tools\CHOPPER.COM` are treated the
 same way.
+Drive-letter launcher paths like `C:\tools\CHOPPER.EXE` are likewise treated
+as direct invocation names.
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
