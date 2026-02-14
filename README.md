@@ -1,6 +1,5 @@
-# chopper <br> <small><small><small>a helicopter parent for your processes</small></small></small>
-
-Tired of tediously implementing wrappers in the remarkably performant and familiar bash scripting language and ready to move to an arbitrary and poorly documented DSL full of bugs and footguns for a hypothetical performance boost?
+# **`chopper`<br><small><small>`# your helicopter process parent`</small></small></sub>**
+<p>Tired of tediously implementing wrappers in the remarkably performant and familiar bash scripting language and ready to move to an arbitrary and poorly documented DSL full of bugs and footguns for a hypothetical performance boost?
 
 Then this is the project for you!
 
