@@ -147,6 +147,25 @@ fn missing_alias_config_falls_back_to_path_command_resolution() {
 }
 
 #[test]
+fn missing_alias_config_reports_clear_exec_failure_when_command_missing() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["definitely-missing-command-xyz"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("exec failed"), "{stderr}");
+    assert!(stderr.contains("No such file or directory"), "{stderr}");
+}
+
+#[test]
 fn alias_lookup_order_prefers_aliases_toml_then_root_toml_then_legacy() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
