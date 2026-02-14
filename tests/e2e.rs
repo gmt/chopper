@@ -7364,6 +7364,54 @@ CACHEENVVALUE01 = "from-config"
 }
 
 #[test]
+fn malformed_cached_manifest_with_nul_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-nul-key-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+NULENVKEYTOKEN1 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-key-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NULENVKEYTOKEN1=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-nul-key-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULENVKEYTOKEN1", b"NUL\0NVKEYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate cached env key to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-key-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NULENVKEYTOKEN1=from-config"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_env_remove_key_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7540,6 +7588,64 @@ env_remove = ["REMOVETOKEN001"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("REMOVETOKEN001=present"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-nul-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["NULRMKEYTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-nul-heal"],
+        std::iter::once(("NULRMKEYTOKEN1", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("NULRMKEYTOKEN1=present"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULRMKEYTOKEN1", b"NULR\0KEYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-nul-heal"],
+        std::iter::once(("NULRMKEYTOKEN1", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env_remove key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("NULRMKEYTOKEN1=present"), "{stdout}");
 }
 
 #[test]
