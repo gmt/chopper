@@ -176,6 +176,7 @@ For reconcile env mutations, `set_env` keys and `remove_env` entries are
 trimmed; blank keys are rejected and blank remove entries are ignored.
 Relative `reconcile.script` paths are resolved against the alias config file's
 real directory (following symlinks).
+`reconcile.script` cannot be `.` or `..`.
 
 Example:
 

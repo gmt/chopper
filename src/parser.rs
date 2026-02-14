@@ -90,6 +90,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         if script.is_empty() {
             return Err(anyhow!("field `reconcile.script` cannot be empty"));
         }
+        if script == "." || script == ".." {
+            return Err(anyhow!("field `reconcile.script` cannot be `.` or `..`"));
+        }
         let script = resolve_script_path(&base_dir, script);
         let function = reconcile
             .function
@@ -462,6 +465,27 @@ namespace = "  "
         assert!(err
             .to_string()
             .contains("field `journal.namespace` cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_dot_reconcile_script_field() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot be `.` or `..`"));
     }
 
     #[test]
