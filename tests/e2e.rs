@@ -116,6 +116,66 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
 }
 
 #[test]
+fn alias_lookup_order_prefers_aliases_toml_then_root_toml_then_legacy() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let aliases_toml = aliases_dir.join("lookup.toml");
+    let root_toml = chopper_dir.join("lookup.toml");
+    let legacy = chopper_dir.join("lookup");
+
+    fs::write(
+        &aliases_toml,
+        r#"
+exec = "echo"
+args = ["source=aliases"]
+"#,
+    )
+    .expect("write aliases toml");
+    fs::write(
+        &root_toml,
+        r#"
+exec = "echo"
+args = ["source=root-toml"]
+"#,
+    )
+    .expect("write root toml");
+    fs::write(&legacy, "echo source=legacy").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=aliases"), "{stdout}");
+
+    fs::remove_file(&aliases_toml).expect("remove aliases toml");
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=root-toml"), "{stdout}");
+
+    fs::remove_file(&root_toml).expect("remove root toml");
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=legacy"), "{stdout}");
+}
+
+#[test]
 fn journal_config_forwards_stderr_to_systemd_cat() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
