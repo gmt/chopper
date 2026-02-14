@@ -6209,6 +6209,63 @@ args = ["NUL_EXECPATH_HEAL"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_empty_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-empty-heal.toml"),
+        r#"
+exec = "echo"
+args = ["EMPTY_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-empty-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTY_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"echo", b"");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to empty form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-empty-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("EMPTY_EXECPATH_HEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_whitespace_exec_path_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
