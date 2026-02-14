@@ -63,6 +63,11 @@ impl Manifest {
             env_remove.extend(patch.remove_env);
         }
 
+        env_remove = dedupe_preserving_order(env_remove);
+        for key in &env_remove {
+            env.remove(key);
+        }
+
         Invocation {
             exec: self.exec.clone(),
             args,
@@ -101,6 +106,17 @@ pub struct Invocation {
     pub env: HashMap<String, String>,
     pub env_remove: Vec<String>,
     pub journal: Option<JournalConfig>,
+}
+
+fn dedupe_preserving_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        if seen.insert(value.clone()) {
+            out.push(value);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -170,7 +186,24 @@ mod tests {
         };
 
         let invocation = manifest.build_invocation(&[], Some(patch));
-        assert_eq!(invocation.env.get("CLASH"), Some(&"patched".to_string()));
+        assert!(!invocation.env.contains_key("CLASH"));
         assert_eq!(invocation.env_remove, vec!["CLASH"]);
+    }
+
+    #[test]
+    fn env_remove_is_deduplicated_and_applied_to_env_map() {
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.env = HashMap::from([("A".into(), "1".into()), ("B".into(), "2".into())]);
+        manifest.env_remove = vec!["A".into(), "A".into()];
+
+        let patch = RuntimePatch {
+            remove_env: vec!["B".into(), "B".into()],
+            ..RuntimePatch::default()
+        };
+
+        let invocation = manifest.build_invocation(&[], Some(patch));
+        assert_eq!(invocation.env_remove, vec!["A", "B"]);
+        assert!(!invocation.env.contains_key("A"));
+        assert!(!invocation.env.contains_key("B"));
     }
 }
