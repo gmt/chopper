@@ -50,13 +50,13 @@ pub fn source_fingerprint(path: &Path) -> Result<SourceFingerprint> {
 }
 
 pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
-    let primary_path = cache_path(alias)?;
+    let primary_path = cache_path(alias);
     if let Some(manifest) = load_from_path(&primary_path, fingerprint) {
         return Some(manifest);
     }
 
     if needs_hashed_cache_name(alias) {
-        let legacy_path = legacy_cache_path(alias)?;
+        let legacy_path = legacy_cache_path(alias);
         if legacy_path != primary_path {
             if let Some(manifest) = load_from_path(&legacy_path, fingerprint) {
                 if store(alias, fingerprint, &manifest).is_ok() {
@@ -92,8 +92,7 @@ fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manife
 }
 
 pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) -> Result<()> {
-    let path = cache_path(alias)
-        .ok_or_else(|| anyhow::anyhow!("failed to compute cache path for alias `{alias}`"))?;
+    let path = cache_path(alias);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create cache directory {}", parent.display()))?;
@@ -108,7 +107,7 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
     write_atomically(&path, &bytes)
 }
 
-fn cache_path(alias: &str) -> Option<PathBuf> {
+fn cache_path(alias: &str) -> PathBuf {
     let cache_dir = cache_dir();
     let safe_alias = sanitize_alias_for_cache(alias);
     let filename = if !needs_hashed_cache_name(alias) {
@@ -117,17 +116,15 @@ fn cache_path(alias: &str) -> Option<PathBuf> {
         format!("{safe_alias}-{:016x}.bin", alias_cache_hash(alias))
     };
 
-    Some(cache_dir.join("manifests").join(filename))
+    cache_dir.join("manifests").join(filename)
 }
 
-fn legacy_cache_path(alias: &str) -> Option<PathBuf> {
+fn legacy_cache_path(alias: &str) -> PathBuf {
     let cache_dir = cache_dir();
     let safe_alias = sanitize_alias_for_cache(alias);
-    Some(
-        cache_dir
-            .join("manifests")
-            .join(format!("{safe_alias}.bin")),
-    )
+    cache_dir
+        .join("manifests")
+        .join(format!("{safe_alias}.bin"))
 }
 
 fn needs_hashed_cache_name(alias: &str) -> bool {
@@ -274,7 +271,7 @@ mod tests {
         fs::write(&source_file, "exec = \"printf\"\n").expect("rewrite source");
         let new_fingerprint = source_fingerprint(&source_file).expect("new fingerprint");
         assert!(load("demo", &new_fingerprint).is_none());
-        let cache_file = cache_path("demo").expect("cache path");
+        let cache_file = cache_path("demo");
         assert!(
             !cache_file.exists(),
             "fingerprint-mismatched cache file should be pruned"
@@ -385,7 +382,7 @@ mod tests {
         let manifest = Manifest::simple(PathBuf::from("echo"));
         store("demo", &fingerprint, &manifest).expect("store cache");
 
-        let path = cache_path("demo").expect("cache path").to_path_buf();
+        let path = cache_path("demo");
         let bytes = fs::read(&path).expect("read stored cache");
         let mut entry: CacheEntry = bincode::deserialize(&bytes).expect("deserialize entry");
         entry.version = CACHE_ENTRY_VERSION + 1;
@@ -415,7 +412,7 @@ mod tests {
         let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
         let manifest = Manifest::simple(PathBuf::from("echo"));
 
-        let path = cache_path("demo").expect("cache path");
+        let path = cache_path("demo");
         let parent = path.parent().expect("cache path parent");
         fs::create_dir_all(parent).expect("create cache parent");
         let colliding_tmp = cache_temp_path(&path, 0);
@@ -438,8 +435,8 @@ mod tests {
     fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
         let alias_a = "demo/prod";
         let alias_b = "demo:prod";
-        let path_a = cache_path(alias_a).expect("cache path for alias_a");
-        let path_b = cache_path(alias_b).expect("cache path for alias_b");
+        let path_a = cache_path(alias_a);
+        let path_b = cache_path(alias_b);
 
         assert_ne!(
             path_a, path_b,
@@ -472,8 +469,8 @@ mod tests {
         let manifest = Manifest::simple(PathBuf::from("echo"));
         let alias = "alpha:beta";
 
-        let legacy_path = legacy_cache_path(alias).expect("legacy cache path");
-        let hashed_path = cache_path(alias).expect("hashed cache path");
+        let legacy_path = legacy_cache_path(alias);
+        let hashed_path = cache_path(alias);
         assert_ne!(
             legacy_path, hashed_path,
             "legacy and hashed paths should differ"
