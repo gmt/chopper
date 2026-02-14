@@ -6243,6 +6243,107 @@ args = ["HASHLEGACYTOKEN1"]
 }
 
 #[test]
+fn stale_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEHASHOLDTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        output.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEHASHOLDTOKEN1 seed-old"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let stale_hashed_bytes = fs::read(&hashed_file).expect("read stale hashed bytes");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEHASHNEWTOKEN99X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-new"]);
+    assert!(
+        output.status.success(),
+        "refresh run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEHASHNEWTOKEN99X seed-new"), "{stdout}");
+
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy fresh hashed cache to legacy path");
+    fs::write(&hashed_file, stale_hashed_bytes).expect("restore stale hashed cache bytes");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "fallback-run"]);
+    assert!(
+        output.status.success(),
+        "fallback run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALEHASHNEWTOKEN99X fallback-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("STALEHASHOLDTOKEN1 fallback-run"),
+        "stale hashed payload should not execute during legacy fallback: {stdout}"
+    );
+
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after fallback migration"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt after fallback migration"
+    );
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"STALEHASHNEWTOKEN99X".len())
+            .any(|window| window == b"STALEHASHNEWTOKEN99X"),
+        "rebuilt hashed cache should contain fresh payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALEHASHOLDTOKEN1".len())
+            .any(|window| window == b"STALEHASHOLDTOKEN1"),
+        "rebuilt hashed cache should not retain stale hashed payload"
+    );
+}
+
+#[test]
 fn corrupted_hashed_cache_file_falls_back_to_valid_legacy_and_migrates() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
