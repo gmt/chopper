@@ -214,14 +214,14 @@ fn validate_alias_name(alias: &str) -> Result<()> {
 
 fn invocation_executable_name(args: &[String]) -> String {
     let raw = args.first().map(String::as_str).unwrap_or("chopper");
-    let basename = if raw.contains('/') {
-        raw.trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .unwrap_or("chopper")
-    } else if looks_like_windows_invocation_path(raw) {
+    let basename = if looks_like_windows_invocation_path(raw) {
         raw.trim_end_matches(['/', '\\'])
             .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("chopper")
+    } else if raw.contains('/') {
+        raw.trim_end_matches('/')
+            .rsplit('/')
             .next()
             .unwrap_or("chopper")
     } else {
@@ -549,6 +549,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_mixed_separator_drive_chopper_cmd_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "C:/tools\\CHOPPER.CMD".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_windows_drive_forward_slash_chopper_cmd_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "C:/tools/CHOPPER.CMD".to_string(),
@@ -630,6 +643,19 @@ mod tests {
     fn parse_invocation_treats_unc_windows_chopper_cmd_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "\\\\server\\tools\\CHOPPER.CMD".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_mixed_separator_unc_chopper_bat_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "\\\\server/tools\\CHOPPER.BAT".to_string(),
             "kpods".to_string(),
             "--tail=100".to_string(),
         ])
@@ -975,7 +1001,15 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["C:/tools\\CHOPPER.CMD".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["\\\\server\\tools\\CHOPPER.CMD".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
+            detect_builtin_action(&["\\\\server/tools\\CHOPPER.BAT".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
         assert_eq!(
@@ -1079,6 +1113,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&["\\\\server/tools\\CHOPPER.COM".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.exe".into(), "--version".into()]),
             Some(BuiltinAction::Version)
         );
@@ -1152,6 +1190,10 @@ mod tests {
                 "--print-config-dir".into()
             ]),
             Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&["C:/tools\\CHOPPER.COM".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
             detect_builtin_action(&[
@@ -1258,6 +1300,14 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&[
                 "C:/tools/CHOPPER.COM".into(),
+                "--help".into(),
+                "extra".into()
+            ]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&[
+                "\\\\server/tools\\CHOPPER.BAT".into(),
                 "--help".into(),
                 "extra".into()
             ]),
