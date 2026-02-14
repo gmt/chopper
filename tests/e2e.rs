@@ -119,12 +119,22 @@ fn builtin_flags_with_extra_args_fall_back_to_alias_validation_error() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cannot start with `-`"), "{stderr}");
 
+    let output = run_chopper(&config_home, &cache_home, &["-h", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
     let output = run_chopper(&config_home, &cache_home, &["--print-cache-dir", "extra"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cannot start with `-`"), "{stderr}");
 
     let output = run_chopper(&config_home, &cache_home, &["--version", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["-V", "extra"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cannot start with `-`"), "{stderr}");
