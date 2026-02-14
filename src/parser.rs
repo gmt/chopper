@@ -207,7 +207,7 @@ fn default_true() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{looks_like_relative_exec_path, parse};
     use anyhow::Result;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -730,6 +730,20 @@ exec = "../bin/runner"
         let manifest = parse(&config)?;
         assert_eq!(manifest.exec, aliases_dir.join("../bin/runner"));
         Ok(())
+    }
+
+    #[test]
+    fn detects_path_like_relative_exec_tokens() {
+        assert!(looks_like_relative_exec_path("."));
+        assert!(looks_like_relative_exec_path(".."));
+        assert!(looks_like_relative_exec_path("./bin/runner"));
+        assert!(looks_like_relative_exec_path("../bin/runner"));
+        assert!(looks_like_relative_exec_path("bin/runner"));
+        assert!(looks_like_relative_exec_path("bin\\runner"));
+
+        assert!(!looks_like_relative_exec_path("echo"));
+        assert!(!looks_like_relative_exec_path("kubectl.prod"));
+        assert!(!looks_like_relative_exec_path("emoji🚀"));
     }
 
     #[test]
