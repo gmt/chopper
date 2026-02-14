@@ -156,6 +156,14 @@ fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<St
                 "`set_env` keys cannot contain `=`: `{normalized_key}`"
             ));
         }
+        if normalized_key.contains('\0') {
+            return Err(anyhow!("`set_env` keys cannot contain NUL bytes"));
+        }
+        if value.contains('\0') {
+            return Err(anyhow!(
+                "`set_env` values cannot contain NUL bytes for key `{normalized_key}`"
+            ));
+        }
         if normalized.contains_key(normalized_key) {
             return Err(anyhow!(
                 "`set_env` contains duplicate keys after trimming: `{normalized_key}`"
@@ -179,6 +187,9 @@ fn normalize_patch_remove_env(values: Vec<String>) -> Result<Vec<String>> {
                 "`remove_env` entries cannot contain `=`: `{normalized_key}`"
             ));
         }
+        if normalized_key.contains('\0') {
+            return Err(anyhow!("`remove_env` entries cannot contain NUL bytes"));
+        }
         let normalized_key = normalized_key.to_string();
         if seen.insert(normalized_key.clone()) {
             normalized.push(normalized_key);
@@ -199,9 +210,12 @@ fn dynamic_to_string(value: Dynamic, field: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{maybe_reconcile, reconcile_disabled};
+    use super::{
+        maybe_reconcile, normalize_patch_remove_env, normalize_patch_set_env, reconcile_disabled,
+    };
     use crate::manifest::{Manifest, ReconcileConfig};
     use crate::test_support::ENV_LOCK;
+    use std::collections::HashMap;
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -411,6 +425,16 @@ fn reconcile(_ctx) {
     }
 
     #[test]
+    fn reconcile_rejects_remove_env_entries_containing_nul_bytes() {
+        let err = normalize_patch_remove_env(vec!["BAD\0KEY".to_string()])
+            .expect_err("expected remove_env validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn reconcile_rejects_blank_set_env_keys_after_trimming() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");
@@ -501,6 +525,32 @@ fn reconcile(_ctx) {
             .expect_err("expected set_env key validation error")
             .to_string();
         assert!(err.contains("keys cannot contain `=`"), "{err}");
+    }
+
+    #[test]
+    fn reconcile_rejects_set_env_keys_containing_nul_bytes() {
+        let err = normalize_patch_set_env(HashMap::from([(
+            "BAD\0KEY".to_string(),
+            "value".to_string(),
+        )]))
+        .expect_err("expected set_env key validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reconcile_rejects_set_env_values_containing_nul_bytes() {
+        let err = normalize_patch_set_env(HashMap::from([(
+            "GOOD_KEY".to_string(),
+            "bad\0value".to_string(),
+        )]))
+        .expect_err("expected set_env value validation error");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 
     #[test]

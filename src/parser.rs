@@ -145,6 +145,14 @@ fn normalize_env_map(env: HashMap<String, String>) -> Result<HashMap<String, Str
                 "field `env` keys cannot contain `=`: `{normalized_key}`"
             ));
         }
+        if normalized_key.contains('\0') {
+            return Err(anyhow!("field `env` keys cannot contain NUL bytes"));
+        }
+        if value.contains('\0') {
+            return Err(anyhow!(
+                "field `env` values cannot contain NUL bytes for key `{normalized_key}`"
+            ));
+        }
         if normalized.contains_key(normalized_key) {
             return Err(anyhow!(
                 "field `env` contains duplicate keys after trimming: `{normalized_key}`"
@@ -166,6 +174,11 @@ fn normalize_env_remove(env_remove: Vec<String>) -> Result<Vec<String>> {
         if normalized_key.contains('=') {
             return Err(anyhow!(
                 "field `env_remove` entries cannot contain `=`: `{normalized_key}`"
+            ));
+        }
+        if normalized_key.contains('\0') {
+            return Err(anyhow!(
+                "field `env_remove` entries cannot contain NUL bytes"
             ));
         }
         let normalized_key = normalized_key.to_string();
@@ -264,8 +277,9 @@ fn default_true() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_relative_exec_path, parse};
+    use super::{looks_like_relative_exec_path, normalize_env_map, normalize_env_remove, parse};
     use anyhow::Result;
+    use std::collections::HashMap;
     use std::fs;
     use std::os::unix::fs::symlink;
     use tempfile::TempDir;
@@ -1000,6 +1014,42 @@ exec = "echo"
 
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err.to_string().contains("keys cannot contain `=`"));
+    }
+
+    #[test]
+    fn rejects_env_keys_containing_nul_bytes() {
+        let err = normalize_env_map(HashMap::from([(
+            "BAD\0KEY".to_string(),
+            "value".to_string(),
+        )]))
+        .expect_err("expected env key validation failure");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_env_values_containing_nul_bytes() {
+        let err = normalize_env_map(HashMap::from([(
+            "GOOD_KEY".to_string(),
+            "bad\0value".to_string(),
+        )]))
+        .expect_err("expected env value validation failure");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_env_remove_entries_containing_nul_bytes() {
+        let err = normalize_env_remove(vec!["BAD\0KEY".to_string()])
+            .expect_err("expected env_remove validation failure");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 
     #[test]

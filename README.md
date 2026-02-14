@@ -115,9 +115,10 @@ function = "reconcile"           # optional, default "reconcile"
 Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
 `env_remove` entries are trimmed, deduplicated (first-seen order), and blank entries are ignored.
-`env_remove` entries cannot contain `=`.
+`env_remove` entries cannot contain `=` or NUL bytes.
 `[env]` keys are trimmed and must remain unique after trimming.
-`[env]` keys cannot contain `=`.
+`[env]` keys cannot contain `=` or NUL bytes.
+`[env]` values cannot contain NUL bytes.
 `exec` cannot be `.` or `..`.
 Relative `exec` forms like `./` or `.\` must include a path segment
 (for example `./bin/tool`).
@@ -182,7 +183,9 @@ For reconcile env mutations, `set_env` keys and `remove_env` entries are
 trimmed; blank keys are rejected, and `remove_env` entries are deduplicated (first-seen order)
 while blank remove entries are ignored.
 `set_env` keys cannot contain `=`.
-`remove_env` entries cannot contain `=`.
+`set_env` values cannot contain NUL bytes.
+`set_env` keys cannot contain NUL bytes.
+`remove_env` entries cannot contain `=` or NUL bytes.
 Relative `reconcile.script` paths are resolved against the alias config file's
 real directory (following symlinks).
 `reconcile.script` cannot be `.` or `..`.
