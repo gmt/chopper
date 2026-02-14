@@ -704,6 +704,67 @@ fn no_args_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_ch
 }
 
 #[test]
+fn no_args_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn mixed_absolute_unix_windows_uppercase_chopper_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixabsbare.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["mixabsbare", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
 fn mixed_absolute_unix_windows_uppercase_chopper_bat_supports_direct_alias_invocation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2583,6 +2644,41 @@ fn builtin_flags_with_extra_args_via_mixed_absolute_unix_windows_uppercase_chopp
 }
 
 #[test]
+fn builtin_flags_with_extra_args_via_mixed_absolute_unix_windows_uppercase_chopper_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
 fn builtin_flags_with_extra_args_via_nested_relative_uppercase_chopper_bat_with_trailing_separator_fall_back_to_alias_validation_error(
 ) {
     let config_home = TempDir::new().expect("create config home");
@@ -3549,6 +3645,54 @@ fn print_dir_builtins_work_when_invoked_as_mixed_absolute_unix_windows_uppercase
     assert!(
         output.status.success(),
         "print-cache-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed absolute CHOPPER failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
