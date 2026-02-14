@@ -117,6 +117,7 @@ Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `env_remove` entries are also trimmed; blank entries are ignored.
 `[env]` keys are trimmed and must remain unique after trimming.
 `exec` cannot be `.` or `..`.
+Relative `exec` forms like `./` must include a path segment (for example `./bin/tool`).
 If `exec` is a relative path (for example `bin/runner`), it is resolved against
 the alias config file's real directory (following symlinks).
 TOML documents may optionally start with a UTF-8 BOM.
@@ -177,6 +178,7 @@ trimmed; blank keys are rejected and blank remove entries are ignored.
 Relative `reconcile.script` paths are resolved against the alias config file's
 real directory (following symlinks).
 `reconcile.script` cannot be `.` or `..`.
+Relative forms like `./` must include a script path segment (for example `./hooks/reconcile.rhai`).
 
 Example:
 

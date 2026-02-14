@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub fn parse(path: &Path) -> Result<Manifest> {
     let content = fs::read_to_string(path)
@@ -62,6 +62,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec == "." || exec == ".." {
         return Err(anyhow!("field `exec` cannot be `.` or `..`"));
     }
+    if looks_like_relative_exec_path(exec) && !path_has_normal_component(Path::new(exec)) {
+        return Err(anyhow!(
+            "field `exec` must include a path segment when using relative path notation"
+        ));
+    }
 
     let exec = resolve_exec_path(&base_dir, exec);
 
@@ -92,6 +97,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         }
         if script == "." || script == ".." {
             return Err(anyhow!("field `reconcile.script` cannot be `.` or `..`"));
+        }
+        if !Path::new(script).is_absolute() && !path_has_normal_component(Path::new(script)) {
+            return Err(anyhow!(
+                "field `reconcile.script` must include a file path when using relative path notation"
+            ));
         }
         let script = resolve_script_path(&base_dir, script);
         let function = reconcile
@@ -172,6 +182,11 @@ fn looks_like_relative_exec_path(exec: &str) -> bool {
             || exec.contains('/')
             || exec.contains('\\')
             || exec.contains(std::path::MAIN_SEPARATOR))
+}
+
+fn path_has_normal_component(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::Normal(_)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -420,6 +435,24 @@ exec = ".."
     }
 
     #[test]
+    fn rejects_dot_slash_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "./"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` must include a path segment"));
+    }
+
+    #[test]
     fn defaults_reconcile_function_when_blank() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("svc.toml");
@@ -507,6 +540,27 @@ script = ".."
         assert!(err
             .to_string()
             .contains("field `reconcile.script` cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_dot_slash_reconcile_script_field() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "./"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` must include a file path"));
     }
 
     #[test]
