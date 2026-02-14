@@ -173,7 +173,13 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
 
     if let Some(journal) = &manifest.journal {
         match journal_validation::normalize_namespace(&journal.namespace) {
-            Ok(_) => {}
+            Ok(normalized) => {
+                if normalized != journal.namespace {
+                    return Err(anyhow!(
+                        "cached manifest journal namespace cannot include surrounding whitespace"
+                    ));
+                }
+            }
             Err(JournalNamespaceViolation::Empty) => {
                 return Err(anyhow!("cached manifest journal namespace cannot be empty"));
             }
@@ -186,7 +192,17 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
         match journal_validation::normalize_optional_identifier_for_invocation(
             journal.identifier.as_deref(),
         ) {
-            Ok(_) => {}
+            Ok(normalized_identifier) => {
+                if let (Some(original), Some(normalized)) =
+                    (journal.identifier.as_ref(), normalized_identifier)
+                {
+                    if original != &normalized {
+                        return Err(anyhow!(
+                            "cached manifest journal identifier cannot include surrounding whitespace"
+                        ));
+                    }
+                }
+            }
             Err(JournalIdentifierViolation::Blank) => {
                 return Err(anyhow!(
                     "cached manifest journal identifier cannot be blank when provided"
@@ -729,6 +745,84 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached journal config should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_whitespace_journal_namespace_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.journal = Some(JournalConfig {
+            namespace: " ops ".to_string(),
+            stderr: true,
+            identifier: None,
+        });
+
+        let path = cache_path("unsafe-journal-namespace");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-journal-namespace", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached journal namespace should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_whitespace_journal_identifier_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.journal = Some(JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some(" id ".to_string()),
+        });
+
+        let path = cache_path("unsafe-journal-identifier");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-journal-identifier", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached journal identifier should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
