@@ -10194,6 +10194,104 @@ args = ["CACHENEWPAYLOADLONGTOK01"]
 }
 
 #[test]
+fn cache_disable_flag_bypasses_corrupted_cache_without_pruning_until_reenabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-corrupt.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHECORRUPTOLD001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["nocache-corrupt", "seed"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("CACHECORRUPTOLD001 seed"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-corrupt.bin");
+    fs::write(&cache_file, b"corrupt-cache-bytes").expect("overwrite cache with corrupt bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHECORRUPTNEWTOK99"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-corrupt", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("CACHECORRUPTNEWTOK99 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let cache_after_disabled = fs::read(&cache_file).expect("read cache after disabled run");
+    assert_eq!(
+        cache_after_disabled, b"corrupt-cache-bytes",
+        "corrupted cache should remain untouched while cache is disabled"
+    );
+
+    let enabled = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-corrupt", "enabled-run"],
+    );
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("CACHECORRUPTNEWTOK99 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    let cache_after_enabled = fs::read(&cache_file).expect("read cache after enabled run");
+    assert!(
+        cache_after_enabled
+            .windows(b"CACHECORRUPTNEWTOK99".len())
+            .any(|window| window == b"CACHECORRUPTNEWTOK99"),
+        "cache should be healed and rewritten after cache is re-enabled"
+    );
+    assert!(
+        !cache_after_enabled
+            .windows(b"corrupt-cache-bytes".len())
+            .any(|window| window == b"corrupt-cache-bytes"),
+        "healed cache should not retain corrupt disabled-run bytes"
+    );
+}
+
+#[test]
 fn cache_disable_flag_is_case_insensitive_in_e2e_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
