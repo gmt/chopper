@@ -1012,7 +1012,11 @@ mod tests {
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "no");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "off");
+        assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "   ");
+        assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "definitely-not");
         assert!(cache_enabled());
         env::remove_var("CHOPPER_DISABLE_CACHE");
     }
