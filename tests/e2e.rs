@@ -64,6 +64,19 @@ fn write_executable_script(path: &Path, body: &str) {
     fs::set_permissions(path, perms).expect("set executable permissions");
 }
 
+fn replace_bytes_once(haystack: &mut [u8], needle: &[u8], replacement: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() != replacement.len() || needle.len() > haystack.len() {
+        return false;
+    }
+    for idx in 0..=(haystack.len() - needle.len()) {
+        if haystack[idx..idx + needle.len()] == *needle {
+            haystack[idx..idx + replacement.len()].copy_from_slice(replacement);
+            return true;
+        }
+    }
+    false
+}
+
 #[test]
 fn help_flag_prints_usage_without_alias() {
     let config_home = TempDir::new().expect("create config home");
@@ -5979,6 +5992,47 @@ args = ["migration-check"]
         !legacy_file.exists(),
         "legacy cache file should be pruned after migration"
     );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_arg_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-heal.toml"),
+        r#"
+exec = "echo"
+args = ["MAGICPAYLOAD1234"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-heal", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAGICPAYLOAD1234 first-run"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/cache-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"MAGICPAYLOAD1234", b"BAD\0PAYLOAD12345");
+    assert!(replaced, "expected to mutate serialized cached argument");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-heal", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAGICPAYLOAD1234 second-run"), "{stdout}");
 }
 
 #[test]
