@@ -36,6 +36,7 @@ kpods [args...]
 ```
 
 In symlink mode, alias name is inferred from executable name (`kpods` above).
+You may also use `kpods -- [args...]` to explicitly separate passthrough args.
 
 ---
 

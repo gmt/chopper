@@ -84,11 +84,12 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
         if alias.trim().is_empty() {
             return Err(anyhow!("alias name cannot be empty"));
         }
-        let passthrough_args = if args.get(2).map(String::as_str) == Some("--") {
-            args[3..].to_vec()
-        } else {
-            args[2..].to_vec()
-        };
+        if alias == "--" {
+            return Err(anyhow!(
+                "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
+            ));
+        }
+        let passthrough_args = normalize_passthrough(&args[2..]);
         Ok(InvocationInput {
             alias,
             passthrough_args,
@@ -96,8 +97,16 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
     } else {
         Ok(InvocationInput {
             alias: exe_name,
-            passthrough_args: args[1..].to_vec(),
+            passthrough_args: normalize_passthrough(&args[1..]),
         })
+    }
+}
+
+fn normalize_passthrough(args: &[String]) -> Vec<String> {
+    if args.first().map(String::as_str) == Some("--") {
+        args[1..].to_vec()
+    } else {
+        args.to_vec()
     }
 }
 
@@ -133,6 +142,19 @@ mod tests {
     }
 
     #[test]
+    fn strips_double_dash_separator_for_symlink_invocation() {
+        let invocation = parse_invocation(&[
+            "kubectl-prod".to_string(),
+            "--".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl-prod");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn supports_symlink_invocation_mode() {
         let invocation = parse_invocation(&[
             "kubectl-prod".to_string(),
@@ -143,5 +165,17 @@ mod tests {
 
         assert_eq!(invocation.alias, "kubectl-prod");
         assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
+    }
+
+    #[test]
+    fn rejects_separator_as_alias_name() {
+        let err = parse_invocation(&[
+            "chopper".to_string(),
+            "--".to_string(),
+            "runtime".to_string(),
+        ])
+        .expect_err("separator cannot be alias");
+
+        assert!(err.to_string().contains("alias name cannot be `--`"));
     }
 }
