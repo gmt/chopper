@@ -3150,6 +3150,30 @@ exec = "./"
 }
 
 #[test]
+fn toml_exec_dot_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-backslash-exec.toml"),
+        r#"
+exec = '.\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-backslash-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` must include a path segment"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_reconcile_script_dot_path_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3222,6 +3246,33 @@ script = "./"
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["dot-slash-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` must include a file path"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_dot_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-backslash-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = '.\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-backslash-reconcile"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
