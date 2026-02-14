@@ -5,6 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
+use std::time::Duration;
 
 pub fn run(invocation: Invocation) -> Result<()> {
     if let Some(journal) = invocation.journal.clone() {
@@ -38,6 +39,16 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
         .stdin
         .take()
         .ok_or_else(|| anyhow!("failed to open systemd-cat stdin"))?;
+    thread::sleep(Duration::from_millis(1));
+    if let Some(status) = journal_child
+        .try_wait()
+        .context("failed checking initial systemd-cat status")?
+    {
+        drop(journal_stdin);
+        return Err(anyhow!(
+            "systemd-cat exited before child spawn with status {status}; journal namespace requires systemd-cat --namespace support"
+        ));
+    }
 
     let mut child_cmd = command_for_invocation(&invocation);
     child_cmd.stderr(Stdio::piped());
@@ -79,12 +90,16 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
         }
     }
     if !journal_status.success() {
-        return Err(anyhow!(
-            "systemd-cat failed with status {journal_status}; journal namespace requires systemd-cat --namespace support"
-        ));
+        return Err(journal_status_error(journal_status));
     }
 
     exit_like_child(child_status)
+}
+
+fn journal_status_error(status: ExitStatus) -> anyhow::Error {
+    anyhow!(
+        "systemd-cat failed with status {status}; journal namespace requires systemd-cat --namespace support"
+    )
 }
 
 fn command_for_invocation(invocation: &Invocation) -> Command {

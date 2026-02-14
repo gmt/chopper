@@ -135,7 +135,9 @@ This means reconcile `set_env` can intentionally re-introduce a key that alias
 
 When `[journal]` is configured with `stderr = true`, `chopper`:
 
-- launches target command
+- launches `systemd-cat --namespace=...` first
+- verifies the journal sink is alive before launching the target command
+- launches target command only after journal sink startup succeeds
 - captures target stderr
 - forwards stderr into `systemd-cat --namespace=<namespace>`
 - keeps stdout attached normally
