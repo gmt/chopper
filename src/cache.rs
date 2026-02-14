@@ -2101,6 +2101,32 @@ mod tests {
     }
 
     #[test]
+    fn load_from_primary_cache_for_safe_alias_keeps_cache_file() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let alias = "safe-alias";
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+
+        store(alias, &fingerprint, &manifest).expect("store cache");
+        let cache_file = cache_path(alias);
+        assert!(cache_file.exists(), "cache file should exist before load");
+
+        let loaded = load(alias, &fingerprint).expect("load cached manifest");
+        assert_eq!(loaded.exec, manifest.exec);
+        assert!(
+            cache_file.exists(),
+            "safe-alias primary cache file should remain after cache hit"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn load_migrates_legacy_cache_path_for_unsafe_aliases() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
