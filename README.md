@@ -97,6 +97,9 @@ function = "reconcile"           # optional, default "reconcile"
 3. alias `env_remove` is removed
 4. optional Rhai patch (`set_env`, then `remove_env`)
 
+This means reconcile `set_env` can intentionally re-introduce a key that alias
+`env_remove` removed, while reconcile `remove_env` still has final precedence.
+
 ---
 
 ## Journald namespace behavior

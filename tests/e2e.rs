@@ -986,6 +986,48 @@ script = "replace.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_set_env_overrides_alias_env_remove() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("promote.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "PROMOTE": "from_reconcile" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("promote.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'PROMOTE=%s\n' \"$PROMOTE\""]
+env_remove = ["PROMOTE"]
+
+[reconcile]
+script = "promote.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["promote"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PROMOTE=from_reconcile"), "{stdout}");
+}
+
+#[test]
 fn static_env_remove_unsets_inherited_environment_values() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

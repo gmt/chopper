@@ -57,6 +57,7 @@ impl Manifest {
             args.extend(patch.append_args);
 
             for (key, value) in patch.set_env {
+                env_remove.retain(|remove_key| remove_key != &key);
                 env.insert(key, value);
             }
             env_remove.extend(patch.remove_env);
@@ -141,5 +142,35 @@ mod tests {
 
         let invocation = manifest.build_invocation(&["runtime".into()], Some(patch));
         assert_eq!(invocation.args, vec!["replaced", "extra"]);
+    }
+
+    #[test]
+    fn patch_set_env_overrides_alias_env_remove() {
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.env_remove = vec!["PROMOTE".into(), "KEEP_REMOVED".into()];
+
+        let patch = RuntimePatch {
+            set_env: HashMap::from([("PROMOTE".into(), "patched".into())]),
+            remove_env: vec!["PATCH_REMOVED".into()],
+            ..RuntimePatch::default()
+        };
+
+        let invocation = manifest.build_invocation(&[], Some(patch));
+        assert_eq!(invocation.env.get("PROMOTE"), Some(&"patched".to_string()));
+        assert_eq!(invocation.env_remove, vec!["KEEP_REMOVED", "PATCH_REMOVED"]);
+    }
+
+    #[test]
+    fn patch_remove_env_still_wins_over_patch_set_env() {
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        let patch = RuntimePatch {
+            set_env: HashMap::from([("CLASH".into(), "patched".into())]),
+            remove_env: vec!["CLASH".into()],
+            ..RuntimePatch::default()
+        };
+
+        let invocation = manifest.build_invocation(&[], Some(patch));
+        assert_eq!(invocation.env.get("CLASH"), Some(&"patched".to_string()));
+        assert_eq!(invocation.env_remove, vec!["CLASH"]);
     }
 }
