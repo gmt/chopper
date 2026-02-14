@@ -701,6 +701,17 @@ fn direct_invocation_rejects_dash_prefixed_alias_tokens() {
 }
 
 #[test]
+fn direct_invocation_rejects_whitespace_alias_tokens() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["foo bar", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot contain whitespace"), "{stderr}");
+}
+
+#[test]
 fn explicit_config_and_cache_override_env_vars_are_honored() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");

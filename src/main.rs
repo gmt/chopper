@@ -179,6 +179,9 @@ fn validate_alias_name(alias: &str) -> Result<()> {
             "alias name cannot start with `-`; choose a non-flag alias name"
         ));
     }
+    if alias.chars().any(char::is_whitespace) {
+        return Err(anyhow!("alias name cannot contain whitespace"));
+    }
     if alias == "." || alias == ".." {
         return Err(anyhow!("alias name cannot be `.` or `..`"));
     }
@@ -390,5 +393,11 @@ mod tests {
     fn rejects_alias_starting_with_dash() {
         let err = validate_alias_name("-alias").expect_err("dash-prefixed alias is invalid");
         assert!(err.to_string().contains("cannot start with `-`"));
+    }
+
+    #[test]
+    fn rejects_alias_with_whitespace() {
+        let err = validate_alias_name("foo bar").expect_err("whitespace aliases are invalid");
+        assert!(err.to_string().contains("cannot contain whitespace"));
     }
 }
