@@ -75,6 +75,30 @@ fn no_args_prints_usage_without_alias() {
 }
 
 #[test]
+fn no_args_prints_usage_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
 fn short_help_flag_prints_usage_without_alias() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -87,6 +111,41 @@ fn short_help_flag_prints_usage_without_alias() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn direct_alias_invocation_works_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("fromexe.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["fromexe", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
 }
 
 #[test]

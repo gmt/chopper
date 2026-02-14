@@ -72,7 +72,7 @@ enum BuiltinAction {
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     let exe_name = invocation_executable_name(args);
-    if exe_name != "chopper" {
+    if !is_direct_chopper_name(&exe_name) {
         return None;
     }
     if args.len() == 1 {
@@ -151,7 +151,7 @@ struct InvocationInput {
 fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
     let exe_name = invocation_executable_name(args);
 
-    if exe_name == "chopper" {
+    if is_direct_chopper_name(&exe_name) {
         if args.len() < 2 {
             return Err(anyhow!(
                 "missing alias name; use `chopper <alias> [args...]` or `chopper --help`"
@@ -223,6 +223,10 @@ fn invocation_executable_name(args: &[String]) -> String {
     .and_then(|s| s.to_str())
     .unwrap_or("chopper")
     .to_string()
+}
+
+fn is_direct_chopper_name(exe_name: &str) -> bool {
+    exe_name.eq_ignore_ascii_case("chopper") || exe_name.eq_ignore_ascii_case("chopper.exe")
 }
 
 fn normalize_passthrough(args: &[String]) -> Vec<String> {
@@ -351,6 +355,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_chopper_exe_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "/tmp/bin/chopper.exe".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn rejects_separator_as_alias_name() {
         let err = parse_invocation(&[
             "chopper".to_string(),
@@ -450,6 +467,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["/tmp/chopper.exe".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["chopper".into()]),
             Some(BuiltinAction::Help)
         );
@@ -463,6 +484,10 @@ mod tests {
     fn detects_version_action_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
+            detect_builtin_action(&["/tmp/chopper.exe".into(), "--version".into()]),
             Some(BuiltinAction::Version)
         );
         assert_eq!(
