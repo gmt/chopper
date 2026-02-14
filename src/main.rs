@@ -214,15 +214,43 @@ fn validate_alias_name(alias: &str) -> Result<()> {
 }
 
 fn invocation_executable_name(args: &[String]) -> String {
-    PathBuf::from(
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| "chopper".to_string()),
-    )
-    .file_name()
-    .and_then(|s| s.to_str())
-    .unwrap_or("chopper")
-    .to_string()
+    let raw = args.first().map(String::as_str).unwrap_or("chopper");
+    let basename = if raw.contains('/') {
+        raw.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("chopper")
+    } else if looks_like_windows_invocation_path(raw) {
+        raw.trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("chopper")
+    } else {
+        raw
+    };
+    let basename = if basename.is_empty() || basename == "." || basename == ".." {
+        "chopper"
+    } else {
+        basename
+    };
+
+    PathBuf::from(basename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("chopper")
+        .to_string()
+}
+
+fn looks_like_windows_invocation_path(raw: &str) -> bool {
+    raw.starts_with("\\\\")
+        || raw.starts_with(".\\")
+        || raw.starts_with("..\\")
+        || has_windows_drive_prefix(raw)
+}
+
+fn has_windows_drive_prefix(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn is_direct_chopper_name(exe_name: &str) -> bool {
@@ -355,9 +383,35 @@ mod tests {
     }
 
     #[test]
+    fn symlink_invocation_uses_windows_style_basename_from_path() {
+        let invocation = parse_invocation(&[
+            "C:\\tools\\kubectl.prod".to_string(),
+            "get".to_string(),
+            "pods".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl.prod");
+        assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_chopper_exe_as_direct_mode() {
         let invocation = parse_invocation(&[
             "/tmp/bin/chopper.exe".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_windows_style_chopper_exe_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "C:\\tools\\chopper.exe".to_string(),
             "kpods".to_string(),
             "--tail=100".to_string(),
         ])
@@ -464,6 +518,10 @@ mod tests {
     fn detects_help_action_only_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
+            detect_builtin_action(&["C:\\tools\\chopper.exe".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
         assert_eq!(

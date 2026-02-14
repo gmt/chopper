@@ -42,7 +42,8 @@ chopper --print-cache-dir
 ```
 
 A binary named `chopper.exe` is treated the same as `chopper` for direct
-invocation and built-in detection.
+invocation and built-in detection (including when `argv[0]` is provided as a
+full path with `/` or `\` separators).
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
