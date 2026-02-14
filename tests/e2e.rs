@@ -517,6 +517,45 @@ args = ["cache-bypass"]
 }
 
 #[test]
+fn cache_disable_flag_is_case_insensitive_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-case.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-case"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-case", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "TrUe".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-case runtime"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache-case.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with mixed-case value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_invalidation_applies_updated_alias_config() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -714,6 +753,54 @@ script = "toggle.reconcile.rhai"
     assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
     assert!(!stdout.contains("from_reconcile"), "{stdout}");
     assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
+fn reconcile_disable_flag_is_case_insensitive_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-case.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_case"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-case.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-case.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-case", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "YeS".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_reconcile_case"), "{stdout}");
 }
 
 #[test]
