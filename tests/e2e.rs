@@ -2353,6 +2353,24 @@ echo legacy-commented
 }
 
 #[test]
+fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-bom"), "\u{feff}echo bom-ok").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-bom", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bom-ok runtime"), "{stdout}");
+}
+
+#[test]
 fn toml_env_duplicate_keys_after_trim_fail_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

@@ -132,10 +132,12 @@ mod tests {
         manifest.env.insert("A".into(), "1".into());
         manifest.env_remove = vec!["OLD".into()];
 
-        let mut patch = RuntimePatch::default();
-        patch.append_args = vec!["patch".into()];
-        patch.set_env = HashMap::from([("B".into(), "2".into())]);
-        patch.remove_env = vec!["REMOVE".into()];
+        let patch = RuntimePatch {
+            append_args: vec!["patch".into()],
+            set_env: HashMap::from([("B".into(), "2".into())]),
+            remove_env: vec!["REMOVE".into()],
+            ..RuntimePatch::default()
+        };
 
         let invocation = manifest.build_invocation(&["runtime".into()], Some(patch));
 
