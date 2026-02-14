@@ -536,9 +536,61 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_windows_relative_chopper_cmd_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            ".\\chopper.cmd".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_windows_relative_chopper_bat_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            ".\\chopper.bat".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_windows_relative_chopper_com_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            ".\\chopper.com".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_parent_windows_relative_chopper_exe_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "..\\CHOPPER.EXE".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_parent_windows_relative_chopper_cmd_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "..\\CHOPPER.CMD".to_string(),
             "kpods".to_string(),
             "--tail=100".to_string(),
         ])
@@ -688,6 +740,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.CMD".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["..\\CHOPPER.EXE".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -757,6 +813,10 @@ mod tests {
         );
         assert_eq!(
             detect_builtin_action(&[".\\CHOPPER.EXE".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
+            detect_builtin_action(&["..\\chopper.bat".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
         assert_eq!(
@@ -885,6 +945,14 @@ mod tests {
         assert_eq!(
             windows_relative_basename("..\\nested\\CHOPPER.EXE"),
             Some("CHOPPER.EXE")
+        );
+        assert_eq!(
+            windows_relative_basename(".\\nested\\chopper.com"),
+            Some("chopper.com")
+        );
+        assert_eq!(
+            windows_relative_basename("..\\nested\\CHOPPER.CMD"),
+            Some("CHOPPER.CMD")
         );
     }
 
