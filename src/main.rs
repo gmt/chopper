@@ -174,6 +174,9 @@ fn validate_alias_name(alias: &str) -> Result<()> {
     if alias.trim().is_empty() {
         return Err(anyhow!("alias name cannot be empty"));
     }
+    if alias.contains('\0') {
+        return Err(anyhow!("alias name cannot contain NUL bytes"));
+    }
     if alias == "--" {
         return Err(anyhow!(
             "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
@@ -312,9 +315,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_alias_with_nul_bytes() {
+        let err = validate_alias_name("bad\0alias").expect_err("nul bytes are invalid");
+        assert!(err.to_string().contains("cannot contain NUL bytes"));
+    }
+
+    #[test]
     fn rejects_dot_alias_tokens() {
         assert!(validate_alias_name(".").is_err());
         assert!(validate_alias_name("..").is_err());
+    }
+
+    #[test]
+    fn parse_invocation_rejects_alias_with_nul_bytes() {
+        let err = parse_invocation(&["chopper".to_string(), "bad\0alias".to_string()])
+            .expect_err("alias with nul should be invalid");
+        assert!(
+            err.to_string().contains("cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 
     #[test]
