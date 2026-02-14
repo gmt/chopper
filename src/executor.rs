@@ -2,6 +2,7 @@ use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Stdio};
@@ -117,6 +118,9 @@ fn ensure_journal_sink_startup(journal_child: &mut std::process::Child) -> Resul
 }
 
 fn command_for_invocation(invocation: &Invocation) -> Result<Command> {
+    validate_exec_path_for_command(invocation)?;
+    validate_args_for_command(invocation)?;
+
     let mut cmd = Command::new(&invocation.exec);
     cmd.args(&invocation.args);
 
@@ -131,6 +135,20 @@ fn command_for_invocation(invocation: &Invocation) -> Result<Command> {
         cmd.env_remove(key);
     }
     Ok(cmd)
+}
+
+fn validate_exec_path_for_command(invocation: &Invocation) -> Result<()> {
+    if invocation.exec.as_os_str().as_bytes().contains(&0) {
+        return Err(anyhow!("execution path cannot contain NUL bytes"));
+    }
+    Ok(())
+}
+
+fn validate_args_for_command(invocation: &Invocation) -> Result<()> {
+    if invocation.args.iter().any(|arg| arg.contains('\0')) {
+        return Err(anyhow!("command arguments cannot contain NUL bytes"));
+    }
+    Ok(())
 }
 
 fn validate_env_key_for_command(key: &str) -> Result<()> {
@@ -242,5 +260,31 @@ mod tests {
 
         let err = command_for_invocation(&invocation).expect_err("expected validation error");
         assert!(err.to_string().contains("cannot contain `=`"), "{err}");
+    }
+
+    #[test]
+    fn command_builder_rejects_argument_with_nul_byte() {
+        let mut invocation = invocation();
+        invocation.args = vec!["ok".to_string(), "bad\0arg".to_string()];
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(
+            err.to_string()
+                .contains("command arguments cannot contain NUL bytes"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn command_builder_rejects_exec_path_with_nul_byte() {
+        let mut invocation = invocation();
+        invocation.exec = PathBuf::from("ec\0ho");
+
+        let err = command_for_invocation(&invocation).expect_err("expected validation error");
+        assert!(
+            err.to_string()
+                .contains("execution path cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 }
