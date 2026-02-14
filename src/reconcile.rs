@@ -420,6 +420,10 @@ fn reconcile(_ctx) {
         assert!(reconcile_disabled());
         env::set_var("CHOPPER_DISABLE_RECONCILE", "on");
         assert!(reconcile_disabled());
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "  yEs  ");
+        assert!(reconcile_disabled());
+        env::set_var("CHOPPER_DISABLE_RECONCILE", "  ON  ");
+        assert!(reconcile_disabled());
         env::set_var("CHOPPER_DISABLE_RECONCILE", "0");
         assert!(!reconcile_disabled());
         env::set_var("CHOPPER_DISABLE_RECONCILE", "false");
