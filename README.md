@@ -114,6 +114,7 @@ function = "reconcile"           # optional, default "reconcile"
 
 Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `journal.identifier`, `reconcile.script`, and `reconcile.function` is trimmed.
+Those string fields cannot contain NUL bytes.
 `env_remove` entries are trimmed, deduplicated (first-seen order), and blank entries are ignored.
 `env_remove` entries cannot contain `=` or NUL bytes.
 `[env]` keys are trimmed and must remain unique after trimming.

@@ -1395,6 +1395,61 @@ identifier = "  id-trimmed  "
 }
 
 #[test]
+fn journal_namespace_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-nul-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "ops\u0000prod"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-nul-namespace"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_identifier_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-nul-identifier.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "ops"
+identifier = "svc\u0000id"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-nul-identifier"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.identifier` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn direct_invocation_with_alias_name_still_works() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3528,6 +3583,28 @@ exec = "."
 }
 
 #[test]
+fn toml_exec_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-exec.toml"),
+        "exec = \"echo\\u0000tool\"\n",
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_exec_parent_path_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3746,6 +3823,61 @@ script = "."
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("field `reconcile.script` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-reconcile-script.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile\u0000.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-reconcile-script"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_function_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-reconcile-function.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+function = "reconcile\u0000hook"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-reconcile-function"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.function` cannot contain NUL bytes"),
         "{stderr}"
     );
 }

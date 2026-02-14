@@ -60,6 +60,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec.is_empty() {
         return Err(anyhow!("field `exec` cannot be empty"));
     }
+    if exec.contains('\0') {
+        return Err(anyhow!("field `exec` cannot contain NUL bytes"));
+    }
     if exec == "." || exec == ".." {
         return Err(anyhow!("field `exec` cannot be `.` or `..`"));
     }
@@ -88,10 +91,26 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         if namespace.is_empty() {
             return Err(anyhow!("field `journal.namespace` cannot be empty"));
         }
-        let identifier = journal
-            .identifier
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        if namespace.contains('\0') {
+            return Err(anyhow!(
+                "field `journal.namespace` cannot contain NUL bytes"
+            ));
+        }
+        let identifier = if let Some(value) = journal.identifier {
+            let identifier = value.trim();
+            if identifier.is_empty() {
+                None
+            } else {
+                if identifier.contains('\0') {
+                    return Err(anyhow!(
+                        "field `journal.identifier` cannot contain NUL bytes"
+                    ));
+                }
+                Some(identifier.to_string())
+            }
+        } else {
+            None
+        };
         manifest = manifest.with_journal(JournalConfig {
             namespace: namespace.to_string(),
             stderr: journal.stderr,
@@ -103,6 +122,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         let script = reconcile.script.trim();
         if script.is_empty() {
             return Err(anyhow!("field `reconcile.script` cannot be empty"));
+        }
+        if script.contains('\0') {
+            return Err(anyhow!("field `reconcile.script` cannot contain NUL bytes"));
         }
         if script == "." || script == ".." {
             return Err(anyhow!("field `reconcile.script` cannot be `.` or `..`"));
@@ -123,11 +145,21 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             ));
         }
         let script = resolve_script_path(&base_dir, script);
-        let function = reconcile
-            .function
-            .map(|f| f.trim().to_string())
-            .filter(|f| !f.is_empty())
-            .unwrap_or_else(|| "reconcile".to_string());
+        let function = match reconcile.function {
+            Some(f) => {
+                let function = f.trim();
+                if function.is_empty() {
+                    "reconcile".to_string()
+                } else if function.contains('\0') {
+                    return Err(anyhow!(
+                        "field `reconcile.function` cannot contain NUL bytes"
+                    ));
+                } else {
+                    function.to_string()
+                }
+            }
+            None => "reconcile".to_string(),
+        };
         manifest = manifest.with_reconcile(ReconcileConfig { script, function });
     }
 
@@ -465,6 +497,18 @@ exec = "   "
     }
 
     #[test]
+    fn rejects_exec_field_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(&config, "exec = \"echo\\u0000tool\"\n").expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot contain NUL bytes"));
+    }
+
+    #[test]
     fn rejects_dot_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -675,6 +719,49 @@ namespace = "  "
     }
 
     #[test]
+    fn rejects_journal_namespace_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[journal]
+namespace = "ops\u0000prod"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `journal.namespace` cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_journal_identifier_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[journal]
+namespace = "ops"
+identifier = "svc\u0000id"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `journal.identifier` cannot contain NUL bytes"));
+    }
+
+    #[test]
     fn rejects_dot_reconcile_script_field() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -693,6 +780,27 @@ script = "."
         assert!(err
             .to_string()
             .contains("field `reconcile.script` cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_reconcile_script_field_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile\u0000.rhai"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot contain NUL bytes"));
     }
 
     #[test]
@@ -909,6 +1017,28 @@ function = "  custom_reconcile  "
         assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
         assert_eq!(reconcile.function, "custom_reconcile");
         Ok(())
+    }
+
+    #[test]
+    fn rejects_reconcile_function_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+function = "reconcile\u0000hook"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.function` cannot contain NUL bytes"));
     }
 
     #[test]
