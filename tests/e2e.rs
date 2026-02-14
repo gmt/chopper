@@ -116,6 +116,37 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
 }
 
 #[test]
+fn missing_alias_config_falls_back_to_path_command_resolution() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let command_path = fake_bin.path().join("fallbackcmd");
+    write_executable_script(
+        &command_path,
+        "#!/usr/bin/env bash\nprintf 'PATH_FALLBACK=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PATH_FALLBACK=runtime"), "{stdout}");
+}
+
+#[test]
 fn alias_lookup_order_prefers_aliases_toml_then_root_toml_then_legacy() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
