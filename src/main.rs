@@ -562,6 +562,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_with_dot_argv0_uses_direct_mode_error() {
+        let err =
+            parse_invocation(&[".".into()]).expect_err("dot argv0 should map to direct-mode flow");
+        assert!(err.to_string().contains("missing alias name"), "{err}");
+    }
+
+    #[test]
+    fn parse_invocation_with_parent_argv0_uses_direct_mode_error() {
+        let err = parse_invocation(&["..".into()])
+            .expect_err("parent argv0 should map to direct-mode flow");
+        assert!(err.to_string().contains("missing alias name"), "{err}");
+    }
+
+    #[test]
     fn rejects_alias_starting_with_dash() {
         let err = validate_alias_name("-alias").expect_err("dash-prefixed alias is invalid");
         assert!(err.to_string().contains("cannot start with `-`"));
