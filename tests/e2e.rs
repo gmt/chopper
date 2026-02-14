@@ -1048,6 +1048,70 @@ args = ["direct=question"]
 }
 
 #[test]
+fn unsafe_alias_cache_entry_migrates_from_legacy_filename_on_load() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["migration-check"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+    assert!(
+        !hashed_file.exists(),
+        "hashed cache file should be absent after legacy rename"
+    );
+    assert!(
+        legacy_file.exists(),
+        "legacy cache file should exist after rename"
+    );
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("migration-check second-run"), "{stdout}");
+    assert!(
+        hashed_file.exists(),
+        "hashed cache file should be restored after migration load path"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache file should be pruned after migration"
+    );
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
