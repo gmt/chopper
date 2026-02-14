@@ -479,6 +479,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_parent_windows_relative_chopper_exe_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            "..\\CHOPPER.EXE".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn rejects_separator_as_alias_name() {
         let err = parse_invocation(&[
             "chopper".to_string(),
@@ -654,6 +667,14 @@ mod tests {
     fn builtin_detection_requires_exact_argument_shape() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--help".into(), "extra".into()]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&[
+                "CHOPPER.EXE".into(),
+                "--print-config-dir".into(),
+                "extra".into()
+            ]),
             None
         );
         assert_eq!(
