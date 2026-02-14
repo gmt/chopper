@@ -171,6 +171,54 @@ fn no_args_prints_usage_when_invoked_as_chopper_bat() {
 }
 
 #[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
 fn no_args_prints_usage_when_invoked_as_uppercase_chopper() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -921,6 +969,37 @@ fn builtin_flags_with_extra_args_via_chopper_bat_fall_back_to_alias_validation_e
 
     let output = run_chopper_with(
         chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_cmd_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_cmd,
         &config_home,
         &cache_home,
         &["--print-cache-dir", "extra"],
