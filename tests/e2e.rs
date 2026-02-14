@@ -1068,6 +1068,39 @@ args = ["base"]
 }
 
 #[test]
+fn alias_config_resolves_parent_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_PARENT=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("parentexec.toml"),
+        r#"
+exec = "../bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write parent relative exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parentexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC_PARENT=base runtime"), "{stdout}");
+}
+
+#[test]
 fn journal_config_forwards_stderr_to_systemd_cat() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

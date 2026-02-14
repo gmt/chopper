@@ -602,6 +602,24 @@ exec = "./bin/runner"
     }
 
     #[test]
+    fn resolves_parent_relative_exec_path_against_config_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir)?;
+        let config = aliases_dir.join("local.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "../bin/runner"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(manifest.exec, aliases_dir.join("../bin/runner"));
+        Ok(())
+    }
+
+    #[test]
     fn resolves_relative_exec_path_against_symlink_target_directory() -> Result<()> {
         let temp = TempDir::new()?;
         let target_dir = temp.path().join("shared");
