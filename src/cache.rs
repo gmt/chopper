@@ -6,6 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+const CACHE_ENTRY_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
     pub source_path: PathBuf,
@@ -18,6 +20,7 @@ pub struct SourceFingerprint {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CacheEntry {
+    version: u32,
     fingerprint: SourceFingerprint,
     manifest: Manifest,
 }
@@ -49,6 +52,9 @@ pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     let cache_path = cache_path(alias)?;
     let bytes = fs::read(cache_path).ok()?;
     let entry: CacheEntry = bincode::deserialize(&bytes).ok()?;
+    if entry.version != CACHE_ENTRY_VERSION {
+        return None;
+    }
     if entry.fingerprint == *fingerprint {
         Some(entry.manifest)
     } else {
@@ -65,6 +71,7 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
     }
 
     let entry = CacheEntry {
+        version: CACHE_ENTRY_VERSION,
         fingerprint: fingerprint.clone(),
         manifest: manifest.clone(),
     };
@@ -132,7 +139,7 @@ fn unix_file_signature(_metadata: &fs::Metadata) -> (u128, u64, u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{load, source_fingerprint, store};
+    use super::{cache_path, load, source_fingerprint, store, CacheEntry, CACHE_ENTRY_VERSION};
     use crate::manifest::Manifest;
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -223,5 +230,32 @@ mod tests {
             assert!(fingerprint.source_device > 0);
             assert!(fingerprint.source_inode > 0);
         }
+    }
+
+    #[test]
+    fn cache_entry_version_mismatch_invalidates_entry() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        store("demo", &fingerprint, &manifest).expect("store cache");
+
+        let path = cache_path("demo").expect("cache path").to_path_buf();
+        let bytes = fs::read(&path).expect("read stored cache");
+        let mut entry: CacheEntry = bincode::deserialize(&bytes).expect("deserialize entry");
+        entry.version = CACHE_ENTRY_VERSION + 1;
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("re-serialize entry"),
+        )
+        .expect("rewrite cache entry");
+
+        assert!(load("demo", &fingerprint).is_none());
+        env::remove_var("XDG_CACHE_HOME");
     }
 }
