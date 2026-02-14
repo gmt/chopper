@@ -2548,6 +2548,42 @@ mod tests {
     }
 
     #[test]
+    fn load_returns_none_when_primary_and_legacy_entries_are_both_corrupted() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let alias = "alpha:beta";
+
+        let primary_path = cache_path(alias);
+        let legacy_path = legacy_cache_path(alias);
+        assert_ne!(
+            primary_path, legacy_path,
+            "hashed and legacy paths should differ for unsafe aliases"
+        );
+        fs::create_dir_all(primary_path.parent().expect("cache parent"))
+            .expect("create cache parent");
+
+        fs::write(&primary_path, b"corrupt-primary").expect("write invalid primary cache");
+        fs::write(&legacy_path, b"corrupt-legacy").expect("write invalid legacy cache");
+
+        assert!(load(alias, &fingerprint).is_none());
+        assert!(
+            !primary_path.exists(),
+            "corrupted primary hashed cache entry should be pruned"
+        );
+        assert!(
+            !legacy_path.exists(),
+            "corrupted legacy cache entry should be pruned"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn load_prunes_primary_and_legacy_entries_when_fingerprints_are_stale() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");

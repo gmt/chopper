@@ -6418,6 +6418,91 @@ args = ["HASHLEGACYBOTH01"]
 }
 
 #[test]
+fn corrupted_hashed_and_legacy_cache_files_fall_back_to_source_and_rebuild_hashed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTBOTHCACHE001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CORRUPTBOTHCACHE001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    fs::write(&hashed_file, b"bad-hashed-bytes").expect("overwrite hashed cache with junk");
+    fs::write(&legacy_file, b"bad-legacy-bytes").expect("overwrite legacy cache with junk");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with corrupt hashed and legacy cache files: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTBOTHCACHE001 second-run"),
+        "{stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source after dual corruption"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after dual corruption fallback"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"CORRUPTBOTHCACHE001".len())
+            .any(|window| window == b"CORRUPTBOTHCACHE001"),
+        "rebuilt hashed cache should contain source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"bad-hashed-bytes".len())
+            .any(|window| window == b"bad-hashed-bytes"),
+        "rebuilt hashed cache should not retain corrupted hashed bytes"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"bad-legacy-bytes".len())
+            .any(|window| window == b"bad-legacy-bytes"),
+        "rebuilt hashed cache should not retain corrupted legacy bytes"
+    );
+}
+
+#[test]
 fn malformed_hashed_cache_file_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
