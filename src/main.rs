@@ -309,6 +309,19 @@ mod tests {
     }
 
     #[test]
+    fn symlink_invocation_uses_executable_basename_from_path() {
+        let invocation = parse_invocation(&[
+            "/tmp/bin/kubectl.prod".to_string(),
+            "get".to_string(),
+            "pods".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl.prod");
+        assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
+    }
+
+    #[test]
     fn rejects_separator_as_alias_name() {
         let err = parse_invocation(&[
             "chopper".to_string(),
