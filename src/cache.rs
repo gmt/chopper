@@ -98,11 +98,7 @@ fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manife
 }
 
 fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
-    if path_contains_nul(&manifest.exec) {
-        return Err(anyhow!(
-            "cached manifest exec path cannot contain NUL bytes"
-        ));
-    }
+    validate_cached_command_path(&manifest.exec, "cached manifest exec path")?;
 
     for arg in &manifest.args {
         if matches!(
@@ -217,11 +213,7 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
     }
 
     if let Some(reconcile) = &manifest.reconcile {
-        if path_contains_nul(&reconcile.script) {
-            return Err(anyhow!(
-                "cached manifest reconcile script cannot contain NUL bytes"
-            ));
-        }
+        validate_cached_command_path(&reconcile.script, "cached manifest reconcile script path")?;
 
         let function = reconcile.function.trim();
         if function.is_empty() {
@@ -242,6 +234,34 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn validate_cached_command_path(path: &Path, field: &str) -> Result<()> {
+    if path_contains_nul(path) {
+        return Err(anyhow!("{field} cannot contain NUL bytes"));
+    }
+
+    let value = path.to_string_lossy();
+    if value.is_empty() {
+        return Err(anyhow!("{field} cannot be empty"));
+    }
+    if value == "." || value == ".." {
+        return Err(anyhow!("{field} cannot be `.` or `..`"));
+    }
+    if value.ends_with('/') || value.ends_with('\\') {
+        return Err(anyhow!("{field} cannot end with a path separator"));
+    }
+    if ends_with_dot_component(&value) {
+        return Err(anyhow!(
+            "{field} cannot end with `.` or `..` path components"
+        ));
+    }
+    Ok(())
+}
+
+fn ends_with_dot_component(value: &str) -> bool {
+    let trimmed = value.trim_end_matches(['/', '\\']);
+    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
 }
 
 #[cfg(unix)]
@@ -711,6 +731,40 @@ mod tests {
     }
 
     #[test]
+    fn cached_manifest_with_trailing_separator_exec_path_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let manifest = Manifest::simple(PathBuf::from("ech/"));
+
+        let path = cache_path("unsafe-exec-path");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-exec-path", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached exec path should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cached_manifest_with_blank_journal_identifier_is_pruned() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
@@ -861,6 +915,44 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached reconcile function should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_trailing_separator_reconcile_script_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from("hooks/reconcile.rha/"),
+            function: "reconcile".to_string(),
+        });
+
+        let path = cache_path("unsafe-reconcile-script-path");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-reconcile-script-path", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached reconcile script path should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }

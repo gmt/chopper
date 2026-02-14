@@ -6036,6 +6036,57 @@ args = ["MAGICPAYLOAD1234"]
 }
 
 #[test]
+fn malformed_cached_manifest_with_trailing_separator_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-path-heal.toml"),
+        r#"
+exec = "echo"
+args = ["EXECPATHHEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-path-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EXECPATHHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-path-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"echo", b"ech/");
+    assert!(replaced, "expected to mutate cached exec path");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-path-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EXECPATHHEAL second-run"), "{stdout}");
+}
+
+#[test]
 fn malformed_cached_manifest_with_blank_journal_identifier_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -6363,6 +6414,86 @@ function = "FUNC_TOKEN_ABC1"
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("RECONCILEWSFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_trailing_separator_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-script-path-heal.rhai"),
+        r#"
+fn PATHHEALFUNC001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-script-path-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILESCRIPTPATHHEAL"]
+
+[reconcile]
+script = "cache-reconcile-script-path-heal.rhai"
+function = "PATHHEALFUNC001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-script-path-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILESCRIPTPATHHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-script-path-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"cache-reconcile-script-path-heal.rhai",
+        b"cache-reconcile-script-path-heal.rha/",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script path with trailing separator"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-script-path-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILESCRIPTPATHHEAL second-run reconciled"),
         "{stdout}"
     );
 }
