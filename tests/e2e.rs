@@ -6009,6 +6009,72 @@ args = ["migration-check"]
 }
 
 #[test]
+fn invalid_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["LEGACYMUTATE001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACYMUTATE001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+
+    let mut legacy_bytes = fs::read(&legacy_file).expect("read legacy cache file");
+    let replaced = replace_bytes_once(&mut legacy_bytes, b"LEGACYMUTATE001", b"LEGACY\0UTATE001");
+    assert!(
+        replaced,
+        "expected to mutate legacy cache entry to invalid NUL payload"
+    );
+    fs::write(&legacy_file, legacy_bytes).expect("rewrite invalid legacy cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after invalid legacy cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACYMUTATE001 second-run"), "{stdout}");
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source after invalid legacy prune"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "invalid legacy cache file should be pruned after run"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_nul_arg_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
