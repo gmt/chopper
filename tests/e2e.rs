@@ -1,5 +1,6 @@
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
@@ -27,6 +28,27 @@ fn run_chopper_with(
 ) -> Output {
     let mut cmd = Command::new(executable);
     cmd.args(args)
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path());
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("failed to run chopper")
+}
+
+fn run_chopper_with_cwd_and_argv0(
+    executable: PathBuf,
+    argv0: &str,
+    working_dir: &Path,
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    args: &[&str],
+    env_vars: impl IntoIterator<Item = (&'static str, String)>,
+) -> Output {
+    let mut cmd = Command::new(executable);
+    cmd.arg0(argv0)
+        .current_dir(working_dir)
+        .args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path());
     for (key, value) in env_vars {
@@ -288,6 +310,67 @@ fn no_args_prints_usage_when_invoked_as_uppercase_chopper() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_windows_relative_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn windows_relative_uppercase_chopper_cmd_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("winrel.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["winrel", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
 }
 
 #[test]
@@ -1635,6 +1718,41 @@ fn builtin_flags_with_extra_args_via_uppercase_chopper_exe_fall_back_to_alias_va
 }
 
 #[test]
+fn builtin_flags_with_extra_args_via_windows_relative_uppercase_chopper_bat_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
 fn builtin_flags_with_extra_args_via_uppercase_chopper_fall_back_to_alias_validation_error() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2134,6 +2252,54 @@ fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_exe() {
     assert!(
         output.status.success(),
         "print-cache-dir via CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_windows_relative_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.COM failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);

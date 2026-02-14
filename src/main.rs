@@ -601,6 +601,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_invocation_treats_windows_relative_uppercase_chopper_bat_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            ".\\CHOPPER.BAT".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn parse_invocation_treats_windows_relative_uppercase_chopper_com_path_as_direct_mode() {
+        let invocation = parse_invocation(&[
+            ".\\CHOPPER.COM".to_string(),
+            "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
     fn parse_invocation_treats_parent_windows_relative_chopper_exe_path_as_direct_mode() {
         let invocation = parse_invocation(&[
             "..\\CHOPPER.EXE".to_string(),
@@ -778,6 +804,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.BAT".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["..\\CHOPPER.EXE".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -862,6 +892,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.COM".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["..\\chopper.bat".into(), "-V".into()]),
             Some(BuiltinAction::Version)
         );
@@ -929,6 +963,10 @@ mod tests {
             Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.COM".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-cache-dir".into()]),
             Some(BuiltinAction::PrintCacheDir)
         );
@@ -978,6 +1016,10 @@ mod tests {
                 "--print-cache-dir".into(),
                 "extra".into()
             ]),
+            None
+        );
+        assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.BAT".into(), "--help".into(), "extra".into()]),
             None
         );
     }
