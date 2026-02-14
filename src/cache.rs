@@ -2383,6 +2383,55 @@ mod tests {
     }
 
     #[test]
+    fn load_prunes_primary_and_legacy_entries_when_fingerprints_are_stale() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let stale_fingerprint = source_fingerprint(&source_file).expect("stale source fingerprint");
+        let alias = "alpha:beta";
+
+        let manifest = Manifest::simple(PathBuf::from("echo"));
+        store(alias, &stale_fingerprint, &manifest).expect("store primary hashed cache");
+
+        let primary_path = cache_path(alias);
+        let legacy_path = legacy_cache_path(alias);
+        assert_ne!(
+            primary_path, legacy_path,
+            "hashed and legacy paths should differ for unsafe aliases"
+        );
+        let stale_entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: stale_fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &legacy_path,
+            bincode::serialize(&stale_entry).expect("serialize stale legacy entry"),
+        )
+        .expect("write stale legacy cache");
+        assert!(primary_path.exists(), "primary hashed cache should exist");
+        assert!(legacy_path.exists(), "legacy cache should exist");
+
+        fs::write(&source_file, "exec = \"printf\"\n").expect("rewrite source");
+        let fresh_fingerprint = source_fingerprint(&source_file).expect("fresh source fingerprint");
+
+        assert!(load(alias, &fresh_fingerprint).is_none());
+        assert!(
+            !primary_path.exists(),
+            "stale primary hashed cache should be pruned on fingerprint mismatch"
+        );
+        assert!(
+            !legacy_path.exists(),
+            "stale legacy cache should be pruned on fingerprint mismatch"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cached_manifest_with_invalid_runtime_strings_is_pruned() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
