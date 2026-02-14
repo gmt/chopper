@@ -110,6 +110,22 @@ fn short_version_flag_prints_binary_version() {
 }
 
 #[test]
+fn builtin_flags_with_extra_args_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--help", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-cache-dir", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
 fn print_dir_builtins_report_resolved_override_paths() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
