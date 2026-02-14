@@ -50,9 +50,16 @@ pub fn source_fingerprint(path: &Path) -> Result<SourceFingerprint> {
 
 pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     let cache_path = cache_path(alias)?;
-    let bytes = fs::read(cache_path).ok()?;
-    let entry: CacheEntry = bincode::deserialize(&bytes).ok()?;
+    let bytes = fs::read(&cache_path).ok()?;
+    let entry: CacheEntry = match bincode::deserialize(&bytes) {
+        Ok(entry) => entry,
+        Err(_) => {
+            delete_cache_file_best_effort(&cache_path);
+            return None;
+        }
+    };
     if entry.version != CACHE_ENTRY_VERSION {
+        delete_cache_file_best_effort(&cache_path);
         return None;
     }
     if entry.fingerprint == *fingerprint {
@@ -119,6 +126,10 @@ fn cache_root_dir() -> PathBuf {
     directories::ProjectDirs::from("", "", "chopper")
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".chopper-cache"))
+}
+
+fn delete_cache_file_best_effort(path: &Path) {
+    let _ = fs::remove_file(path);
 }
 
 #[cfg(unix)]
@@ -191,6 +202,10 @@ mod tests {
         fs::write(&cache_file, [0, 159, 146, 150]).expect("write invalid cache bytes");
 
         assert!(load("broken", &fingerprint).is_none());
+        assert!(
+            !cache_file.exists(),
+            "corrupted cache file should be pruned after read failure"
+        );
         env::remove_var("XDG_CACHE_HOME");
     }
 
@@ -256,6 +271,10 @@ mod tests {
         .expect("rewrite cache entry");
 
         assert!(load("demo", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "version-mismatched cache file should be pruned"
+        );
         env::remove_var("XDG_CACHE_HOME");
     }
 }
