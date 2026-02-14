@@ -7105,6 +7105,67 @@ args = ["SAFESTALENEWTOKEN9X"]
 }
 
 #[test]
+fn corrupted_safe_alias_cache_file_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("safealias-corrupt.toml"),
+        r#"
+exec = "echo"
+args = ["SAFECORRUPTCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-corrupt", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFECORRUPTCACHE01 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/safealias-corrupt.bin");
+    fs::write(&cache_file, b"safe-not-bincode").expect("overwrite safe cache file with junk");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-corrupt", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt safe cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFECORRUPTCACHE01 second-run"), "{stdout}");
+    let healed_cache = fs::read(&cache_file).expect("read healed safe cache");
+    assert!(
+        healed_cache
+            .windows(b"SAFECORRUPTCACHE01".len())
+            .any(|window| window == b"SAFECORRUPTCACHE01"),
+        "healed safe cache should contain source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"safe-not-bincode".len())
+            .any(|w| w == b"safe-not-bincode"),
+        "healed safe cache should not retain corrupted bytes"
+    );
+}
+
+#[test]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
