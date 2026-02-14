@@ -908,6 +908,62 @@ args = ["direct-dot-alias"]
 }
 
 #[test]
+fn direct_aliases_that_sanitize_to_same_cache_prefix_do_not_collide() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["direct=colon"]
+"#,
+    )
+    .expect("write colon alias config");
+    fs::write(
+        aliases_dir.join("alpha?beta.toml"),
+        r#"
+exec = "echo"
+args = ["direct=question"]
+"#,
+    )
+    .expect("write question alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "runtime-a"]);
+    assert!(
+        output.status.success(),
+        "colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=colon runtime-a"), "{stdout}");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha?beta", "runtime-b"]);
+    assert!(
+        output.status.success(),
+        "question command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=question runtime-b"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 2,
+        "expected one cache entry per colliding-sanitization direct alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
