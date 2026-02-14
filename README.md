@@ -22,6 +22,12 @@ It is opinionated:
 chopper <alias> [args...]
 ```
 
+You may insert `--` to separate chopper parsing from alias args:
+
+```bash
+chopper <alias> -- [args...]
+```
+
 2. **Symlinked alias**:
 
 ```bash

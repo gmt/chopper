@@ -191,6 +191,33 @@ CHOPPER_E2E = "from_alias"
 }
 
 #[test]
+fn direct_invocation_strips_double_dash_separator() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dash.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dash", "--", "--tail=100"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base --tail=100"), "{stdout}");
+    assert!(!stdout.contains("ARGS=base -- --tail=100"), "{stdout}");
+}
+
+#[test]
 fn reconcile_script_can_append_args_and_override_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

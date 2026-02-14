@@ -84,9 +84,14 @@ fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
         if alias.trim().is_empty() {
             return Err(anyhow!("alias name cannot be empty"));
         }
+        let passthrough_args = if args.get(2).map(String::as_str) == Some("--") {
+            args[3..].to_vec()
+        } else {
+            args[2..].to_vec()
+        };
         Ok(InvocationInput {
             alias,
-            passthrough_args: args[2..].to_vec(),
+            passthrough_args,
         })
     } else {
         Ok(InvocationInput {
@@ -105,6 +110,20 @@ mod tests {
         let invocation = parse_invocation(&[
             "chopper".to_string(),
             "kpods".to_string(),
+            "--tail=100".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
+    }
+
+    #[test]
+    fn strips_double_dash_separator_for_direct_invocation() {
+        let invocation = parse_invocation(&[
+            "chopper".to_string(),
+            "kpods".to_string(),
+            "--".to_string(),
             "--tail=100".to_string(),
         ])
         .expect("valid invocation");
