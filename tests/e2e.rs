@@ -2109,3 +2109,30 @@ FOO = "base"
         "{stderr}"
     );
 }
+
+#[test]
+fn toml_env_blank_key_after_trim_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"   " = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
