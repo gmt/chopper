@@ -87,10 +87,24 @@ mod tests {
     }
 
     #[test]
+    fn config_identifier_normalization_treats_missing_as_unset() {
+        let out = normalize_optional_identifier_for_config(None)
+            .expect("missing identifier should normalize");
+        assert!(out.is_none());
+    }
+
+    #[test]
     fn invocation_identifier_normalization_rejects_blank_values() {
         let err = normalize_optional_identifier_for_invocation(Some("   "))
             .expect_err("blank identifier should be invalid for invocation");
         assert_eq!(err, JournalIdentifierViolation::Blank);
+    }
+
+    #[test]
+    fn invocation_identifier_normalization_allows_missing_values() {
+        let out = normalize_optional_identifier_for_invocation(None)
+            .expect("missing identifier should normalize");
+        assert!(out.is_none());
     }
 
     #[test]
@@ -110,5 +124,12 @@ mod tests {
         let err = normalize_optional_identifier_for_config(Some("svc\0id"))
             .expect_err("nul identifier should be invalid");
         assert_eq!(err, JournalIdentifierViolation::ContainsNul);
+    }
+
+    #[test]
+    fn namespace_normalization_trims_mixed_whitespace() {
+        let out = normalize_namespace("\n\t ops.ns \t")
+            .expect("namespace with mixed surrounding whitespace should normalize");
+        assert_eq!(out, "ops.ns");
     }
 }
