@@ -286,8 +286,9 @@ fn normalize_passthrough(args: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_enabled, config_dir, detect_builtin_action, find_config, parse_invocation,
-        validate_alias_name, BuiltinAction,
+        cache_enabled, config_dir, detect_builtin_action, find_config,
+        is_direct_invocation_executable, parse_invocation, validate_alias_name,
+        windows_relative_basename, BuiltinAction,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -701,6 +702,49 @@ mod tests {
             detect_builtin_action(&["chopper".into(), "--version".into(), "extra".into()]),
             None
         );
+    }
+
+    #[test]
+    fn windows_relative_basename_extracts_only_dot_and_parent_prefixes() {
+        assert_eq!(
+            windows_relative_basename(".\\chopper.exe"),
+            Some("chopper.exe")
+        );
+        assert_eq!(
+            windows_relative_basename("..\\CHOPPER.EXE"),
+            Some("CHOPPER.EXE")
+        );
+        assert_eq!(
+            windows_relative_basename(".\\nested\\chopper.exe"),
+            Some("chopper.exe")
+        );
+        assert_eq!(
+            windows_relative_basename("..\\nested\\CHOPPER.EXE"),
+            Some("CHOPPER.EXE")
+        );
+    }
+
+    #[test]
+    fn windows_relative_basename_does_not_match_other_path_shapes() {
+        assert_eq!(windows_relative_basename("bad\\alias"), None);
+        assert_eq!(
+            windows_relative_basename("\\\\server\\tools\\chopper.exe"),
+            None
+        );
+        assert_eq!(windows_relative_basename("C:\\tools\\chopper.exe"), None);
+        assert_eq!(windows_relative_basename("chopper.exe"), None);
+    }
+
+    #[test]
+    fn direct_executable_detection_is_specific_to_chopper_names() {
+        assert!(is_direct_invocation_executable(&[".\\chopper.exe".into()]));
+        assert!(is_direct_invocation_executable(&["..\\CHOPPER.EXE".into()]));
+        assert!(is_direct_invocation_executable(&["CHOPPER".into()]));
+
+        assert!(!is_direct_invocation_executable(&[
+            ".\\not-chopper.exe".into()
+        ]));
+        assert!(!is_direct_invocation_executable(&["..\\alias".into()]));
     }
 
     #[test]
