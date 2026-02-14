@@ -2207,6 +2207,44 @@ mod tests {
         env::remove_var("XDG_CACHE_HOME");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cached_manifest_with_nul_exec_osstring_is_pruned() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let manifest = Manifest::simple(PathBuf::from(OsString::from_vec(b"ec\0ho".to_vec())));
+
+        let path = cache_path("unsafe-nul-exec-osstring");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-nul-exec-osstring", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached NUL exec osstring path should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
     #[test]
     fn cached_manifest_with_trailing_separator_exec_path_is_pruned() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
@@ -3057,6 +3095,48 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached NUL reconcile script path should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_manifest_with_nul_reconcile_script_osstring_is_pruned() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from(OsString::from_vec(b"hook\0s/reconcile.rhai".to_vec())),
+            function: "reconcile".to_string(),
+        });
+
+        let path = cache_path("unsafe-nul-reconcile-script-osstring");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-nul-reconcile-script-osstring", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached NUL reconcile script osstring should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
