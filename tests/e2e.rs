@@ -83,7 +83,7 @@ fn no_args_prints_usage_when_invoked_as_chopper_exe() {
     symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
 
     let output = run_chopper_with(
-        chopper_exe,
+        chopper_exe.clone(),
         &config_home,
         &cache_home,
         &[],
@@ -107,7 +107,7 @@ fn no_args_prints_usage_when_invoked_as_uppercase_chopper_exe() {
     symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
 
     let output = run_chopper_with(
-        chopper_exe,
+        chopper_exe.clone(),
         &config_home,
         &cache_home,
         &[],
@@ -146,10 +146,34 @@ fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper() {
     symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
 
     let output = run_chopper_with(
-        uppercase_chopper,
+        uppercase_chopper.clone(),
         &config_home,
         &cache_home,
         &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--help"],
         std::iter::empty::<(&str, String)>(),
     );
     assert!(
@@ -170,7 +194,7 @@ fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_exe() {
     symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
 
     let output = run_chopper_with(
-        chopper_exe,
+        chopper_exe.clone(),
         &config_home,
         &cache_home,
         &["--help"],
@@ -205,7 +229,7 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
     symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
 
     let output = run_chopper_with(
-        chopper_exe,
+        chopper_exe.clone(),
         &config_home,
         &cache_home,
         &["fromexe", "runtime"],
@@ -240,7 +264,7 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
     symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
 
     let output = run_chopper_with(
-        uppercase_chopper,
+        uppercase_chopper.clone(),
         &config_home,
         &cache_home,
         &["fromupper", "runtime"],
@@ -309,6 +333,33 @@ fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_ex
     assert!(
         output.status.success(),
         "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -407,10 +458,21 @@ fn builtin_flags_with_extra_args_via_uppercase_chopper_exe_fall_back_to_alias_va
     assert!(stderr.contains("cannot start with `-`"), "{stderr}");
 
     let output = run_chopper_with(
-        chopper_exe,
+        chopper_exe.clone(),
         &config_home,
         &cache_home,
         &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
         std::iter::empty::<(&str, String)>(),
     );
     assert!(!output.status.success(), "command unexpectedly succeeded");
@@ -449,10 +511,21 @@ fn builtin_flags_with_extra_args_via_uppercase_chopper_fall_back_to_alias_valida
     assert!(stderr.contains("cannot start with `-`"), "{stderr}");
 
     let output = run_chopper_with(
-        uppercase_chopper,
+        uppercase_chopper.clone(),
         &config_home,
         &cache_home,
         &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
         std::iter::empty::<(&str, String)>(),
     );
     assert!(!output.status.success(), "command unexpectedly succeeded");

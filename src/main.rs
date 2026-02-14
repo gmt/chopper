@@ -679,6 +679,10 @@ mod tests {
             Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
+            detect_builtin_action(&["CHOPPER".into(), "--print-cache-dir".into()]),
+            Some(BuiltinAction::PrintCacheDir)
+        );
+        assert_eq!(
             detect_builtin_action(&["symlink-alias".into(), "--print-config-dir".into()]),
             None
         );
