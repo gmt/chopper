@@ -90,20 +90,26 @@ pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) 
 
 fn cache_path(alias: &str) -> Option<PathBuf> {
     let cache_dir = cache_dir();
-
-    let safe_alias = alias
-        .chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | ' ' => '_',
-            other => other,
-        })
-        .collect::<String>();
+    let safe_alias = sanitize_alias_for_cache(alias);
 
     Some(
         cache_dir
             .join("manifests")
             .join(format!("{safe_alias}.bin")),
     )
+}
+
+fn sanitize_alias_for_cache(alias: &str) -> String {
+    alias
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 pub fn cache_dir() -> PathBuf {
@@ -191,8 +197,8 @@ fn unix_file_signature(_metadata: &fs::Metadata) -> (u128, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_path, cache_temp_path, load, source_fingerprint, store, CacheEntry,
-        CACHE_ENTRY_VERSION,
+        cache_path, cache_temp_path, load, sanitize_alias_for_cache, source_fingerprint, store,
+        CacheEntry, CACHE_ENTRY_VERSION,
     };
     use crate::manifest::Manifest;
     use crate::test_support::ENV_LOCK;
@@ -373,5 +379,11 @@ mod tests {
         let loaded = load("demo", &fingerprint).expect("load stored cache");
         assert_eq!(loaded.exec, PathBuf::from("echo"));
         env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cache_alias_sanitization_replaces_unsafe_characters() {
+        let safe = sanitize_alias_for_cache("alpha/beta\\gamma:delta space\tnewline\nemoji🚀");
+        assert_eq!(safe, "alpha_beta_gamma_delta_space_newline_emoji_");
     }
 }
