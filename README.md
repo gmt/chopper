@@ -62,6 +62,8 @@ Nested relative variants with mixed separators (for example
 `./nested\CHOPPER.CMD`) are recognized as direct invocation names as well.
 Trailing path separators on launcher paths (for example
 `C:/tools/CHOPPER.CMD/`) are tolerated for direct invocation detection.
+Mixed absolute forms that combine Unix and Windows separators (for example
+`/tmp\CHOPPER.CMD`) are also recognized.
 
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
