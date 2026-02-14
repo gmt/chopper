@@ -3560,6 +3560,28 @@ fn legacy_one_line_alias_with_dot_command_fails_validation() {
 }
 
 #[test]
+fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-dot-component"), "bin/.. runtime")
+        .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-dot-component", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_alias_accepts_utf8_bom_prefixed_document() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

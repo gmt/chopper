@@ -515,6 +515,18 @@ echo hello world
     }
 
     #[test]
+    fn rejects_legacy_alias_command_with_trailing_dot_component() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(&alias, "bin/.. runtime").expect("write config");
+
+        let err = parse(&alias).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("legacy alias command cannot end with `.` or `..` path components"));
+    }
+
+    #[test]
     fn parses_toml_alias_with_journal_and_reconcile() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("svc.toml");
