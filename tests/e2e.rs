@@ -3699,6 +3699,31 @@ fn legacy_one_line_alias_with_trailing_separator_fails_validation() {
 }
 
 #[test]
+fn legacy_one_line_alias_with_trailing_backslash_separator_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-trailing-backslash-separator"),
+        "'bin\\' runtime",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-trailing-backslash-separator", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -3711,6 +3736,31 @@ fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
         &config_home,
         &cache_home,
         &["legacy-dot-component", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_backslash_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-backslash-dot-component"),
+        "'bin\\..' runtime",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-backslash-dot-component", "runtime"],
     );
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
