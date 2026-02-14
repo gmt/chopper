@@ -561,6 +561,10 @@ mod tests {
             Some(BuiltinAction::PrintConfigDir)
         );
         assert_eq!(
+            detect_builtin_action(&["C:\\tools\\chopper.exe".into(), "--print-config-dir".into()]),
+            Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-cache-dir".into()]),
             Some(BuiltinAction::PrintCacheDir)
         );
