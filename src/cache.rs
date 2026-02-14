@@ -7,7 +7,6 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -99,7 +98,7 @@ fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manife
 }
 
 fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
-    if manifest.exec.as_os_str().as_bytes().contains(&0) {
+    if path_contains_nul(&manifest.exec) {
         return Err(anyhow!(
             "cached manifest exec path cannot contain NUL bytes"
         ));
@@ -202,7 +201,7 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
     }
 
     if let Some(reconcile) = &manifest.reconcile {
-        if reconcile.script.as_os_str().as_bytes().contains(&0) {
+        if path_contains_nul(&reconcile.script) {
             return Err(anyhow!(
                 "cached manifest reconcile script cannot contain NUL bytes"
             ));
@@ -227,6 +226,18 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn path_contains_nul(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().contains(&0)
+}
+
+#[cfg(not(unix))]
+fn path_contains_nul(path: &Path) -> bool {
+    path.to_string_lossy().contains('\0')
 }
 
 pub fn store(alias: &str, fingerprint: &SourceFingerprint, manifest: &Manifest) -> Result<()> {
@@ -756,6 +767,43 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached reconcile function should be pruned on load"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn cached_manifest_with_whitespace_env_key_is_pruned() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest
+            .env
+            .insert(" CACHE_ENV_KEY".to_string(), "value".to_string());
+
+        let path = cache_path("unsafe-env");
+        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
+        let entry = CacheEntry {
+            version: CACHE_ENTRY_VERSION,
+            fingerprint: fingerprint.clone(),
+            manifest,
+        };
+        fs::write(
+            &path,
+            bincode::serialize(&entry).expect("serialize cache entry"),
+        )
+        .expect("write cache file");
+
+        assert!(load("unsafe-env", &fingerprint).is_none());
+        assert!(
+            !path.exists(),
+            "invalid cached env key should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }

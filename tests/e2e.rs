@@ -6165,6 +6165,51 @@ function = "CACHEFUNCABCDE"
 }
 
 #[test]
+fn malformed_cached_manifest_with_whitespace_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHE_ENV_KEY = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHE_ENV_KEY=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHE_ENV_KEY", b" CACHE_ENV_KE");
+    assert!(replaced, "expected to mutate cached env key");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHE_ENV_KEY=from-config"), "{stdout}");
+}
+
+#[test]
 fn parser_trimming_is_applied_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
