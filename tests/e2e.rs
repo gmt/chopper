@@ -10292,6 +10292,126 @@ args = ["CACHECORRUPTNEWTOK99"]
 }
 
 #[test]
+fn cache_disable_flag_bypasses_existing_unsafe_alias_cache_entries_until_reenabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["DISABLEOLDPAYLOAD01"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("DISABLEOLDPAYLOAD01 seed-old"),
+        "{first_stdout}"
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    let hashed_before_disabled = fs::read(&hashed_file).expect("read hashed cache bytes");
+    let legacy_before_disabled = fs::read(&legacy_file).expect("read legacy cache bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["DISABLENEWPAYLOADLONG9"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["alpha:beta", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("DISABLENEWPAYLOADLONG9 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let hashed_after_disabled = fs::read(&hashed_file).expect("read hashed after disabled run");
+    let legacy_after_disabled = fs::read(&legacy_file).expect("read legacy after disabled run");
+    assert_eq!(
+        hashed_after_disabled, hashed_before_disabled,
+        "hashed cache should remain untouched while cache is disabled"
+    );
+    assert_eq!(
+        legacy_after_disabled, legacy_before_disabled,
+        "legacy cache should remain untouched while cache is disabled"
+    );
+
+    let enabled = run_chopper(&config_home, &cache_home, &["alpha:beta", "enabled-run"]);
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("DISABLENEWPAYLOADLONG9 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt once re-enabled"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned during re-enabled cache refresh"
+    );
+    let hashed_after_enabled = fs::read(&hashed_file).expect("read hashed after enabled run");
+    assert!(
+        hashed_after_enabled
+            .windows(b"DISABLENEWPAYLOADLONG9".len())
+            .any(|window| window == b"DISABLENEWPAYLOADLONG9"),
+        "hashed cache should refresh to new payload once cache is re-enabled"
+    );
+    assert!(
+        !hashed_after_enabled
+            .windows(b"DISABLEOLDPAYLOAD01".len())
+            .any(|window| window == b"DISABLEOLDPAYLOAD01"),
+        "hashed cache should no longer contain stale payload after re-enabled run"
+    );
+}
+
+#[test]
 fn cache_disable_flag_is_case_insensitive_in_e2e_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
