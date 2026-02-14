@@ -62,6 +62,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec == "." || exec == ".." {
         return Err(anyhow!("field `exec` cannot be `.` or `..`"));
     }
+    if exec.ends_with('/') || exec.ends_with('\\') {
+        return Err(anyhow!("field `exec` cannot end with a path separator"));
+    }
     if looks_like_relative_exec_path(exec) && !has_meaningful_relative_segment(exec) {
         return Err(anyhow!(
             "field `exec` must include a path segment when using relative path notation"
@@ -97,6 +100,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
         }
         if script == "." || script == ".." {
             return Err(anyhow!("field `reconcile.script` cannot be `.` or `..`"));
+        }
+        if script.ends_with('/') || script.ends_with('\\') {
+            return Err(anyhow!(
+                "field `reconcile.script` cannot end with a path separator"
+            ));
         }
         if !Path::new(script).is_absolute() && !has_meaningful_relative_segment(script) {
             return Err(anyhow!(
@@ -450,7 +458,25 @@ exec = "./"
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err
             .to_string()
-            .contains("field `exec` must include a path segment"));
+            .contains("field `exec` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_trailing_separator_exec_field_in_toml() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "./bin/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot end with a path separator"));
     }
 
     #[test]
@@ -468,7 +494,7 @@ exec = '.\'
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err
             .to_string()
-            .contains("field `exec` must include a path segment"));
+            .contains("field `exec` cannot end with a path separator"));
     }
 
     #[test]
@@ -579,7 +605,28 @@ script = "./"
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err
             .to_string()
-            .contains("field `reconcile.script` must include a file path"));
+            .contains("field `reconcile.script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_trailing_separator_reconcile_script_field() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "./hooks/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot end with a path separator"));
     }
 
     #[test]
@@ -600,7 +647,7 @@ script = '.\'
         let err = parse(&config).expect_err("expected parse failure");
         assert!(err
             .to_string()
-            .contains("field `reconcile.script` must include a file path"));
+            .contains("field `reconcile.script` cannot end with a path separator"));
     }
 
     #[test]

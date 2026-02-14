@@ -119,6 +119,7 @@ Leading/trailing whitespace in string fields like `exec`, `journal.namespace`,
 `exec` cannot be `.` or `..`.
 Relative `exec` forms like `./` or `.\` must include a path segment
 (for example `./bin/tool`).
+`exec` cannot end with a path separator.
 If `exec` is a relative path (for example `bin/runner`), it is resolved against
 the alias config file's real directory (following symlinks).
 TOML documents may optionally start with a UTF-8 BOM.
@@ -181,6 +182,7 @@ real directory (following symlinks).
 `reconcile.script` cannot be `.` or `..`.
 Relative forms like `./` or `.\` must include a script path segment
 (for example `./hooks/reconcile.rhai`).
+`reconcile.script` cannot end with a path separator.
 
 Example:
 
