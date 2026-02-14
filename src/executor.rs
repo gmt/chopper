@@ -56,13 +56,18 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
     });
 
     let child_status = child.wait().context("failed waiting for child process")?;
-    pump.join()
-        .map_err(|_| anyhow!("stderr pump thread panicked"))?
-        .context("failed piping stderr to systemd-cat")?;
+    let pump_result = pump
+        .join()
+        .map_err(|_| anyhow!("stderr pump thread panicked"))?;
 
     let journal_status = journal_child
         .wait()
         .context("failed waiting for systemd-cat process")?;
+    if let Err(err) = pump_result {
+        if err.kind() != io::ErrorKind::BrokenPipe {
+            return Err(err).context("failed piping stderr to systemd-cat");
+        }
+    }
     if !journal_status.success() {
         return Err(anyhow!(
             "systemd-cat failed with status {journal_status}; journal namespace requires systemd-cat --namespace support"
