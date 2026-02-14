@@ -6162,6 +6162,87 @@ args = ["HASHEDPAYLOAD001"]
 }
 
 #[test]
+fn invalid_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["HASHLEGACYTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYTOKEN1 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    let mut hashed_bytes = fs::read(&hashed_file).expect("read hashed cache file");
+    let replaced = replace_bytes_once(&mut hashed_bytes, b"HASHLEGACYTOKEN1", b"HASH\0EGACYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate hashed cache payload into invalid NUL form"
+    );
+    fs::write(&hashed_file, hashed_bytes).expect("rewrite invalid hashed cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with invalid hashed cache and valid legacy fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYTOKEN1 second-run"), "{stdout}");
+
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after fallback migration"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt after fallback migration"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"HASHLEGACYTOKEN1".len())
+            .any(|window| window == b"HASHLEGACYTOKEN1"),
+        "rebuilt hashed cache should contain valid source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"HASH\0EGACYTOKEN1".len())
+            .any(|window| window == b"HASH\0EGACYTOKEN1"),
+        "rebuilt hashed cache should not retain invalid hashed payload"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_nul_arg_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
