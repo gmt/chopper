@@ -599,6 +599,10 @@ mod tests {
             Some(BuiltinAction::Help)
         );
         assert_eq!(
+            detect_builtin_action(&["..\\CHOPPER.EXE".into(), "--help".into()]),
+            Some(BuiltinAction::Help)
+        );
+        assert_eq!(
             detect_builtin_action(&["C:\\tools\\chopper.exe".into(), "--help".into()]),
             Some(BuiltinAction::Help)
         );
@@ -784,6 +788,17 @@ mod tests {
     fn parse_invocation_rejects_windows_relative_pathlike_symlink_alias() {
         let err = parse_invocation(&[".\\badalias".into()])
             .expect_err("windows-relative path-like symlink alias should be rejected");
+        assert!(
+            err.to_string()
+                .contains("alias name cannot contain path separators"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_invocation_rejects_parent_windows_relative_pathlike_symlink_alias() {
+        let err = parse_invocation(&["..\\badalias".into()])
+            .expect_err("parent windows-relative path-like symlink alias should be rejected");
         assert!(
             err.to_string()
                 .contains("alias name cannot contain path separators"),

@@ -138,6 +138,30 @@ fn short_help_flag_prints_usage_without_alias() {
 }
 
 #[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
 fn direct_alias_invocation_works_when_invoked_as_chopper_exe() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -286,6 +310,28 @@ fn builtin_flags_with_extra_args_via_uppercase_chopper_exe_fall_back_to_alias_va
     let bin_dir = TempDir::new().expect("create bin dir");
     let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
     symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
 
     let output = run_chopper_with(
         chopper_exe,
