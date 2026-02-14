@@ -723,6 +723,73 @@ mod tests {
     }
 
     #[test]
+    fn store_rejects_manifest_with_blank_journal_namespace_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.journal = Some(JournalConfig {
+            namespace: "   ".to_string(),
+            stderr: true,
+            identifier: None,
+        });
+
+        let err = store("invalid-store-journal", &fingerprint, &invalid_manifest)
+            .expect_err("blank journal namespace manifest should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-journal");
+        assert!(
+            !path.exists(),
+            "blank journal namespace manifest should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
+    fn store_rejects_manifest_with_nul_reconcile_function_and_skips_cache_write() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("a.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+
+        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
+        invalid_manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from("hooks/reconcile.rhai"),
+            function: "reco\0ncile".to_string(),
+        });
+
+        let err = store("invalid-store-reconcile", &fingerprint, &invalid_manifest)
+            .expect_err("NUL reconcile function manifest should be rejected on store");
+        assert!(
+            err.to_string()
+                .contains("refusing to store invalid alias cache entry manifest"),
+            "{err}"
+        );
+
+        let path = cache_path("invalid-store-reconcile");
+        assert!(
+            !path.exists(),
+            "NUL reconcile function manifest should not produce cache file"
+        );
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn cache_path_disambiguates_aliases_that_sanitize_to_same_name() {
         let alias_a = "demo/prod";
         let alias_b = "demo:prod";
