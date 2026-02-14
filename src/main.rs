@@ -281,6 +281,16 @@ fn mixed_separator_basename(raw: &str) -> Option<&str> {
     if !(raw.contains('/') && raw.contains('\\')) {
         return None;
     }
+    if !(raw.starts_with('/')
+        || raw.starts_with("\\\\")
+        || has_windows_drive_prefix(raw)
+        || raw.starts_with(".\\")
+        || raw.starts_with("..\\")
+        || raw.starts_with("./")
+        || raw.starts_with("../"))
+    {
+        return None;
+    }
 
     raw.trim_end_matches(['/', '\\'])
         .rsplit(['/', '\\'])
@@ -1547,6 +1557,8 @@ mod tests {
         assert_eq!(mixed_separator_basename("C:\\tools\\CHOPPER.CMD"), None);
         assert_eq!(mixed_separator_basename("/tmp/CHOPPER.CMD"), None);
         assert_eq!(mixed_separator_basename("CHOPPER.CMD"), None);
+        assert_eq!(mixed_separator_basename("alpha/beta\\CHOPPER.CMD"), None);
+        assert_eq!(mixed_separator_basename("alpha\\beta/CHOPPER.CMD"), None);
     }
 
     #[test]
@@ -1564,6 +1576,9 @@ mod tests {
         ]));
         assert!(!is_direct_invocation_executable(&["..\\alias".into()]));
         assert!(!is_direct_invocation_executable(&["/tmp\\alias".into()]));
+        assert!(!is_direct_invocation_executable(&[
+            "alpha/beta\\CHOPPER.EXE".into()
+        ]));
     }
 
     #[test]
