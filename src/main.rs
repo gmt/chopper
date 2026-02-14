@@ -575,6 +575,10 @@ mod tests {
             Some(BuiltinAction::Version)
         );
         assert_eq!(
+            detect_builtin_action(&[".\\CHOPPER.EXE".into(), "--version".into()]),
+            Some(BuiltinAction::Version)
+        );
+        assert_eq!(
             detect_builtin_action(&["/tmp/chopper.exe".into(), "--version".into()]),
             Some(BuiltinAction::Version)
         );
@@ -593,6 +597,13 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["C:\\tools\\chopper.exe".into(), "--print-config-dir".into()]),
             Some(BuiltinAction::PrintConfigDir)
+        );
+        assert_eq!(
+            detect_builtin_action(&[
+                "\\\\server\\tools\\CHOPPER.EXE".into(),
+                "--print-cache-dir".into()
+            ]),
+            Some(BuiltinAction::PrintCacheDir)
         );
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--print-cache-dir".into()]),
