@@ -6050,6 +6050,74 @@ args = ["MAGICPAYLOAD1234"]
 }
 
 #[test]
+fn malformed_cached_manifest_is_rewritten_after_prune_and_reparse() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-rewrite-heal.toml"),
+        r#"
+exec = "echo"
+args = ["REWRITECACHE123"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-rewrite-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REWRITECACHE123 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-rewrite-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"REWRITECACHE123", b"BAD\0");
+    assert!(
+        replaced,
+        "expected to mutate cached argument with invalid NUL payload"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-rewrite-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REWRITECACHE123 second-run"), "{stdout}");
+
+    let healed_cache = fs::read(&cache_file).expect("read healed cache file");
+    assert!(
+        healed_cache
+            .windows(b"REWRITECACHE123".len())
+            .any(|window| window == b"REWRITECACHE123"),
+        "healed cache should contain reparsed source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"BAD\0".len())
+            .any(|window| window == b"BAD\0"),
+        "healed cache should not retain corrupted payload"
+    );
+}
+
+#[test]
 fn malformed_cached_manifest_with_trailing_separator_exec_path_is_pruned_and_reparsed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
