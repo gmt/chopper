@@ -11391,6 +11391,106 @@ args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
 }
 
 #[test]
+fn toml_args_and_env_values_preserve_empty_unicode_and_whitespace_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("value-shapes.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG1=<%s>\nARG2=<%s>\nARG3=<%s>\nENV_EMPTY=<%s>\nENV_UNICODE=<%s>\nENV_SPACED=<%s>\n' \"$1\" \"$2\" \"$3\" \"$CHOPPER_EMPTY\" \"$CHOPPER_UNICODE\" \"$CHOPPER_SPACED\"",
+  "_",
+  "",
+  "emoji🚀",
+  " spaced value "
+]
+
+[env]
+CHOPPER_EMPTY = ""
+CHOPPER_UNICODE = "emoji🚀"
+CHOPPER_SPACED = " spaced value "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["value-shapes"]);
+    assert!(
+        output.status.success(),
+        "value-shapes command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG1=<>"), "{stdout}");
+    assert!(stdout.contains("ARG2=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ARG3=< spaced value >"), "{stdout}");
+    assert!(stdout.contains("ENV_EMPTY=<>"), "{stdout}");
+    assert!(stdout.contains("ENV_UNICODE=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ENV_SPACED=< spaced value >"), "{stdout}");
+}
+
+#[test]
+fn reconcile_patch_preserves_empty_unicode_and_whitespace_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("value-shapes.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["", "emoji🚀", " spaced value "],
+    set_env: #{
+      "CHOPPER_EMPTY": "",
+      "CHOPPER_UNICODE": "emoji🚀",
+      " CHOPPER_SPACED ": " spaced value "
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-value-shapes.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARGS=<%s>|<%s>|<%s>|<%s>\nENV_EMPTY=<%s>\nENV_UNICODE=<%s>\nENV_SPACED=<%s>\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$CHOPPER_EMPTY\" \"$CHOPPER_UNICODE\" \"$CHOPPER_SPACED\"",
+  "_",
+  "base"
+]
+
+[reconcile]
+script = "value-shapes.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-value-shapes"]);
+    assert!(
+        output.status.success(),
+        "reconcile-value-shapes command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=<base>|<>|<emoji🚀>|< spaced value >"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("ENV_EMPTY=<>"), "{stdout}");
+    assert!(stdout.contains("ENV_UNICODE=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ENV_SPACED=< spaced value >"), "{stdout}");
+}
+
+#[test]
 fn direct_invocation_strips_double_dash_separator() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
