@@ -47,6 +47,9 @@ Use this directory when you need behavior details beyond quickstart usage.
 - [`cli-reference.md`](cli-reference.md)
   - command-oriented invocation and env control reference
   - built-ins, toggles, and mode semantics at a glance
+- [`config-reference.md`](config-reference.md)
+  - field-by-field alias DSL reference
+  - required/optional keys and defaults
 - [`faq.md`](faq.md)
   - short answers to common "where do I look?" questions
   - quick links to the right doc for each task

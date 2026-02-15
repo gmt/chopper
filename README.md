@@ -160,6 +160,7 @@ Fast routing:
 
 - command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
 - cli command details: [`doc/cli-reference.md`](doc/cli-reference.md)
+- config field reference: [`doc/config-reference.md`](doc/config-reference.md)
 - copy/paste workflows: [`doc/examples.md`](doc/examples.md)
 - migration from legacy aliases: [`doc/migration.md`](doc/migration.md)
 - terminology lookup: [`doc/glossary.md`](doc/glossary.md)
