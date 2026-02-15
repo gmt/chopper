@@ -26,11 +26,18 @@ Use [`operational-spec.md`](operational-spec.md).
 CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 ```
 
+Only truthy values disable it (`1`, `true`, `yes`, `on`; trimmed and
+case-insensitive). Blank/unknown values (including CRLF-wrapped strings) keep
+cache enabled.
+
 ## How do I disable reconcile for one invocation?
 
 ```bash
 CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 ```
+
+Uses the same truthy parsing as cache disable; blank/unknown values keep
+reconcile enabled.
 
 ## Where are aliases loaded from?
 
