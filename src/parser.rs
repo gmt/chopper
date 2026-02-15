@@ -15,7 +15,7 @@ pub fn parse(path: &Path) -> Result<Manifest> {
     if is_toml_path(path) {
         parse_toml(strip_utf8_bom(&content), path)
     } else {
-        parse_trivial(&content)
+        parse_trivial(&content, path)
     }
 }
 
@@ -26,7 +26,7 @@ fn is_toml_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_trivial(content: &str) -> Result<Manifest> {
+fn parse_trivial(content: &str, path: &Path) -> Result<Manifest> {
     let line = content
         .lines()
         .map(normalize_legacy_line)
@@ -40,7 +40,8 @@ fn parse_trivial(content: &str) -> Result<Manifest> {
     validate_legacy_command_token(&parts[0])?;
     validate_arg_values(&parts[1..], "legacy alias args")?;
 
-    let exec = which::which(&parts[0]).unwrap_or_else(|_| parts[0].clone().into());
+    let base_dir = config_base_dir(path);
+    let exec = resolve_exec_path(&base_dir, &parts[0]);
 
     let args = parts[1..].to_vec();
 
@@ -410,6 +411,37 @@ mod tests {
                 r"windows\path".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn resolves_relative_legacy_command_against_config_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config_dir = temp.path().join("chopper");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let alias = config_dir.join("legacy-relative");
+        fs::write(&alias, "'bin/runner @v1' base").expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(manifest.exec, config_dir.join("bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
+    }
+
+    #[test]
+    fn resolves_relative_legacy_command_against_symlink_target_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let aliases_dir = temp.path().join("aliases");
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+        fs::create_dir_all(&shared_dir).expect("create shared dir");
+
+        let target = shared_dir.join("legacy-target");
+        fs::write(&target, "'bin/runner @v1' base").expect("write target config");
+        let link = aliases_dir.join("legacy-link");
+        symlink(&target, &link).expect("create legacy symlink");
+
+        let manifest = parse(&link).expect("parse symlinked legacy config");
+        assert_eq!(manifest.exec, shared_dir.join("bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
     }
 
     #[test]

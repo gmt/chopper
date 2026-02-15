@@ -126,6 +126,8 @@ or trailing `.` / `..` path components.
 Legacy command and argument tokens cannot contain NUL bytes.
 Legacy arguments are otherwise preserved as provided (for example
 `--flag=value`, `../relative/path`, `$DOLLAR`, and `windows\path`).
+If a legacy command token is a relative path (for example `bin/runner`), it is
+resolved against the alias file's real directory (following symlinks).
 
 ---
 

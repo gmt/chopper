@@ -15604,6 +15604,62 @@ fn legacy_one_line_alias_remains_supported() {
 }
 
 #[test]
+fn legacy_one_line_alias_resolves_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(chopper_dir.join("legacy-relative"), "'bin/runner @v1' base")
+        .expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-relative", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACY_REL_EXEC=base runtime"), "{stdout}");
+}
+
+#[test]
+fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create shared bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-target");
+    fs::write(&target, "'bin/runner @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-link", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
