@@ -21,11 +21,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## Documentation map
 
-- User quickstart: `README.md`
-- Full docs index: `doc/README.md`
-- Behavioral semantics: `doc/operational-spec.md`
-- Testing workflow: `doc/testing.md`
-- Release prep: `doc/release-checklist.md`
+- User quickstart: [`README.md`](README.md)
+- Full docs index: [`doc/README.md`](doc/README.md)
+- Status snapshot: [`doc/project-status.md`](doc/project-status.md)
+- Decision rationale: [`doc/decision-log.md`](doc/decision-log.md)
+- Behavioral semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
+- Testing workflow: [`doc/testing.md`](doc/testing.md)
+- Release prep: [`doc/release-checklist.md`](doc/release-checklist.md)
 
 ## Before opening a PR
 

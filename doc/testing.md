@@ -40,6 +40,8 @@ Examples:
 cargo test print_dir_builtins_trim_crlf_wrapped_symbolic_override_paths -- --nocapture
 cargo test cache_disable_flag_crlf_wrapped_truthy_disables_cache_in_e2e_flow -- --nocapture
 cargo test reconcile_disable_flag_crlf_wrapped_falsey_value_keeps_reconcile_enabled -- --nocapture
+cargo test cache_disable_flag_crlf_wrapped_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry -- --nocapture
+cargo test reconcile_disable_flag_crlf_wrapped_unknown_value_keeps_reconcile_enabled -- --nocapture
 ```
 
 ---
