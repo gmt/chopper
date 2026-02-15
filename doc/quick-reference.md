@@ -54,6 +54,9 @@ Truthy values (case-insensitive, trimmed):
 - `yes`
 - `on`
 
+Matching is ASCII case-insensitive; non-ASCII lookalike tokens (for example
+`ＴＲＵＥ`) are treated as unknown values.
+
 Blank/unknown values (including whitespace or CRLF-wrapped values) keep cache
 and reconcile enabled.
 

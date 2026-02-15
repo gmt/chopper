@@ -283,10 +283,12 @@ per-invocation:
 CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 ```
 
-`CHOPPER_DISABLE_RECONCILE` uses trimmed, case-insensitive truthy parsing:
+`CHOPPER_DISABLE_RECONCILE` uses trimmed, ASCII case-insensitive truthy parsing:
 `1`, `true`, `yes`, and `on` disable reconcile. Blank, falsey (`0`, `false`,
 `no`, `off`), or unknown values leave reconcile enabled. This includes
 whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.
+Non-ASCII lookalike tokens (for example fullwidth `ＴＲＵＥ`) are treated as
+unknown and therefore leave reconcile enabled.
 
 Examples that **leave reconcile enabled**:
 
@@ -346,10 +348,13 @@ For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 ```
 
-`CHOPPER_DISABLE_CACHE` uses the same trimmed, case-insensitive truthy parsing:
+`CHOPPER_DISABLE_CACHE` uses the same trimmed, ASCII case-insensitive truthy
+parsing:
 `1`, `true`, `yes`, and `on` disable cache. Blank, falsey (`0`, `false`, `no`,
 `off`), or unknown values keep cache enabled. This includes
 whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.
+Non-ASCII lookalike tokens (for example fullwidth `ＴＲＵＥ`) are treated as
+unknown and therefore keep cache enabled.
 
 Examples that **keep cache enabled**:
 
