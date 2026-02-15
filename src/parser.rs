@@ -1426,6 +1426,43 @@ CHOPPER_WIN = 'windows\path'
     }
 
     #[test]
+    fn preserves_env_keys_with_symbolic_and_pathlike_shapes() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("env-keys.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+" KEY-WITH-DASH " = "dash"
+"KEY.WITH.DOT" = "dot"
+"KEY/WITH/SLASH" = "slash"
+"KEY\\WITH\\BACKSLASH" = "backslash"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest.env.get("KEY-WITH-DASH").map(String::as_str),
+            Some("dash")
+        );
+        assert_eq!(
+            manifest.env.get("KEY.WITH.DOT").map(String::as_str),
+            Some("dot")
+        );
+        assert_eq!(
+            manifest.env.get("KEY/WITH/SLASH").map(String::as_str),
+            Some("slash")
+        );
+        assert_eq!(
+            manifest.env.get(r"KEY\WITH\BACKSLASH").map(String::as_str),
+            Some("backslash")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn rejects_env_remove_entries_containing_equals_sign() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");

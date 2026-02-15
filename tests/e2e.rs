@@ -11919,6 +11919,88 @@ script = "env-symbols.reconcile.rhai"
 }
 
 #[test]
+fn toml_env_keys_allow_symbolic_and_pathlike_shapes_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-symbols.toml"),
+        r#"
+exec = "env"
+
+[env]
+" KEY-WITH-DASH " = "dash"
+"KEY.WITH.DOT" = "dot"
+"KEY/WITH/SLASH" = "slash"
+"KEY\\WITH\\BACKSLASH" = "backslash"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-symbols"]);
+    assert!(
+        output.status.success(),
+        "env-key-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("KEY-WITH-DASH=dash"), "{stdout}");
+    assert!(stdout.contains("KEY.WITH.DOT=dot"), "{stdout}");
+    assert!(stdout.contains("KEY/WITH/SLASH=slash"), "{stdout}");
+    assert!(stdout.contains(r"KEY\WITH\BACKSLASH=backslash"), "{stdout}");
+}
+
+#[test]
+fn reconcile_set_env_keys_allow_symbolic_and_pathlike_shapes_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      " KEY-WITH-DASH ": "dash",
+      "KEY.WITH.DOT": "dot",
+      "KEY/WITH/SLASH": "slash",
+      "KEY\\WITH\\BACKSLASH": "backslash"
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-env-key-symbols.toml"),
+        r#"
+exec = "env"
+
+[reconcile]
+script = "env-key-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-env-key-symbols"]);
+    assert!(
+        output.status.success(),
+        "reconcile-env-key-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("KEY-WITH-DASH=dash"), "{stdout}");
+    assert!(stdout.contains("KEY.WITH.DOT=dot"), "{stdout}");
+    assert!(stdout.contains("KEY/WITH/SLASH=slash"), "{stdout}");
+    assert!(stdout.contains(r"KEY\WITH\BACKSLASH=backslash"), "{stdout}");
+}
+
+#[test]
 fn toml_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

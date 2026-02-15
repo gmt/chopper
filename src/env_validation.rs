@@ -37,6 +37,14 @@ mod tests {
     }
 
     #[test]
+    fn env_key_validator_accepts_symbolic_and_pathlike_keys() {
+        assert!(validate_env_key("KEY-WITH-DASH").is_ok());
+        assert!(validate_env_key("KEY.WITH.DOT").is_ok());
+        assert!(validate_env_key("KEY/WITH/SLASH").is_ok());
+        assert!(validate_env_key(r"KEY\WITH\BACKSLASH").is_ok());
+    }
+
+    #[test]
     fn env_value_validator_accepts_empty_and_unicode_values() {
         assert!(validate_env_value("").is_ok());
         assert!(validate_env_value("value with spaces").is_ok());

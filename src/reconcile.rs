@@ -482,6 +482,53 @@ fn reconcile(_ctx) {
     }
 
     #[test]
+    fn reconcile_accepts_symbolic_and_pathlike_set_env_keys() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("env-key-symbols.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      " KEY-WITH-DASH ": "dash",
+      "KEY.WITH.DOT": "dot",
+      "KEY/WITH/SLASH": "slash",
+      "KEY\\WITH\\BACKSLASH": "backslash"
+    }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.set_env.get("KEY-WITH-DASH"),
+            Some(&"dash".to_string())
+        );
+        assert_eq!(patch.set_env.get("KEY.WITH.DOT"), Some(&"dot".to_string()));
+        assert_eq!(
+            patch.set_env.get("KEY/WITH/SLASH"),
+            Some(&"slash".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get(r"KEY\WITH\BACKSLASH"),
+            Some(&"backslash".to_string())
+        );
+    }
+
+    #[test]
     fn reconcile_requires_map_return_type() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");
