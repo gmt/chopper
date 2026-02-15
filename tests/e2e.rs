@@ -14436,6 +14436,50 @@ script = "reconcile-remove-equals.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_remove_env_entry_with_mixed_whitespace_equals_sign_fails_validation_in_end_to_end_flow(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["\n\t BAD=KEY \t\n"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals-mixed.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-equals-mixed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-equals-mixed"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_remove_env_entry_with_nul_byte_fails_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -14467,6 +14511,45 @@ script = "reconcile-remove-nul.reconcile.rhai"
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_mixed_whitespace_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["\n\t BAD\x00KEY \t\n"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul-mixed.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-nul-mixed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-nul-mixed"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -14663,6 +14746,31 @@ env_remove = ["BAD=KEY"]
 }
 
 #[test]
+fn env_remove_entry_with_mixed_whitespace_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-invalid-mixed.toml"),
+        r#"
+exec = "echo"
+env_remove = ["\n\t BAD=KEY \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-invalid-mixed"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn env_remove_entry_with_nul_escape_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -14679,6 +14787,31 @@ env_remove = ["BAD\u0000KEY"]
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["envremove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn env_remove_entry_with_mixed_whitespace_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-nul-mixed.toml"),
+        r#"
+exec = "echo"
+env_remove = ["\n\t BAD\u0000KEY \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-nul-mixed"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
