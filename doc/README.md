@@ -40,6 +40,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - implementation status summary
   - completed capability matrix
   - current "what remains" snapshot
+- [`decision-log.md`](decision-log.md)
+  - key architectural bets
+  - rationale for major design choices
 - [`architecture.md`](architecture.md)
   - runtime flow overview
   - module ownership map

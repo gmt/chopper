@@ -185,6 +185,7 @@ Fast routing:
 - terminology lookup: [`doc/glossary.md`](doc/glossary.md)
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - architecture overview: [`doc/architecture.md`](doc/architecture.md)
+- implementation decision rationale: [`doc/decision-log.md`](doc/decision-log.md)
 - local validation/testing commands: [`doc/testing.md`](doc/testing.md)
 - release prep checklist: [`doc/release-checklist.md`](doc/release-checklist.md)
 - implementation progress snapshot: [`doc/project-status.md`](doc/project-status.md)
