@@ -1077,6 +1077,8 @@ mod tests {
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "definitely-not");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\nmaybe\r\n");
+        assert!(cache_enabled());
         env::remove_var("CHOPPER_DISABLE_CACHE");
     }
 
