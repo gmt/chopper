@@ -67,6 +67,8 @@ mod tests {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::set_var("CHOPPER_TEST_FLAG", "false");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\u{00A0}FaLsE\u{00A0}");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "\r\nFaLsE\r\n");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "\r\n0\r\n");
