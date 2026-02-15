@@ -4407,6 +4407,56 @@ fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_un
 }
 
 #[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_unc_windows_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_default_to_xdg_roots() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
