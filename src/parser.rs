@@ -1307,6 +1307,31 @@ identifier = "\n\t  \t\n"
     }
 
     #[test]
+    fn preserves_journal_symbolic_and_pathlike_namespace_and_identifier() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("journal-symbols.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[journal]
+namespace = "  ops/ns.prod@2026  "
+identifier = '  svc.id/worker\edge@2026  '
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let journal = manifest.journal.expect("journal config");
+        assert_eq!(journal.namespace, "ops/ns.prod@2026");
+        assert_eq!(
+            journal.identifier.as_deref(),
+            Some(r"svc.id/worker\edge@2026")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn trims_reconcile_script_and_function() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("trimmed.toml");

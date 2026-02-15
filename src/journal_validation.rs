@@ -80,6 +80,13 @@ mod tests {
     }
 
     #[test]
+    fn namespace_normalization_accepts_symbolic_and_pathlike_values() {
+        let out = normalize_namespace("ops/ns.prod@2026")
+            .expect("symbolic/pathlike namespace should normalize");
+        assert_eq!(out, "ops/ns.prod@2026");
+    }
+
+    #[test]
     fn config_identifier_normalization_treats_blank_as_unset() {
         let out = normalize_optional_identifier_for_config(Some("   "))
             .expect("blank identifier should normalize");
@@ -117,6 +124,25 @@ mod tests {
             normalize_optional_identifier_for_invocation(Some("  chopper  "))
                 .expect("invocation identifier should normalize");
         assert_eq!(invocation_identifier, Some("chopper".to_string()));
+    }
+
+    #[test]
+    fn identifier_normalization_accepts_symbolic_and_pathlike_values() {
+        let config_identifier =
+            normalize_optional_identifier_for_config(Some("svc.id/worker\\edge@2026"))
+                .expect("config identifier should normalize");
+        assert_eq!(
+            config_identifier,
+            Some("svc.id/worker\\edge@2026".to_string())
+        );
+
+        let invocation_identifier =
+            normalize_optional_identifier_for_invocation(Some("svc.id/worker\\edge@2026"))
+                .expect("invocation identifier should normalize");
+        assert_eq!(
+            invocation_identifier,
+            Some("svc.id/worker\\edge@2026".to_string())
+        );
     }
 
     #[test]

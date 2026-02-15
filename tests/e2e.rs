@@ -7399,6 +7399,66 @@ identifier = "\n\t id-trimmed \t\n"
 }
 
 #[test]
+fn journal_namespace_and_identifier_symbolic_shapes_are_forwarded_unchanged() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-symbolic-forward.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops/ns.prod@2026  "
+stderr = true
+identifier = '  svc.id/worker\edge@2026  '
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-symbolic-forward"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops/ns.prod@2026"),
+        "symbolic namespace should be forwarded: {captured_args_text}"
+    );
+    assert!(
+        captured_args_text.contains(r"--identifier=svc.id/worker\edge@2026"),
+        "symbolic identifier should be forwarded: {captured_args_text}"
+    );
+}
+
+#[test]
 fn journal_namespace_with_nul_escape_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
