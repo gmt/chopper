@@ -472,6 +472,42 @@ mod tests {
     }
 
     #[test]
+    fn resolves_dot_prefixed_legacy_command_against_symlink_target_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let aliases_dir = temp.path().join("aliases");
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+        fs::create_dir_all(&shared_dir).expect("create shared dir");
+
+        let target = shared_dir.join("legacy-dot-target");
+        fs::write(&target, "'./bin/runner @v1' base").expect("write target config");
+        let link = aliases_dir.join("legacy-dot-link");
+        symlink(&target, &link).expect("create legacy symlink");
+
+        let manifest = parse(&link).expect("parse symlinked legacy config");
+        assert_eq!(manifest.exec, shared_dir.join("./bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
+    }
+
+    #[test]
+    fn resolves_parent_relative_legacy_command_against_symlink_target_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let aliases_dir = temp.path().join("aliases");
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+        fs::create_dir_all(&shared_dir).expect("create shared dir");
+
+        let target = shared_dir.join("legacy-parent-target");
+        fs::write(&target, "'../outside-bin/runner @v1' base").expect("write target config");
+        let link = aliases_dir.join("legacy-parent-link");
+        symlink(&target, &link).expect("create legacy symlink");
+
+        let manifest = parse(&link).expect("parse symlinked legacy config");
+        assert_eq!(manifest.exec, shared_dir.join("../outside-bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
+    }
+
+    #[test]
     fn parses_trivial_legacy_alias_after_blank_and_comment_lines() {
         let temp = TempDir::new().expect("create tempdir");
         let alias = temp.path().join("legacy");

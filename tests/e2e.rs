@@ -15731,6 +15731,74 @@ fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
 }
 
 #[test]
+fn symlinked_legacy_alias_resolves_dot_prefixed_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create shared bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-dot @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_DOT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-dot-target");
+    fs::write(&target, "'./bin/runner-dot @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-dot-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-dot-link", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_DOT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn symlinked_legacy_alias_resolves_parent_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let shared_bin = shared_dir.join("bin");
+    let outside_bin = chopper_dir.join("outside-bin");
+    fs::create_dir_all(&shared_bin).expect("create shared bin dir");
+    fs::create_dir_all(&outside_bin).expect("create outside bin dir");
+
+    write_executable_script(
+        &outside_bin.join("runner-parent @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_PARENT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-parent-target");
+    fs::write(&target, "'../outside-bin/runner-parent @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-parent-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-parent-link", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_PARENT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn legacy_relative_command_cache_invalidation_reparses_updated_command() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
