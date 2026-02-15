@@ -44,6 +44,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - compact command lookup
   - env override/toggle cheat sheet
   - alias discovery path summary
+- [`cli-reference.md`](cli-reference.md)
+  - command-oriented invocation and env control reference
+  - built-ins, toggles, and mode semantics at a glance
 - [`faq.md`](faq.md)
   - short answers to common "where do I look?" questions
   - quick links to the right doc for each task
