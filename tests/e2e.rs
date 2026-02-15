@@ -15339,6 +15339,31 @@ args = ["CACHEUNICODESRC01"]
         !mixed_stdout.contains("CACHEUNICODESRC01 runtime2"),
         "mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
     );
+
+    let nbsp_wrapped_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\u{00A0}ＴＲＵＥ\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        nbsp_wrapped_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&nbsp_wrapped_output.stderr)
+    );
+    let nbsp_wrapped_stdout = String::from_utf8_lossy(&nbsp_wrapped_output.stdout);
+    assert!(
+        nbsp_wrapped_stdout.contains("CACHEUNICODEHIT02 runtime3"),
+        "NBSP-wrapped unicode lookalike values should keep cache enabled: {nbsp_wrapped_stdout}"
+    );
+    assert!(
+        !nbsp_wrapped_stdout.contains("CACHEUNICODESRC01 runtime3"),
+        "NBSP-wrapped unicode lookalike values must not bypass cache: {nbsp_wrapped_stdout}"
+    );
 }
 
 #[test]
@@ -15429,6 +15454,31 @@ args = ["CACHEUNICODECRLFSRC"]
     assert!(
         !mixed_stdout.contains("CACHEUNICODECRLFSRC runtime2"),
         "CRLF-wrapped mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
+    );
+
+    let crlf_nbsp_mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\r\n\u{00A0}Ｔrue\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        crlf_nbsp_mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&crlf_nbsp_mixed_output.stderr)
+    );
+    let crlf_nbsp_mixed_stdout = String::from_utf8_lossy(&crlf_nbsp_mixed_output.stdout);
+    assert!(
+        crlf_nbsp_mixed_stdout.contains("CACHEUNICODECRLFHIT runtime3"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes should keep cache enabled: {crlf_nbsp_mixed_stdout}"
+    );
+    assert!(
+        !crlf_nbsp_mixed_stdout.contains("CACHEUNICODECRLFSRC runtime3"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes must not bypass cache: {crlf_nbsp_mixed_stdout}"
     );
 }
 
@@ -16752,6 +16802,27 @@ script = "toggle-unknown-unicode.reconcile.rhai"
         mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode"),
         "mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
     );
+
+    let nbsp_wrapped_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{00A0}ＴＲＵＥ\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        nbsp_wrapped_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&nbsp_wrapped_output.stderr)
+    );
+    let nbsp_wrapped_stdout = String::from_utf8_lossy(&nbsp_wrapped_output.stdout);
+    assert!(
+        nbsp_wrapped_stdout.contains("ARGS=base runtime3 from_reconcile_unknown_unicode"),
+        "NBSP-wrapped unicode lookalike values should not disable reconcile: {nbsp_wrapped_stdout}"
+    );
 }
 
 #[test]
@@ -16819,6 +16890,27 @@ script = "toggle-unknown-unicode-crlf.reconcile.rhai"
     assert!(
         mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode_crlf"),
         "CRLF-wrapped mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
+    );
+
+    let crlf_nbsp_mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\r\n\u{00A0}Ｔrue\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        crlf_nbsp_mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&crlf_nbsp_mixed_output.stderr)
+    );
+    let crlf_nbsp_mixed_stdout = String::from_utf8_lossy(&crlf_nbsp_mixed_output.stdout);
+    assert!(
+        crlf_nbsp_mixed_stdout.contains("ARGS=base runtime3 from_reconcile_unknown_unicode_crlf"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes should not disable reconcile: {crlf_nbsp_mixed_stdout}"
     );
 }
 

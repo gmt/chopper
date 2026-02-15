@@ -105,6 +105,10 @@ mod tests {
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "Ｔrue");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\u{00A0}ＴＲＵＥ\u{00A0}");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\n\u{00A0}Ｔrue\u{00A0}\r\n");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::remove_var("CHOPPER_TEST_FLAG");
     }
 
