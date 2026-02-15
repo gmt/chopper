@@ -1,0 +1,7 @@
+exec = "sh"
+args = ["-c", "echo ok; echo err >&2"]
+
+[journal]
+namespace = "ops"
+stderr = true
+identifier = "example-journal-alias"

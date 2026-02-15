@@ -1,0 +1,21062 @@
+use std::fs;
+use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use tempfile::TempDir;
+
+fn chopper_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_chopper"))
+}
+
+fn run_chopper(config_home: &TempDir, cache_home: &TempDir, args: &[&str]) -> Output {
+    run_chopper_with(
+        chopper_bin(),
+        config_home,
+        cache_home,
+        args,
+        std::iter::empty::<(&str, String)>(),
+    )
+}
+
+fn run_chopper_with(
+    executable: PathBuf,
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    args: &[&str],
+    env_vars: impl IntoIterator<Item = (&'static str, String)>,
+) -> Output {
+    let mut cmd = Command::new(executable);
+    cmd.args(args)
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path());
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("failed to run chopper")
+}
+
+fn run_chopper_with_cwd_and_argv0(
+    executable: PathBuf,
+    argv0: &str,
+    working_dir: &Path,
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    args: &[&str],
+    env_vars: impl IntoIterator<Item = (&'static str, String)>,
+) -> Output {
+    let mut cmd = Command::new(executable);
+    cmd.arg0(argv0)
+        .current_dir(working_dir)
+        .args(args)
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path());
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("failed to run chopper")
+}
+
+fn write_executable_script(path: &Path, body: &str) {
+    fs::write(path, body).expect("write script");
+    let mut perms = fs::metadata(path).expect("script metadata").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).expect("set executable permissions");
+}
+
+fn replace_bytes_once(haystack: &mut [u8], needle: &[u8], replacement: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() != replacement.len() || needle.len() > haystack.len() {
+        return false;
+    }
+    for idx in 0..=(haystack.len() - needle.len()) {
+        if haystack[idx..idx + needle.len()] == *needle {
+            haystack[idx..idx + replacement.len()].copy_from_slice(replacement);
+            return true;
+        }
+    }
+    false
+}
+
+fn replace_bytes_once_resizing(haystack: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let Some(idx) = haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+    else {
+        return false;
+    };
+    haystack.splice(idx..idx + needle.len(), replacement.iter().copied());
+    true
+}
+
+#[test]
+fn help_flag_prints_usage_without_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--help"]);
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("CHOPPER_DISABLE_CACHE"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_without_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &[]);
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("Built-ins:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_windows_relative_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn windows_relative_uppercase_chopper_cmd_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("winrel.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["winrel", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_parent_windows_relative_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "..\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn parent_windows_relative_uppercase_chopper_com_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("winrelparent.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "..\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["winrelparent", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via parent windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_unc_windows_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server\\tools\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn unc_windows_uppercase_chopper_com_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("uncwin.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server\\tools\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["uncwin", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via UNC windows CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_drive_windows_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "D:\\bin\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn drive_windows_uppercase_chopper_cmd_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("drivewin.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:\\tools\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["drivewin", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via drive windows CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_drive_windows_forward_slash_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:/tools/CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn forward_slash_unc_uppercase_chopper_com_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("uncfwd.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "//server/tools/CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["uncfwd", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via forward-slash UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_mixed_separator_drive_windows_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:/tools\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn mixed_separator_unc_uppercase_chopper_bat_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("uncmix.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server/tools\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["uncmix", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed-separator UNC CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn mixed_absolute_unix_windows_uppercase_chopper_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixabsbare.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["mixabsbare", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn mixed_absolute_unix_windows_uppercase_chopper_with_trailing_separator_supports_direct_alias_invocation(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixabstrail.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["mixabstrail", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed absolute trailing CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn mixed_absolute_unix_windows_uppercase_chopper_bat_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixabs.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["mixabs", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed absolute CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_unix_relative_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "./CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn unix_parent_relative_uppercase_chopper_cmd_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("unixrel.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "../CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["unixrel", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via unix parent-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_mixed_relative_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "./nested\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn mixed_relative_uppercase_chopper_bat_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixrel.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "../nested/CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["mixrel", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via mixed-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn no_args_prints_usage_when_invoked_as_drive_forward_slash_uppercase_chopper_cmd_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:/tools/CHOPPER.CMD/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "no-args command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn unc_backslash_uppercase_chopper_com_with_trailing_separator_supports_direct_alias_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("unctrail.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server\\tools\\CHOPPER.COM\\";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["unctrail", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via UNC trailing CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_without_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["-h"]);
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("1,true,yes,on"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn short_help_flag_prints_usage_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn help_flag_prints_usage_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "help command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn direct_alias_invocation_works_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("fromexe.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["fromexe", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn direct_alias_invocation_works_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("fromupper.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["fromupper", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "direct invocation via CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn version_flag_prints_binary_version() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--version"]);
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["-V"]);
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn short_version_flag_prints_binary_version_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "short version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn version_flag_prints_binary_version_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected version in output: {stdout}"
+    );
+}
+
+#[test]
+fn builtin_flags_with_extra_args_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--help", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["-h", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-cache-dir", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["--version", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["-V", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-config-dir", "extra"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_chopper_exe_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_chopper_cmd_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_chopper_bat_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_bat_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_chopper_com_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_cmd_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_com_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_exe_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["-h", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_windows_relative_uppercase_chopper_bat_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["-h", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_parent_windows_relative_uppercase_chopper_cmd_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "..\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_unc_windows_uppercase_chopper_bat_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server\\tools\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_drive_windows_uppercase_chopper_com_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:\\tools\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_unix_relative_uppercase_chopper_bat_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "./CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_forward_slash_unc_uppercase_chopper_cmd_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "//server/tools/CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_mixed_separator_unc_uppercase_chopper_com_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server/tools\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_mixed_relative_uppercase_chopper_com_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "./nested\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_mixed_absolute_unix_windows_uppercase_chopper_cmd_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_mixed_absolute_unix_windows_uppercase_chopper_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_mixed_absolute_unix_windows_uppercase_chopper_with_trailing_separator_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_nested_relative_uppercase_chopper_bat_with_trailing_separator_fall_back_to_alias_validation_error(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "../nested/CHOPPER.BAT/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn builtin_flags_with_extra_args_via_uppercase_chopper_fall_back_to_alias_validation_error() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["-h", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn print_dir_builtins_report_resolved_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            override_config.path().display().to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            override_cache.path().display().to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_whitespace_wrapped_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_crlf_wrapped_symbolic_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\r\n{}\r\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\r\n{}\r\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_chopper_cmd()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_chopper_exe()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_chopper_bat()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_chopper_com()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase).expect("create uppercase chopper symlink");
+
+    let output = run_chopper_with(
+        uppercase.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        uppercase,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_windows_relative_uppercase_chopper(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_windows_relative_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_windows_relative_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_windows_relative_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &uppercase_chopper_cmd).expect("create uppercase chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &uppercase_chopper_bat).expect("create uppercase chopper.bat symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &uppercase_chopper_com).expect("create uppercase chopper.com symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &uppercase_chopper_exe).expect("create uppercase chopper.exe symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_unc_windows_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_unc_windows_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_unc_windows_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_unc_windows_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via trailing mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via trailing mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_drive_forward_slash_uppercase_chopper_com_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "E:/tools/CHOPPER.COM/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via trailing-separator CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via trailing-separator CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create uppercase chopper symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &uppercase_chopper_com).expect("create uppercase chopper.com symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &uppercase_chopper_cmd).expect("create uppercase chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &uppercase_chopper_bat).expect("create uppercase chopper.bat symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &uppercase_chopper_exe).expect("create uppercase chopper.exe symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create uppercase chopper symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &uppercase_chopper_com).expect("create uppercase chopper.com symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("  {}  ", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("  {}  ", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_windows_relative_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        ".\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_unc_windows_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_unc_windows_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_unc_windows_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_unc_windows_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "\\\\server\\tools\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_default_to_xdg_roots() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-config-dir"]);
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-cache-dir"]);
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("chopper.cmd");
+    symlink(chopper_bin(), &chopper_cmd).expect("create chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.cmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("chopper.bat");
+    symlink(chopper_bin(), &chopper_bat).expect("create chopper.bat symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.bat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("chopper.com");
+    symlink(chopper_bin(), &chopper_com).expect("create chopper.com symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.com failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &chopper_cmd).expect("create CHOPPER.CMD symlink");
+
+    let output = run_chopper_with(
+        chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &chopper_bat).expect("create CHOPPER.BAT symlink");
+
+    let output = run_chopper_with(
+        chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_com = bin_dir.path().join("CHOPPER.COM");
+    symlink(chopper_bin(), &chopper_com).expect("create CHOPPER.COM symlink");
+
+    let output = run_chopper_with(
+        chopper_com.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_com,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &chopper_exe).expect("create CHOPPER.EXE symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_windows_relative_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = ".\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_parent_windows_relative_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "..\\CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_unc_windows_uppercase_chopper_cmd() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "\\\\server\\tools\\CHOPPER.CMD";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via UNC windows CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via UNC windows CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_drive_windows_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "E:\\tools\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via drive windows CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via drive windows CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_unix_parent_relative_uppercase_chopper_exe() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "../CHOPPER.EXE";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via unix parent-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via unix parent-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_drive_windows_forward_slash_uppercase_chopper_bat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "D:/bin/CHOPPER.BAT";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via drive forward-slash CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via drive forward-slash CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_separator_drive_windows_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "C:/tools\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed-separator drive CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed-separator drive CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_relative_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "./nested\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_com() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER.COM";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed absolute CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_mixed_absolute_unix_windows_uppercase_chopper_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "/tmp\\CHOPPER/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via trailing mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via trailing mixed absolute CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_drive_forward_slash_uppercase_chopper_com_with_trailing_separator(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let wrapper_name = "E:/tools/CHOPPER.COM/";
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via trailing-separator CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        wrapper_name,
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via trailing-separator CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_work_when_invoked_as_uppercase_chopper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper = bin_dir.path().join("CHOPPER");
+    symlink(chopper_bin(), &uppercase_chopper).expect("create CHOPPER symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        uppercase_chopper,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via CHOPPER failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn print_dir_builtins_ignore_blank_overrides() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [("CHOPPER_CONFIG_DIR", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        config_home.path().join("chopper").display().to_string()
+    );
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [("CHOPPER_CACHE_DIR", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        cache_home.path().join("chopper").display().to_string()
+    );
+}
+
+#[test]
+fn symlink_mode_does_not_treat_help_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("helpcheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("helpcheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--help"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--help"), "{stdout}");
+    assert!(!stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_help_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("helpextracheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("helpextracheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--help", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--help extra"), "{stdout}");
+    assert!(!stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_short_help_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("shorthelpcheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("shorthelpcheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["-h"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=-h"), "{stdout}");
+    assert!(!stdout.contains("Usage:"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_short_help_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("shorthelpextra.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("shorthelpextra");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["-h", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=-h extra"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_print_config_dir_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("printcheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("printcheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--print-config-dir"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_print_config_dir_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("printconfigextracheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("printconfigextracheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--print-config-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--print-config-dir extra"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_print_cache_dir_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("printcachecheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("printcachecheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--print-cache-dir"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_print_cache_dir_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("printcacheextracheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("printcacheextracheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--print-cache-dir extra"), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_version_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("versioncheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("versioncheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--version"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--version"), "{stdout}");
+    assert!(!stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_version_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("versionextracheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("versionextracheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--version", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=--version extra"), "{stdout}");
+    assert!(!stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_does_not_treat_short_version_as_builtin() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("shortversioncheck.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("shortversioncheck");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["-V"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=-V"), "{stdout}");
+    assert!(!stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+}
+
+#[test]
+fn symlink_mode_short_version_with_extra_args_is_passthrough() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("shortversionextra.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("shortversionextra");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["-V", "extra"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=-V extra"), "{stdout}");
+    assert!(!stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+}
+
+#[test]
+fn symlink_invocation_uses_symlink_name_as_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods.toml"),
+        r#"
+exec = "echo"
+args = ["symlink-mode"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("symlink-mode runtime"), "{stdout}");
+}
+
+#[test]
+fn symlink_invocation_rejects_dash_prefixed_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("-bad-alias");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot start with `-`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_rejects_whitespace_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("bad alias");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot contain whitespace"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_rejects_separator_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("--");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("alias name cannot be `--`"), "{stderr}");
+}
+
+#[test]
+fn symlink_invocation_rejects_pathlike_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("bad\\alias");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot contain path separators"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_rejects_mixed_absolute_pathlike_argv0_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "/tmp\\badalias",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot contain path separators"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_rejects_mixed_relative_pathlike_argv0_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "./bad\\alias",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot contain path separators"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_rejects_non_pathlike_mixed_separator_chopper_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "alpha/beta\\CHOPPER",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alias name cannot contain path separators"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symlink_invocation_without_runtime_args_still_executes_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-noargs.toml"),
+        r#"
+exec = "echo"
+args = ["symlink-noargs"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods-noargs");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("symlink-noargs"), "{stdout}");
+}
+
+#[test]
+fn symlink_invocation_preserves_alias_name_with_dots() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods.prod.toml"),
+        r#"
+exec = "echo"
+args = ["symlink-dot-mode"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods.prod");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("symlink-dot-mode runtime"), "{stdout}");
+}
+
+#[test]
+fn symlink_aliases_that_sanitize_to_same_cache_prefix_do_not_collide() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["alias=colon"]
+"#,
+    )
+    .expect("write colon alias config");
+    fs::write(
+        aliases_dir.join("alpha?beta.toml"),
+        r#"
+exec = "echo"
+args = ["alias=question"]
+"#,
+    )
+    .expect("write question alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let alias_colon = bin_dir.path().join("alpha:beta");
+    let alias_question = bin_dir.path().join("alpha?beta");
+    symlink(chopper_bin(), &alias_colon).expect("create colon symlink");
+    symlink(chopper_bin(), &alias_question).expect("create question symlink");
+
+    let output = run_chopper_with(
+        alias_colon.clone(),
+        &config_home,
+        &cache_home,
+        &["runtime-a"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=colon runtime-a"), "{stdout}");
+
+    let output = run_chopper_with(
+        alias_question,
+        &config_home,
+        &cache_home,
+        &["runtime-b"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "question command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=question runtime-b"), "{stdout}");
+
+    let output = run_chopper_with(
+        alias_colon,
+        &config_home,
+        &cache_home,
+        &["runtime-c"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "second colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alias=colon runtime-c"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 2,
+        "expected one cache entry per colliding-sanitization alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
+fn symlink_invocation_strips_double_dash_separator() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--", "--tail=100"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base --tail=100"), "{stdout}");
+    assert!(!stdout.contains("ARGS=base -- --tail=100"), "{stdout}");
+}
+
+#[test]
+fn symlink_invocation_separator_preserves_literal_double_dash_payload() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-literal-separator.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods-literal-separator");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["--", "--", "--tail=100"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base -- --tail=100"), "{stdout}");
+}
+
+#[test]
+fn symlink_invocation_preserves_symbolic_and_pathlike_runtime_args() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-symbolic.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=<%s>\n' \"$@\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods-symbolic");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &[
+            "--",
+            "--flag=value",
+            "../relative/path",
+            "semi;colon&and",
+            "$DOLLAR",
+            "brace{value}",
+            r"windows\path",
+        ],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=<base>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARGS=<windows\path>"), "{stdout}");
+}
+
+#[test]
+fn missing_alias_config_falls_back_to_path_command_resolution() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let command_path = fake_bin.path().join("fallbackcmd");
+    write_executable_script(
+        &command_path,
+        "#!/usr/bin/env bash\nprintf 'PATH_FALLBACK=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PATH_FALLBACK=runtime"), "{stdout}");
+}
+
+#[test]
+fn alias_lookup_ignores_directory_candidates_and_falls_back_to_path() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(aliases_dir.join("fallbackcmd.toml")).expect("create directory candidate");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let command_path = fake_bin.path().join("fallbackcmd");
+    write_executable_script(
+        &command_path,
+        "#!/usr/bin/env bash\nprintf 'PATH_FALLBACK_DIR_SHADOW=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("PATH_FALLBACK_DIR_SHADOW=runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_lookup_ignores_dangling_symlink_candidates_and_falls_back_to_path() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    symlink(
+        chopper_dir.join("definitely-missing-target.toml"),
+        aliases_dir.join("fallbackcmd.toml"),
+    )
+    .expect("create dangling symlink candidate");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let command_path = fake_bin.path().join("fallbackcmd");
+    write_executable_script(
+        &command_path,
+        "#!/usr/bin/env bash\nprintf 'PATH_FALLBACK_DANGLING_SYMLINK=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("PATH_FALLBACK_DANGLING_SYMLINK=runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn missing_alias_config_reports_clear_exec_failure_when_command_missing() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["definitely-missing-command-xyz"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("exec failed"), "{stderr}");
+    assert!(stderr.contains("No such file or directory"), "{stderr}");
+}
+
+#[test]
+fn alias_lookup_order_prefers_aliases_toml_then_root_toml_then_legacy() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let aliases_toml = aliases_dir.join("lookup.toml");
+    let root_toml = chopper_dir.join("lookup.toml");
+    let legacy = chopper_dir.join("lookup");
+
+    fs::write(
+        &aliases_toml,
+        r#"
+exec = "echo"
+args = ["source=aliases"]
+"#,
+    )
+    .expect("write aliases toml");
+    fs::write(
+        &root_toml,
+        r#"
+exec = "echo"
+args = ["source=root-toml"]
+"#,
+    )
+    .expect("write root toml");
+    fs::write(&legacy, "echo source=legacy").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=aliases"), "{stdout}");
+
+    fs::remove_file(&aliases_toml).expect("remove aliases toml");
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=root-toml"), "{stdout}");
+
+    fs::remove_file(&root_toml).expect("remove root toml");
+    let output = run_chopper(&config_home, &cache_home, &["lookup"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("source=legacy"), "{stdout}");
+}
+
+#[test]
+fn alias_lookup_accepts_symlinked_toml_file_candidate() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target = chopper_dir.join("symlink-target.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "sh"
+args = ["-c", "printf 'SYMLINKED_CONFIG=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkcfg.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkcfg", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SYMLINKED_CONFIG=base runtime"), "{stdout}");
+}
+
+#[test]
+fn symlinked_alias_config_resolves_reconcile_script_relative_to_target() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    let hooks_dir = shared_dir.join("hooks");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_target_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    let target = shared_dir.join("target.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkreconcile.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_target_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_config_resolves_reconcile_script_relative_to_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let hooks_dir = aliases_dir.join("hooks");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_local_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("localreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write local reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["localreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_local_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_config_resolves_parent_relative_reconcile_script_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let hooks_dir = chopper_dir.join("hooks");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_parent_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("parentreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "../hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write parent reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parentreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_parent_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_config_resolves_dot_prefixed_reconcile_script_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let hooks_dir = aliases_dir.join("hooks");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_dot_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("dotreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "./hooks/reconcile.rhai"
+"#,
+    )
+    .expect("write dot reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dotreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_dot_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_config_resolves_symbolic_reconcile_script_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let hooks_dir = aliases_dir.join("hooks");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile @v1.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_symbolic_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("symbolicreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = './hooks/reconcile @v1.rhai'
+"#,
+    )
+    .expect("write symbolic reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["symbolicreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_symbolic_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn symlinked_alias_config_resolves_relative_exec_path_to_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    let target = shared_dir.join("target-exec.toml");
+    fs::write(
+        &target,
+        r#"
+exec = "bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write symlink target config");
+    symlink(&target, aliases_dir.join("linkexec.toml")).expect("create alias symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["linkexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC=base runtime"), "{stdout}");
+}
+
+#[test]
+fn alias_config_resolves_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let bin_dir = aliases_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_LOCAL=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("localexec.toml"),
+        r#"
+exec = "bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write local exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["localexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC_LOCAL=base runtime"), "{stdout}");
+}
+
+#[test]
+fn alias_config_resolves_dot_prefixed_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let bin_dir = aliases_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_DOT=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("dotexec.toml"),
+        r#"
+exec = "./bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write dot exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dotexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC_DOT=base runtime"), "{stdout}");
+}
+
+#[test]
+fn alias_config_resolves_symbolic_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let bin_dir = aliases_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_SYMBOLIC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("symbolicexec.toml"),
+        r#"
+exec = './bin/runner @v1'
+args = ["base"]
+"#,
+    )
+    .expect("write symbolic exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["symbolicexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("REL_EXEC_SYMBOLIC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn alias_config_resolves_parent_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_PARENT=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("parentexec.toml"),
+        r#"
+exec = "../bin/runner"
+args = ["base"]
+"#,
+    )
+    .expect("write parent relative exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parentexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REL_EXEC_PARENT=base runtime"), "{stdout}");
+}
+
+#[test]
+fn journal_config_forwards_stderr_to_systemd_cat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journaled.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+identifier = "journal-test"
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_err = fake_bin.path().join("captured-stderr.log");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat > \"{}\"\n",
+            captured_args.display(),
+            captured_err.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journaled"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("OUT_STREAM"), "{stdout}");
+    assert!(
+        !stdout.contains("ERR_STREAM"),
+        "stderr should be redirected to systemd-cat: {stdout}"
+    );
+
+    let captured_err_text =
+        fs::read_to_string(&captured_err).expect("read captured systemd-cat stdin");
+    assert!(
+        captured_err_text.contains("ERR_STREAM"),
+        "captured stderr text: {captured_err_text}"
+    );
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "captured args: {captured_args_text}"
+    );
+    assert!(
+        captured_args_text.contains("--identifier=journal-test"),
+        "captured args: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_parser_trimming_uses_trimmed_namespace_and_drops_blank_identifier() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops-e2e  "
+stderr = true
+identifier = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_err = fake_bin.path().join("captured-stderr.log");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat > \"{}\"\n",
+            captured_args.display(),
+            captured_err.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-trimmed"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_err_text =
+        fs::read_to_string(&captured_err).expect("read captured systemd-cat stdin");
+    assert!(
+        captured_err_text.contains("ERR_STREAM"),
+        "{captured_err_text}"
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "captured args: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier="),
+        "blank identifier should be omitted: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_parser_trimming_drops_mixed_whitespace_blank_identifier() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-trimmed-mixed-id.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops-e2e  "
+stderr = true
+identifier = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-trimmed-mixed-id"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "captured args: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier="),
+        "mixed-whitespace blank identifier should be omitted: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_identifier_is_trimmed_before_forwarding() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-id-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+identifier = "  id-trimmed  "
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-id-trimmed"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--identifier=id-trimmed"),
+        "trimmed identifier should be forwarded: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier=  id-trimmed  "),
+        "identifier should not retain surrounding whitespace: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_namespace_and_identifier_mixed_whitespace_are_trimmed_before_forwarding() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-mixed-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "\n\t ops-e2e \t\n"
+stderr = true
+identifier = "\n\t id-trimmed \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-mixed-trimmed"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "trimmed namespace should be forwarded: {captured_args_text}"
+    );
+    assert!(
+        captured_args_text.contains("--identifier=id-trimmed"),
+        "trimmed identifier should be forwarded: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--namespace=\\n\\t ops-e2e \\t\\n"),
+        "namespace should not retain raw mixed whitespace: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier=\\n\\t id-trimmed \\t\\n"),
+        "identifier should not retain raw mixed whitespace: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_namespace_and_identifier_symbolic_shapes_are_forwarded_unchanged() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-symbolic-forward.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops/ns.prod@2026  "
+stderr = true
+identifier = '  svc.id/worker\edge@2026  '
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-symbolic-forward"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops/ns.prod@2026"),
+        "symbolic namespace should be forwarded: {captured_args_text}"
+    );
+    assert!(
+        captured_args_text.contains(r"--identifier=svc.id/worker\edge@2026"),
+        "symbolic identifier should be forwarded: {captured_args_text}"
+    );
+}
+
+#[test]
+fn journal_namespace_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-nul-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "ops\u0000prod"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-nul-namespace"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_namespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-blank-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-blank-namespace"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_namespace_mixed_whitespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-mixed-blank-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["journal-mixed-blank-namespace"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_identifier_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-nul-identifier.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "ops"
+identifier = "svc\u0000id"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-nul-identifier"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.identifier` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn direct_invocation_with_alias_name_still_works() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("demo.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"; printf 'ENV=%s\n' \"$CHOPPER_E2E\"", "_", "base"]
+
+[env]
+CHOPPER_E2E = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["demo", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+
+    let cache_entry = cache_home.path().join("chopper/manifests/demo.bin");
+    assert!(
+        cache_entry.exists(),
+        "expected cache entry at {:?}",
+        cache_entry
+    );
+}
+
+#[test]
+fn unicode_alias_name_executes_and_caches_safely() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias = "emoji🚀";
+    fs::write(
+        aliases_dir.join(format!("{alias}.toml")),
+        r#"
+exec = "echo"
+args = ["unicode"]
+"#,
+    )
+    .expect("write alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &[alias, "runtime"]);
+    assert!(
+        first.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.contains("unicode runtime"), "{stdout}");
+
+    let second = run_chopper(&config_home, &cache_home, &[alias, "again"]);
+    assert!(
+        second.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("unicode again"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifest cache dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("emoji_") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 1,
+        "expected one cache entry for unicode alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
+fn direct_invocation_supports_dotted_alias_identifiers() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("demo.prod.toml"),
+        r#"
+exec = "echo"
+args = ["direct-dot-alias"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["demo.prod", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct-dot-alias runtime"), "{stdout}");
+}
+
+#[test]
+fn direct_aliases_that_sanitize_to_same_cache_prefix_do_not_collide() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["direct=colon"]
+"#,
+    )
+    .expect("write colon alias config");
+    fs::write(
+        aliases_dir.join("alpha?beta.toml"),
+        r#"
+exec = "echo"
+args = ["direct=question"]
+"#,
+    )
+    .expect("write question alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "runtime-a"]);
+    assert!(
+        output.status.success(),
+        "colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=colon runtime-a"), "{stdout}");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha?beta", "runtime-b"]);
+    assert!(
+        output.status.success(),
+        "question command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=question runtime-b"), "{stdout}");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "runtime-c"]);
+    assert!(
+        output.status.success(),
+        "second colon command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("direct=colon runtime-c"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let matching_cache_entries = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+        .count();
+    assert_eq!(
+        matching_cache_entries, 2,
+        "expected one cache entry per colliding-sanitization direct alias in {:?}",
+        manifests_dir
+    );
+}
+
+#[test]
+fn unsafe_alias_cache_entry_migrates_from_legacy_filename_on_load() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["migration-check"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+    assert!(
+        !hashed_file.exists(),
+        "hashed cache file should be absent after legacy rename"
+    );
+    assert!(
+        legacy_file.exists(),
+        "legacy cache file should exist after rename"
+    );
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("migration-check second-run"), "{stdout}");
+    assert!(
+        hashed_file.exists(),
+        "hashed cache file should be restored after migration load path"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache file should be pruned after migration"
+    );
+}
+
+#[test]
+fn invalid_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["LEGACYMUTATE001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACYMUTATE001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+
+    let mut legacy_bytes = fs::read(&legacy_file).expect("read legacy cache file");
+    let replaced = replace_bytes_once(&mut legacy_bytes, b"LEGACYMUTATE001", b"LEGACY\0UTATE001");
+    assert!(
+        replaced,
+        "expected to mutate legacy cache entry to invalid NUL payload"
+    );
+    fs::write(&legacy_file, legacy_bytes).expect("rewrite invalid legacy cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after invalid legacy cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACYMUTATE001 second-run"), "{stdout}");
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source after invalid legacy prune"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "invalid legacy cache file should be pruned after run"
+    );
+
+    let rebuilt_cache = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_cache
+            .windows(b"LEGACYMUTATE001".len())
+            .any(|window| window == b"LEGACYMUTATE001"),
+        "rebuilt hashed cache should contain original source payload"
+    );
+    assert!(
+        !rebuilt_cache
+            .windows(b"LEGACY\0UTATE001".len())
+            .any(|window| window == b"LEGACY\0UTATE001"),
+        "rebuilt hashed cache should not retain corrupted legacy payload"
+    );
+}
+
+#[test]
+fn stale_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALELEGACYOLD01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        output.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALELEGACYOLD01 seed-old"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("rename hashed cache file to legacy name");
+    assert!(
+        !hashed_file.exists(),
+        "hashed cache should be absent after renaming to legacy path"
+    );
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALELEGACYNEWTOKEN9"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "fallback-run"]);
+    assert!(
+        output.status.success(),
+        "fallback run failed with stale legacy cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALELEGACYNEWTOKEN9 fallback-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("STALELEGACYOLD01 fallback-run"),
+        "stale legacy payload should not be used after source changes: {stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale legacy cache should be pruned after source fallback"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from fresh source config"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"STALELEGACYNEWTOKEN9".len())
+            .any(|window| window == b"STALELEGACYNEWTOKEN9"),
+        "rebuilt hashed cache should contain fresh payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALELEGACYOLD01".len())
+            .any(|window| window == b"STALELEGACYOLD01"),
+        "rebuilt hashed cache should not retain stale legacy payload"
+    );
+}
+
+#[test]
+fn stale_legacy_cache_entry_is_pruned_when_hashed_cache_hits() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["HASHEDPAYLOAD001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHEDPAYLOAD001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache file to legacy name");
+
+    let mut legacy_bytes = fs::read(&legacy_file).expect("read legacy cache file");
+    let replaced = replace_bytes_once(&mut legacy_bytes, b"HASHEDPAYLOAD001", b"LEGACYPAYLOAD001");
+    assert!(
+        replaced,
+        "expected to mutate legacy cache payload independently"
+    );
+    fs::write(&legacy_file, legacy_bytes).expect("rewrite stale legacy cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale legacy cache present: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("HASHEDPAYLOAD001 second-run"),
+        "hashed payload should win when hashed cache exists: {stdout}"
+    );
+    assert!(
+        !stdout.contains("LEGACYPAYLOAD001 second-run"),
+        "stale legacy payload should not be executed when hashed cache exists: {stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale legacy cache file should be pruned after hashed cache hit"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache file should remain present"
+    );
+}
+
+#[test]
+fn invalid_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["HASHLEGACYTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYTOKEN1 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    let mut hashed_bytes = fs::read(&hashed_file).expect("read hashed cache file");
+    let replaced = replace_bytes_once(&mut hashed_bytes, b"HASHLEGACYTOKEN1", b"HASH\0EGACYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate hashed cache payload into invalid NUL form"
+    );
+    fs::write(&hashed_file, hashed_bytes).expect("rewrite invalid hashed cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with invalid hashed cache and valid legacy fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYTOKEN1 second-run"), "{stdout}");
+
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after fallback migration"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt after fallback migration"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"HASHLEGACYTOKEN1".len())
+            .any(|window| window == b"HASHLEGACYTOKEN1"),
+        "rebuilt hashed cache should contain valid source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"HASH\0EGACYTOKEN1".len())
+            .any(|window| window == b"HASH\0EGACYTOKEN1"),
+        "rebuilt hashed cache should not retain invalid hashed payload"
+    );
+}
+
+#[test]
+fn stale_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEHASHOLDTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        output.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEHASHOLDTOKEN1 seed-old"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let stale_hashed_bytes = fs::read(&hashed_file).expect("read stale hashed bytes");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEHASHNEWTOKEN99X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-new"]);
+    assert!(
+        output.status.success(),
+        "refresh run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEHASHNEWTOKEN99X seed-new"), "{stdout}");
+
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy fresh hashed cache to legacy path");
+    fs::write(&hashed_file, stale_hashed_bytes).expect("restore stale hashed cache bytes");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "fallback-run"]);
+    assert!(
+        output.status.success(),
+        "fallback run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALEHASHNEWTOKEN99X fallback-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("STALEHASHOLDTOKEN1 fallback-run"),
+        "stale hashed payload should not execute during legacy fallback: {stdout}"
+    );
+
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after fallback migration"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt after fallback migration"
+    );
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"STALEHASHNEWTOKEN99X".len())
+            .any(|window| window == b"STALEHASHNEWTOKEN99X"),
+        "rebuilt hashed cache should contain fresh payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALEHASHOLDTOKEN1".len())
+            .any(|window| window == b"STALEHASHOLDTOKEN1"),
+        "rebuilt hashed cache should not retain stale hashed payload"
+    );
+}
+
+#[test]
+fn stale_hashed_cache_entry_without_legacy_is_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["HASHONLYOLDTOKEN01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHONLYOLDTOKEN01 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should not exist before stale-hashed reparse check"
+    );
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["HASHONLYNEWTOKEN99X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale hashed cache and no legacy fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("HASHONLYNEWTOKEN99X second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("HASHONLYOLDTOKEN01 second-run"),
+        "stale hashed payload should not be executed after source changes: {stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should remain absent after stale hashed reparse path"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"HASHONLYNEWTOKEN99X".len())
+            .any(|window| window == b"HASHONLYNEWTOKEN99X"),
+        "rebuilt hashed cache should contain fresh source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"HASHONLYOLDTOKEN01".len())
+            .any(|window| window == b"HASHONLYOLDTOKEN01"),
+        "rebuilt hashed cache should not retain stale hashed payload"
+    );
+}
+
+#[test]
+fn corrupted_hashed_cache_file_falls_back_to_valid_legacy_and_migrates() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTHASHFALLBACK1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTHASHFALLBACK1 first-run"),
+        "{stdout}"
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    fs::write(&hashed_file, b"not-bincode").expect("overwrite hashed cache with corrupt bytes");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with corrupt hashed cache and valid legacy fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTHASHFALLBACK1 second-run"),
+        "{stdout}"
+    );
+
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after fallback migration"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt after fallback migration"
+    );
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"CORRUPTHASHFALLBACK1".len())
+            .any(|window| window == b"CORRUPTHASHFALLBACK1"),
+        "rebuilt hashed cache should contain valid source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"not-bincode".len())
+            .any(|w| w == b"not-bincode"),
+        "rebuilt hashed cache should not retain corrupt hashed payload"
+    );
+}
+
+#[test]
+fn invalid_hashed_and_legacy_entries_fall_back_to_source_and_rebuild_hashed_cache() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["HASHLEGACYBOTH01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYBOTH01 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    let mut hashed_bytes = fs::read(&hashed_file).expect("read hashed cache file");
+    let replaced = replace_bytes_once_resizing(&mut hashed_bytes, b"HASHLEGACYBOTH01", b"HASH\0");
+    assert!(
+        replaced,
+        "expected to mutate hashed cache payload into invalid NUL form"
+    );
+    fs::write(&hashed_file, hashed_bytes).expect("rewrite invalid hashed cache file");
+
+    let mut legacy_bytes = fs::read(&legacy_file).expect("read legacy cache file");
+    let replaced = replace_bytes_once_resizing(&mut legacy_bytes, b"HASHLEGACYBOTH01", b"LEGACY\0");
+    assert!(
+        replaced,
+        "expected to mutate legacy cache payload into invalid NUL form"
+    );
+    fs::write(&legacy_file, legacy_bytes).expect("rewrite invalid legacy cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with invalid hashed and legacy cache entries: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HASHLEGACYBOTH01 second-run"), "{stdout}");
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source after dual-invalid fallback"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "invalid legacy cache should be pruned after dual-invalid fallback"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"HASHLEGACYBOTH01".len())
+            .any(|window| window == b"HASHLEGACYBOTH01"),
+        "rebuilt hashed cache should contain valid source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"HASH\0".len())
+            .any(|window| window == b"HASH\0"),
+        "rebuilt hashed cache should not retain invalid hashed payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"LEGACY\0".len())
+            .any(|window| window == b"LEGACY\0"),
+        "rebuilt hashed cache should not retain invalid legacy payload"
+    );
+}
+
+#[test]
+fn corrupted_hashed_and_legacy_cache_files_fall_back_to_source_and_rebuild_hashed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTBOTHCACHE001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CORRUPTBOTHCACHE001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    fs::write(&hashed_file, b"bad-hashed-bytes").expect("overwrite hashed cache with junk");
+    fs::write(&legacy_file, b"bad-legacy-bytes").expect("overwrite legacy cache with junk");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with corrupt hashed and legacy cache files: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTBOTHCACHE001 second-run"),
+        "{stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source after dual corruption"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned after dual corruption fallback"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"CORRUPTBOTHCACHE001".len())
+            .any(|window| window == b"CORRUPTBOTHCACHE001"),
+        "rebuilt hashed cache should contain source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"bad-hashed-bytes".len())
+            .any(|window| window == b"bad-hashed-bytes"),
+        "rebuilt hashed cache should not retain corrupted hashed bytes"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"bad-legacy-bytes".len())
+            .any(|window| window == b"bad-legacy-bytes"),
+        "rebuilt hashed cache should not retain corrupted legacy bytes"
+    );
+}
+
+#[test]
+fn malformed_hashed_cache_file_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-corrupt-heal.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTEDHASHEDCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-corrupt-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDHASHEDCACHE01 first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-corrupt-heal.bin");
+    fs::write(&cache_file, b"not-bincode").expect("overwrite cache file with corrupt bytes");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-corrupt-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt hashed cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDHASHEDCACHE01 second-run"),
+        "{stdout}"
+    );
+
+    let healed_cache = fs::read(&cache_file).expect("read healed cache file");
+    assert!(
+        healed_cache
+            .windows(b"CORRUPTEDHASHEDCACHE01".len())
+            .any(|window| window == b"CORRUPTEDHASHEDCACHE01"),
+        "healed cache should contain original source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"not-bincode".len())
+            .any(|w| w == b"not-bincode"),
+        "healed cache should not retain corrupt serialized payload"
+    );
+}
+
+#[test]
+fn malformed_legacy_cache_file_is_pruned_then_rebuilt_from_source() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["CORRUPTEDLEGACYCACHE1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDLEGACYCACHE1 first-run"),
+        "{stdout}"
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::rename(&hashed_file, &legacy_file).expect("move hashed cache to legacy filename");
+    fs::write(&legacy_file, b"legacy-not-bincode").expect("overwrite legacy cache with junk");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt legacy cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CORRUPTEDLEGACYCACHE1 second-run"),
+        "{stdout}"
+    );
+
+    assert!(
+        !legacy_file.exists(),
+        "corrupt legacy cache should be pruned after source fallback"
+    );
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"CORRUPTEDLEGACYCACHE1".len())
+            .any(|window| window == b"CORRUPTEDLEGACYCACHE1"),
+        "rebuilt hashed cache should contain source payload"
+    );
+}
+
+#[test]
+fn malformed_stale_legacy_cache_file_is_pruned_when_hashed_cache_hits() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("alpha:beta.toml"),
+        r#"
+exec = "echo"
+args = ["STALELEGACYCORRUPT1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALELEGACYCORRUPT1 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::write(&legacy_file, b"stale-legacy-junk").expect("write corrupt stale legacy cache");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale corrupt legacy cache: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("STALELEGACYCORRUPT1 second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale corrupt legacy cache should be pruned when hashed cache hits"
+    );
+    assert!(hashed_file.exists(), "hashed cache should remain present");
+
+    let hashed_bytes = fs::read(&hashed_file).expect("read hashed cache after legacy prune");
+    assert!(
+        hashed_bytes
+            .windows(b"STALELEGACYCORRUPT1".len())
+            .any(|window| window == b"STALELEGACYCORRUPT1"),
+        "hashed cache should retain expected payload after stale legacy prune"
+    );
+    assert!(
+        !hashed_bytes
+            .windows(b"stale-legacy-junk".len())
+            .any(|window| window == b"stale-legacy-junk"),
+        "hashed cache should not absorb stale legacy junk bytes"
+    );
+}
+
+#[test]
+fn safe_alias_cache_file_persists_after_cache_hit() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("safealias.toml"),
+        r#"
+exec = "echo"
+args = ["SAFEALIASCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFEALIASCACHE01 first-run"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/safealias.bin");
+    assert!(cache_file.exists(), "safe alias cache file should exist");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFEALIASCACHE01 second-run"), "{stdout}");
+    assert!(
+        cache_file.exists(),
+        "safe alias cache file should persist after cache hit"
+    );
+
+    let cache_bytes = fs::read(&cache_file).expect("read safe alias cache bytes");
+    assert!(
+        cache_bytes
+            .windows(b"SAFEALIASCACHE01".len())
+            .any(|window| window == b"SAFEALIASCACHE01"),
+        "safe alias cache should retain expected payload after cache hit"
+    );
+}
+
+#[test]
+fn stale_safe_alias_cache_entry_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_config = aliases_dir.join("safealias-stale.toml");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["SAFESTALEOLDTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["safealias-stale", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFESTALEOLDTOKEN1 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/safealias-stale.bin");
+    assert!(cache_file.exists(), "safe alias cache file should exist");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["SAFESTALENEWTOKEN9X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-stale", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("SAFESTALENEWTOKEN9X second-run"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("SAFESTALEOLDTOKEN1 second-run"),
+        "stale safe-alias cache payload should not execute after source change: {stdout}"
+    );
+
+    let rebuilt_cache = fs::read(&cache_file).expect("read rebuilt safe alias cache");
+    assert!(
+        rebuilt_cache
+            .windows(b"SAFESTALENEWTOKEN9X".len())
+            .any(|window| window == b"SAFESTALENEWTOKEN9X"),
+        "safe alias cache should be rewritten with fresh payload"
+    );
+    assert!(
+        !rebuilt_cache
+            .windows(b"SAFESTALEOLDTOKEN1".len())
+            .any(|window| window == b"SAFESTALEOLDTOKEN1"),
+        "safe alias cache should not retain stale payload after reparse"
+    );
+}
+
+#[test]
+fn corrupted_safe_alias_cache_file_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("safealias-corrupt.toml"),
+        r#"
+exec = "echo"
+args = ["SAFECORRUPTCACHE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-corrupt", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFECORRUPTCACHE01 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/safealias-corrupt.bin");
+    fs::write(&cache_file, b"safe-not-bincode").expect("overwrite safe cache file with junk");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["safealias-corrupt", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after corrupt safe cache file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAFECORRUPTCACHE01 second-run"), "{stdout}");
+    let healed_cache = fs::read(&cache_file).expect("read healed safe cache");
+    assert!(
+        healed_cache
+            .windows(b"SAFECORRUPTCACHE01".len())
+            .any(|window| window == b"SAFECORRUPTCACHE01"),
+        "healed safe cache should contain source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"safe-not-bincode".len())
+            .any(|w| w == b"safe-not-bincode"),
+        "healed safe cache should not retain corrupted bytes"
+    );
+}
+
+#[test]
+fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let alias_config = aliases_dir.join("alpha:beta.toml");
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["STALEPAYLOAD0001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STALEPAYLOAD0001 first-run"), "{stdout}");
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    fs::write(
+        &alias_config,
+        r#"
+exec = "echo"
+args = ["FRESHPAYLOAD0001X"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["alpha:beta", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed with stale hashed and legacy entries: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FRESHPAYLOAD0001X second-run"), "{stdout}");
+    assert!(
+        !stdout.contains("STALEPAYLOAD0001 second-run"),
+        "stale payload should not survive stale-cache fallback: {stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt from source"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "stale legacy cache should be pruned during stale-cache fallback"
+    );
+
+    let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
+    assert!(
+        rebuilt_hashed
+            .windows(b"FRESHPAYLOAD0001X".len())
+            .any(|window| window == b"FRESHPAYLOAD0001X"),
+        "rebuilt hashed cache should contain fresh source payload"
+    );
+    assert!(
+        !rebuilt_hashed
+            .windows(b"STALEPAYLOAD0001".len())
+            .any(|window| window == b"STALEPAYLOAD0001"),
+        "rebuilt hashed cache should not retain stale source payload"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_arg_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-heal.toml"),
+        r#"
+exec = "echo"
+args = ["MAGICPAYLOAD1234"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-heal", "first-run"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAGICPAYLOAD1234 first-run"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/cache-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"MAGICPAYLOAD1234", b"BAD\0PAYLOAD12345");
+    assert!(replaced, "expected to mutate serialized cached argument");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-heal", "second-run"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAGICPAYLOAD1234 second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_is_rewritten_after_prune_and_reparse() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-rewrite-heal.toml"),
+        r#"
+exec = "echo"
+args = ["REWRITECACHE123"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-rewrite-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REWRITECACHE123 first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-rewrite-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"REWRITECACHE123", b"BAD\0");
+    assert!(
+        replaced,
+        "expected to mutate cached argument with invalid NUL payload"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-rewrite-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REWRITECACHE123 second-run"), "{stdout}");
+
+    let healed_cache = fs::read(&cache_file).expect("read healed cache file");
+    assert!(
+        healed_cache
+            .windows(b"REWRITECACHE123".len())
+            .any(|window| window == b"REWRITECACHE123"),
+        "healed cache should contain reparsed source payload"
+    );
+    assert!(
+        !healed_cache
+            .windows(b"BAD\0".len())
+            .any(|window| window == b"BAD\0"),
+        "healed cache should not retain corrupted payload"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_trailing_separator_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-path-heal.toml"),
+        r#"
+exec = "echo"
+args = ["EXECPATHHEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-path-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EXECPATHHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-path-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"echo", b"ech/");
+    assert!(replaced, "expected to mutate cached exec path");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-path-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EXECPATHHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_trailing_backslash_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-backslash-heal.toml"),
+        r#"
+exec = "echo"
+args = ["BS_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-backslash-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("BS_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-backslash-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"echo", b"ech\\");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to trailing-backslash form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-backslash-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed backslash exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("BS_EXECPATH_HEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["NUL_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NUL_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"/echo", b"/ec\0h");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NUL_EXECPATH_HEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-empty-heal.toml"),
+        r#"
+exec = "echo"
+args = ["EMPTY_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-empty-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTY_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"echo", b"");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to empty form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-empty-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("EMPTY_EXECPATH_HEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-whitespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["WS_EXECPATH_HEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-whitespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WS_EXECPATH_HEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-whitespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"/echo", b"/ech ");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to whitespace-prefixed form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-whitespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed whitespace exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WS_EXECPATH_HEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_component_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-dot-heal.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'DOTEXECPATHHEAL %s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTEXECPATHHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-dot-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"/bin/sh", b"/bin/..");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to dot-component form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed exec-dot cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTEXECPATHHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-dot-token-heal.toml"),
+        r#"
+exec = "echo"
+args = ["DOTTOKENEXECPATHHEAL"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-token-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("DOTTOKENEXECPATHHEAL first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-dot-token-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"echo", b".");
+    assert!(replaced, "expected to mutate cached exec path to dot token");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dot-token-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-token exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("DOTTOKENEXECPATHHEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dotdot_exec_path_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-exec-dotdot-heal.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DOTDOTEXECPATHHEAL %s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dotdot-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTDOTEXECPATHHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-exec-dotdot-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"sh", b"..");
+    assert!(
+        replaced,
+        "expected to mutate cached exec path to dotdot token form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-exec-dotdot-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dotdot exec-path cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DOTDOTEXECPATHHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_blank_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALCACHEHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "CACHEIDENT12345"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALCACHEHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEIDENT12345", b"               ");
+    assert!(replaced, "expected to mutate cached journal identifier");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALCACHEHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-id-empty-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALIDEMPTYHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "EMPTYIDTOKEN001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-empty-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDEMPTYHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-id-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"EMPTYIDTOKEN001", b"");
+    assert!(
+        replaced,
+        "expected to mutate cached journal identifier to empty form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-empty-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDEMPTYHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-id-whitespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALIDWHITESPACEHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "CACHEID00000003"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-whitespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALIDWHITESPACEHEAL first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-id-whitespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEID00000003", b" CACHEID0000000");
+    assert!(
+        replaced,
+        "expected to mutate cached journal identifier with whitespace"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-id-whitespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALIDWHITESPACEHEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNAMESPACEHEAL"]
+
+[journal]
+namespace = "OPSNAMESPACE12"
+stderr = false
+identifier = "CACHEID00000001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALNAMESPACEHEAL first-run"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"OPSNAMESPACE12", b" OPSNAMESPACE1");
+    assert!(replaced, "expected to mutate cached journal namespace");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JOURNALNAMESPACEHEAL second-run"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_blank_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-blank-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNSBLANKHEAL"]
+
+[journal]
+namespace = "NSBLANKTOKEN1"
+stderr = false
+identifier = "CACHEID00000021"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-blank-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSBLANKHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-blank-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NSBLANKTOKEN1", b"             ");
+    assert!(
+        replaced,
+        "expected to mutate cached journal namespace to blank form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-blank-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed blank journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSBLANKHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-empty-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNSEMPTYHEAL"]
+
+[journal]
+namespace = "EMPTYNSTOKEN01"
+stderr = false
+identifier = "CACHEID00000031"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-empty-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSEMPTYHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(&mut cache_bytes, b"EMPTYNSTOKEN01", b"");
+    assert!(
+        replaced,
+        "expected to mutate cached journal namespace to empty form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-empty-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSEMPTYHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_journal_namespace_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-namespace-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALNSNULHEAL"]
+
+[journal]
+namespace = "NULNSTOKEN001"
+stderr = false
+identifier = "CACHEID00000011"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSNULHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-namespace-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULNSTOKEN001", b"NULN\0TOKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached journal namespace to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-namespace-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL journal namespace cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALNSNULHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_journal_identifier_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-journal-identifier-nul-heal.toml"),
+        r#"
+exec = "echo"
+args = ["JOURNALIDNULHEAL"]
+
+[journal]
+namespace = "ops"
+stderr = false
+identifier = "NULIDTOKEN001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-identifier-nul-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDNULHEAL first-run"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-journal-identifier-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULIDTOKEN001", b"NULI\0TOKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached journal identifier to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-journal-identifier-nul-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL journal identifier cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JOURNALIDNULHEAL second-run"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_blank_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-heal.rhai"),
+        r#"
+fn CACHEFUNCABCDE(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILECACHEHEAL"]
+
+[reconcile]
+script = "cache-reconcile-heal.rhai"
+function = "CACHEFUNCABCDE"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILECACHEHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEFUNCABCDE", b"              ");
+    assert!(replaced, "expected to mutate cached reconcile function");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILECACHEHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-func-heal.rhai"),
+        r#"
+fn EMPTYFUNCTOK01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-func-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEEMPTYFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-empty-func-heal.rhai"
+function = "EMPTYFUNCTOK01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-func-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-empty-func-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYFUNCTOK01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYFUNCTOK01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-func-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty reconcile-function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-whitespace-heal.rhai"),
+        r#"
+fn FUNC_TOKEN_ABC1(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-whitespace-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEWSFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-whitespace-heal.rhai"
+function = "FUNC_TOKEN_ABC1"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEWSFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-whitespace-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"FUNC_TOKEN_ABC1", b" FUNC_TOKEN_ABC");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function with whitespace"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEWSFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_reconcile_function_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-func-heal.rhai"),
+        r#"
+fn NULFUNCTOKEN01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-func-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILENULFUNCHEAL"]
+
+[reconcile]
+script = "cache-reconcile-nul-func-heal.rhai"
+function = "NULFUNCTOKEN01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-func-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILENULFUNCHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-nul-func-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULFUNCTOKEN01", b"NULF\0NCTOKEN01");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile function to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-func-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL reconcile-function cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILENULFUNCHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_trailing_separator_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-script-path-heal.rhai"),
+        r#"
+fn PATHHEALFUNC001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-script-path-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILESCRIPTPATHHEAL"]
+
+[reconcile]
+script = "cache-reconcile-script-path-heal.rhai"
+function = "PATHHEALFUNC001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-script-path-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILESCRIPTPATHHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-script-path-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"cache-reconcile-script-path-heal.rhai",
+        b"cache-reconcile-script-path-heal.rha/",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script path with trailing separator"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-script-path-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILESCRIPTPATHHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_trailing_backslash_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("bs-script-heal.rhai"),
+        r#"
+fn BSSCRIPTFUNC0001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-backslash-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["BS_RECONCILE_SCRIPT_HEAL"]
+
+[reconcile]
+script = "bs-script-heal.rhai"
+function = "BSSCRIPTFUNC0001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-backslash-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("BS_RECONCILE_SCRIPT_HEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-backslash-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"bs-script-heal.rhai",
+        b"bs-script-heal.rha\\",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to trailing-backslash form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-backslash-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed backslash reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("BS_RECONCILE_SCRIPT_HEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("NULSCRIPTPATHTOKEN01.rhai"),
+        r#"
+fn NULSCRIPTFUNC0001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-nul-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["NUL_RECONCILE_SCRIPT_HEAL"]
+
+[reconcile]
+script = "NULSCRIPTPATHTOKEN01.rhai"
+function = "NULSCRIPTFUNC0001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NUL_RECONCILE_SCRIPT_HEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-nul-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"NULSCRIPTPATHTOKEN01.rhai",
+        b"NULSCRIPTPATHTOKEN01.rha\0",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-nul-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NUL_RECONCILE_SCRIPT_HEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("emptyscrpt01.rhai"),
+        r#"
+fn EMPTYSCRIPTFN01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-empty-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEEMPTYSCRIPTHEAL"]
+
+[reconcile]
+script = "emptyscrpt01.rhai"
+function = "EMPTYSCRIPTFN01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-empty-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"emptyscrpt01.rhai".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"emptyscrpt01.rhai", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-empty-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEEMPTYSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("ws-script-heal.rhai"),
+        r#"
+fn WSSCRIPTFUNC0001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-whitespace-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["WS_RECONCILE_SCRIPT_HEAL"]
+
+[reconcile]
+script = "ws-script-heal.rhai"
+function = "WSSCRIPTFUNC0001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("WS_RECONCILE_SCRIPT_HEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-whitespace-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"ws-script-heal.rhai",
+        b"ws-script-heal.rha ",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to whitespace-suffixed form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-whitespace-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed whitespace reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("WS_RECONCILE_SCRIPT_HEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_component_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(aliases_dir.join("hooks/s1")).expect("create hooks/s1 dir");
+
+    fs::write(
+        aliases_dir.join("hooks/s1/ok"),
+        r#"
+fn DOTSCRIPTFUNC001(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-dot-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEDOTSCRIPTHEAL"]
+
+[reconcile]
+script = "hooks/s1/ok"
+function = "DOTSCRIPTFUNC001"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-dot-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"hooks/s1/ok", b"hooks/s1/..");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to dot-component form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-component reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dot_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-token-script-reconcile-heal.rhai"),
+        r#"
+fn DOTTOKRECFUNC01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-dot-token-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEDOTTOKSCRIPTHEAL"]
+
+[reconcile]
+script = "dot-token-script-reconcile-heal.rhai"
+function = "DOTTOKRECFUNC01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-token-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTTOKSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-dot-token-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once_resizing(
+        &mut cache_bytes,
+        b"dot-token-script-reconcile-heal.rhai",
+        b".",
+    );
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to dot token form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dot-token-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dot-token reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTTOKSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_dotdot_reconcile_script_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("qq"),
+        r#"
+fn DOTTOKSCRIPTF01(_ctx) {
+  #{
+    append_args: ["reconciled"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("cache-reconcile-dotdot-script-heal.toml"),
+        r#"
+exec = "echo"
+args = ["RECONCILEDOTDOTSCRIPTHEAL"]
+
+[reconcile]
+script = "qq"
+function = "DOTTOKSCRIPTF01"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dotdot-script-heal", "first-run"],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTDOTSCRIPTHEAL first-run reconciled"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-reconcile-dotdot-script-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"qq", b"..");
+    assert!(
+        replaced,
+        "expected to mutate cached reconcile script to dotdot token form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["cache-reconcile-dotdot-script-heal", "second-run"],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed dotdot reconcile-script cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RECONCILEDOTDOTSCRIPTHEAL second-run reconciled"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHE_ENV_KEY = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHE_ENV_KEY=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHE_ENV_KEY", b" CACHE_ENV_KE");
+    assert!(replaced, "expected to mutate cached env key");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHE_ENV_KEY=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_equals_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-equals-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHEENVKEY001 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-equals-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVKEY001=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-equals-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"CACHEENVKEY001", b"CACHE=NVKEY001");
+    assert!(replaced, "expected to mutate cached env key to include '='");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-equals-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed equals env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVKEY001=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_env_value_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-nul-value-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+CACHEENVVALUE01 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-value-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVVALUE01=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-nul-value-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"from-config", b"from\0config");
+    assert!(
+        replaced,
+        "expected to mutate cached env value to include embedded NUL"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-value-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env value cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CACHEENVVALUE01=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-nul-key-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+NULENVKEYTOKEN1 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-key-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NULENVKEYTOKEN1=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-nul-key-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULENVKEYTOKEN1", b"NUL\0NVKEYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate cached env key to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-nul-key-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("NULENVKEYTOKEN1=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_env_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-empty-key-heal.toml"),
+        r#"
+exec = "env"
+
+[env]
+EMPTYENVKEY01 = "from-config"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-empty-key-heal"]);
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTYENVKEY01=from-config"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-empty-key-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYENVKEY01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYENVKEY01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached env key to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper(&config_home, &cache_home, &["cache-env-empty-key-heal"]);
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty env key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EMPTYENVKEY01=from-config"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_whitespace_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["RMKEYTOKENABCD1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-heal"],
+        std::iter::once(("RMKEYTOKENABCD1", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("RMKEYTOKENABCD1=from-runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"RMKEYTOKENABCD1", b" RMKEYTOKENABCD");
+    assert!(replaced, "expected to mutate cached env_remove key");
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-heal"],
+        std::iter::once(("RMKEYTOKENABCD1", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed env_remove cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("RMKEYTOKENABCD1=from-runtime"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_empty_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-empty-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["EMPTYRMKEY01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-empty-heal"],
+        std::iter::once(("EMPTYRMKEY01", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("EMPTYRMKEY01=from-runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-empty-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replacement = vec![b' '; b"EMPTYRMKEY01".len()];
+    let replaced = replace_bytes_once(&mut cache_bytes, b"EMPTYRMKEY01", &replacement);
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to empty-after-trim form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-empty-heal"],
+        std::iter::once(("EMPTYRMKEY01", "from-runtime".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed empty env_remove key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("EMPTYRMKEY01=from-runtime"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_duplicate_env_remove_keys_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-dup-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["DUPREMKEYTOK001", "DUPREMKEYTOK002"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-dup-heal"],
+        [
+            ("DUPREMKEYTOK001", "first".to_string()),
+            ("DUPREMKEYTOK002", "second".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("DUPREMKEYTOK001=first"), "{stdout}");
+    assert!(!stdout.contains("DUPREMKEYTOK002=second"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-dup-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"DUPREMKEYTOK002", b"DUPREMKEYTOK001");
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to duplicate"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-dup-heal"],
+        [
+            ("DUPREMKEYTOK001", "first".to_string()),
+            ("DUPREMKEYTOK002", "second".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed duplicate env_remove cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("DUPREMKEYTOK001=first"), "{stdout}");
+    assert!(!stdout.contains("DUPREMKEYTOK002=second"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_equals_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-equals-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["REMOVETOKEN001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-equals-heal"],
+        std::iter::once(("REMOVETOKEN001", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("REMOVETOKEN001=present"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-equals-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"REMOVETOKEN001", b"REMOVE=OKEN001");
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to include '='"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-equals-heal"],
+        std::iter::once(("REMOVETOKEN001", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed equals env_remove cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("REMOVETOKEN001=present"), "{stdout}");
+}
+
+#[test]
+fn malformed_cached_manifest_with_nul_env_remove_key_is_pruned_and_reparsed() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("cache-env-remove-nul-heal.toml"),
+        r#"
+exec = "env"
+env_remove = ["NULRMKEYTOKEN1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-nul-heal"],
+        std::iter::once(("NULRMKEYTOKEN1", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("NULRMKEYTOKEN1=present"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/cache-env-remove-nul-heal.bin");
+    let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
+    let replaced = replace_bytes_once(&mut cache_bytes, b"NULRMKEYTOKEN1", b"NULR\0KEYTOKEN1");
+    assert!(
+        replaced,
+        "expected to mutate cached env_remove key to NUL-containing form"
+    );
+    fs::write(&cache_file, cache_bytes).expect("rewrite cache file");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["cache-env-remove-nul-heal"],
+        std::iter::once(("NULRMKEYTOKEN1", "present".to_string())),
+    );
+    assert!(
+        output.status.success(),
+        "second run failed after malformed NUL env_remove key cache entry: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("NULRMKEYTOKEN1=present"), "{stdout}");
+}
+
+#[test]
+fn parser_trimming_is_applied_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("trimmed.reconcile.rhai"),
+        r#"
+fn trimmed_reconcile(_ctx) {
+  #{
+    append_args: ["from_trimmed_reconcile"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("trimmed.toml"),
+        r#"
+exec = "  sh  "
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "  trimmed.reconcile.rhai  "
+function = "  trimmed_reconcile  "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["trimmed", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_trimmed_reconcile"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn parser_mixed_whitespace_trimming_applies_to_exec_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("exec-trimmed-mixed.toml"),
+        r#"
+exec = "\n\t sh \t\n"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["exec-trimmed-mixed", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+}
+
+#[test]
+fn parser_mixed_whitespace_trimming_applies_to_reconcile_script_and_function_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("trimmed-mixed.reconcile.rhai"),
+        r#"
+fn mixed_reconcile(_ctx) {
+  #{
+    append_args: ["from_mixed_trimmed_reconcile"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("trimmed-mixed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "\n\ttrimmed-mixed.reconcile.rhai\t\n"
+function = "\n\tmixed_reconcile\t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["trimmed-mixed", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_mixed_trimmed_reconcile"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn parser_trimming_applies_to_env_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+"  CHOPPER_E2E  " = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-trim"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
+fn parser_mixed_whitespace_trimming_applies_to_env_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-mixed-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+"\n\t CHOPPER_E2E \t\n" = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-mixed-trim"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
+fn parser_mixed_whitespace_env_remove_entries_are_trimmed_and_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-remove-mixed-trim.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'DROP=%s\nKEEP=%s\n' \"${CHOPPER_DROP-unset}\" \"${CHOPPER_KEEP-unset}\""
+]
+env_remove = ["\n\t CHOPPER_DROP \t\n", "CHOPPER_DROP", "\n\t   \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["env-remove-mixed-trim"],
+        [
+            ("CHOPPER_DROP", "remove-me".to_string()),
+            ("CHOPPER_KEEP", "keep-me".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP=unset"), "{stdout}");
+    assert!(stdout.contains("KEEP=keep-me"), "{stdout}");
+}
+
+#[test]
+fn toml_args_and_env_values_preserve_empty_unicode_and_whitespace_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("value-shapes.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG1=<%s>\nARG2=<%s>\nARG3=<%s>\nENV_EMPTY=<%s>\nENV_UNICODE=<%s>\nENV_SPACED=<%s>\n' \"$1\" \"$2\" \"$3\" \"$CHOPPER_EMPTY\" \"$CHOPPER_UNICODE\" \"$CHOPPER_SPACED\"",
+  "_",
+  "",
+  "emoji🚀",
+  " spaced value "
+]
+
+[env]
+CHOPPER_EMPTY = ""
+CHOPPER_UNICODE = "emoji🚀"
+CHOPPER_SPACED = " spaced value "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["value-shapes"]);
+    assert!(
+        output.status.success(),
+        "value-shapes command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG1=<>"), "{stdout}");
+    assert!(stdout.contains("ARG2=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ARG3=< spaced value >"), "{stdout}");
+    assert!(stdout.contains("ENV_EMPTY=<>"), "{stdout}");
+    assert!(stdout.contains("ENV_UNICODE=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ENV_SPACED=< spaced value >"), "{stdout}");
+}
+
+#[test]
+fn reconcile_patch_preserves_empty_unicode_and_whitespace_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("value-shapes.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["", "emoji🚀", " spaced value "],
+    set_env: #{
+      "CHOPPER_EMPTY": "",
+      "CHOPPER_UNICODE": "emoji🚀",
+      " CHOPPER_SPACED ": " spaced value "
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-value-shapes.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARGS=<%s>|<%s>|<%s>|<%s>\nENV_EMPTY=<%s>\nENV_UNICODE=<%s>\nENV_SPACED=<%s>\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$CHOPPER_EMPTY\" \"$CHOPPER_UNICODE\" \"$CHOPPER_SPACED\"",
+  "_",
+  "base"
+]
+
+[reconcile]
+script = "value-shapes.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-value-shapes"]);
+    assert!(
+        output.status.success(),
+        "reconcile-value-shapes command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=<base>|<>|<emoji🚀>|< spaced value >"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("ENV_EMPTY=<>"), "{stdout}");
+    assert!(stdout.contains("ENV_UNICODE=<emoji🚀>"), "{stdout}");
+    assert!(stdout.contains("ENV_SPACED=< spaced value >"), "{stdout}");
+}
+
+#[test]
+fn toml_env_values_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'EQ=<%s>\nREL=<%s>\nSHELL=<%s>\nDOLLAR=<%s>\nBRACE=<%s>\nWIN=<%s>\n' \"$CHOPPER_EQ\" \"$CHOPPER_REL\" \"$CHOPPER_SHELL\" \"$CHOPPER_DOLLAR\" \"$CHOPPER_BRACE\" \"$CHOPPER_WIN\""
+]
+
+[env]
+CHOPPER_EQ = "--flag=value"
+CHOPPER_REL = "../relative/path"
+CHOPPER_SHELL = "semi;colon&and"
+CHOPPER_DOLLAR = "$DOLLAR"
+CHOPPER_BRACE = "brace{value}"
+CHOPPER_WIN = 'windows\path'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-symbols"]);
+    assert!(
+        output.status.success(),
+        "env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EQ=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("REL=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("SHELL=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("DOLLAR=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("BRACE=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"WIN=<windows\path>"), "{stdout}");
+}
+
+#[test]
+fn reconcile_set_env_values_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      "CHOPPER_EQ": "--replace=value",
+      "CHOPPER_REL": "../from-reconcile",
+      "CHOPPER_SHELL": "semi;colon&and",
+      "CHOPPER_DOLLAR": "$PATCH_DOLLAR",
+      " CHOPPER_BRACE ": "brace{patch}",
+      "CHOPPER_WIN": "windows\\patch"
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-env-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'EQ=<%s>\nREL=<%s>\nSHELL=<%s>\nDOLLAR=<%s>\nBRACE=<%s>\nWIN=<%s>\n' \"$CHOPPER_EQ\" \"$CHOPPER_REL\" \"$CHOPPER_SHELL\" \"$CHOPPER_DOLLAR\" \"$CHOPPER_BRACE\" \"$CHOPPER_WIN\""
+]
+
+[reconcile]
+script = "env-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-env-symbols"]);
+    assert!(
+        output.status.success(),
+        "reconcile-env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EQ=<--replace=value>"), "{stdout}");
+    assert!(stdout.contains("REL=<../from-reconcile>"), "{stdout}");
+    assert!(stdout.contains("SHELL=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("DOLLAR=<$PATCH_DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("BRACE=<brace{patch}>"), "{stdout}");
+    assert!(stdout.contains(r"WIN=<windows\patch>"), "{stdout}");
+}
+
+#[test]
+fn toml_env_keys_allow_symbolic_and_pathlike_shapes_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-symbols.toml"),
+        r#"
+exec = "env"
+
+[env]
+" KEY-WITH-DASH " = "dash"
+"KEY.WITH.DOT" = "dot"
+"KEY/WITH/SLASH" = "slash"
+"KEY\\WITH\\BACKSLASH" = "backslash"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-symbols"]);
+    assert!(
+        output.status.success(),
+        "env-key-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("KEY-WITH-DASH=dash"), "{stdout}");
+    assert!(stdout.contains("KEY.WITH.DOT=dot"), "{stdout}");
+    assert!(stdout.contains("KEY/WITH/SLASH=slash"), "{stdout}");
+    assert!(stdout.contains(r"KEY\WITH\BACKSLASH=backslash"), "{stdout}");
+}
+
+#[test]
+fn reconcile_set_env_keys_allow_symbolic_and_pathlike_shapes_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      " KEY-WITH-DASH ": "dash",
+      "KEY.WITH.DOT": "dot",
+      "KEY/WITH/SLASH": "slash",
+      "KEY\\WITH\\BACKSLASH": "backslash"
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-env-key-symbols.toml"),
+        r#"
+exec = "env"
+
+[reconcile]
+script = "env-key-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-env-key-symbols"]);
+    assert!(
+        output.status.success(),
+        "reconcile-env-key-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("KEY-WITH-DASH=dash"), "{stdout}");
+    assert!(stdout.contains("KEY.WITH.DOT=dot"), "{stdout}");
+    assert!(stdout.contains("KEY/WITH/SLASH=slash"), "{stdout}");
+    assert!(stdout.contains(r"KEY\WITH\BACKSLASH=backslash"), "{stdout}");
+}
+
+#[test]
+fn toml_env_remove_allows_symbolic_and_pathlike_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-remove-symbols.toml"),
+        r#"
+exec = "env"
+env_remove = [
+  " KEY-WITH-DASH ",
+  "KEY.WITH.DOT",
+  "KEY/WITH/SLASH",
+  "KEY\\WITH\\BACKSLASH",
+  "KEY/WITH/SLASH"
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["env-remove-symbols"],
+        [
+            ("KEY-WITH-DASH", "drop-dash".to_string()),
+            ("KEY.WITH.DOT", "drop-dot".to_string()),
+            ("KEY/WITH/SLASH", "drop-slash".to_string()),
+            (r"KEY\WITH\BACKSLASH", "drop-backslash".to_string()),
+            ("KEEP_ME", "keep".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "env-remove-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("KEY-WITH-DASH=drop-dash"), "{stdout}");
+    assert!(!stdout.contains("KEY.WITH.DOT=drop-dot"), "{stdout}");
+    assert!(!stdout.contains("KEY/WITH/SLASH=drop-slash"), "{stdout}");
+    assert!(
+        !stdout.contains(r"KEY\WITH\BACKSLASH=drop-backslash"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("KEEP_ME=keep"), "{stdout}");
+}
+
+#[test]
+fn reconcile_remove_env_allows_symbolic_and_pathlike_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("remove-env-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: [
+      " KEY-WITH-DASH ",
+      "KEY.WITH.DOT",
+      "KEY/WITH/SLASH",
+      "KEY\\WITH\\BACKSLASH",
+      "KEY/WITH/SLASH"
+    ]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-env-symbols.toml"),
+        r#"
+exec = "env"
+
+[reconcile]
+script = "remove-env-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-env-symbols"],
+        [
+            ("KEY-WITH-DASH", "drop-dash".to_string()),
+            ("KEY.WITH.DOT", "drop-dot".to_string()),
+            ("KEY/WITH/SLASH", "drop-slash".to_string()),
+            (r"KEY\WITH\BACKSLASH", "drop-backslash".to_string()),
+            ("KEEP_ME", "keep".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "reconcile-remove-env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("KEY-WITH-DASH=drop-dash"), "{stdout}");
+    assert!(!stdout.contains("KEY.WITH.DOT=drop-dot"), "{stdout}");
+    assert!(!stdout.contains("KEY/WITH/SLASH=drop-slash"), "{stdout}");
+    assert!(
+        !stdout.contains(r"KEY\WITH\BACKSLASH=drop-backslash"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("KEEP_ME=keep"), "{stdout}");
+}
+
+#[test]
+fn toml_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toml-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "--flag=value",
+  "../relative/path",
+  "semi;colon&and",
+  "$DOLLAR",
+  "brace{value}",
+  'windows\path'
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["toml-arg-symbols", "runtime=1", "literal*star"],
+    );
+    assert!(
+        output.status.success(),
+        "toml-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<runtime=1>"), "{stdout}");
+    assert!(stdout.contains("ARG=<literal*star>"), "{stdout}");
+}
+
+#[test]
+fn runtime_passthrough_args_preserve_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("runtime-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "base"
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "runtime-arg-symbols",
+            "--",
+            "--flag=value",
+            "../relative/path",
+            "semi;colon&and",
+            "$DOLLAR",
+            "brace{value}",
+            r"windows\path",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "runtime-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<base>"), "{stdout}");
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+}
+
+#[test]
+fn reconcile_patch_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("arg-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: [
+      "-c",
+      "printf 'ARG=<%s>\\n' \"$@\"",
+      "_",
+      "--replace=value",
+      "../from-reconcile",
+      "semi;colon&and"
+    ],
+    append_args: [
+      "$PATCH_DOLLAR",
+      "brace{patch}",
+      "windows\\patch"
+    ]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "base"
+]
+
+[reconcile]
+script = "arg-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["reconcile-arg-symbols", "runtime-ignored"],
+    );
+    assert!(
+        output.status.success(),
+        "reconcile-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--replace=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../from-reconcile>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$PATCH_DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{patch}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\patch>"), "{stdout}");
+    assert!(!stdout.contains("ARG=<base>"), "{stdout}");
+    assert!(!stdout.contains("ARG=<runtime-ignored>"), "{stdout}");
+}
+
+#[test]
+fn direct_invocation_strips_double_dash_separator() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dash.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dash", "--", "--tail=100"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base --tail=100"), "{stdout}");
+    assert!(!stdout.contains("ARGS=base -- --tail=100"), "{stdout}");
+}
+
+#[test]
+fn direct_invocation_separator_preserves_literal_double_dash_payload() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-direct-literal-separator.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["kpods-direct-literal-separator", "--", "--", "--tail=100"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base -- --tail=100"), "{stdout}");
+}
+
+#[test]
+fn direct_invocation_rejects_separator_as_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("alias name cannot be `--`"), "{stderr}");
+}
+
+#[test]
+fn direct_invocation_rejects_pathlike_alias_name() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["foo/bar", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("path separators"), "{stderr}");
+}
+
+#[test]
+fn direct_invocation_rejects_dot_alias_tokens() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &[".", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot be `.` or `..`"), "{stderr}");
+
+    let output = run_chopper(&config_home, &cache_home, &["..", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot be `.` or `..`"), "{stderr}");
+}
+
+#[test]
+fn direct_invocation_rejects_dash_prefixed_alias_tokens() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--version", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot start with `-`"), "{stderr}");
+}
+
+#[test]
+fn direct_invocation_rejects_whitespace_alias_tokens() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["foo bar", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot contain whitespace"), "{stderr}");
+}
+
+#[test]
+fn explicit_config_and_cache_override_env_vars_are_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let override_config_root = TempDir::new().expect("create override config root");
+    let override_cache_root = TempDir::new().expect("create override cache root");
+
+    let aliases_dir = override_config_root.path().join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("override.toml"),
+        r#"
+exec = "echo"
+args = ["override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                override_config_root.path().display().to_string(),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                override_cache_root.path().display().to_string(),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("override-root runtime"), "{stdout}");
+
+    let override_cache_file = override_cache_root
+        .path()
+        .join("manifests")
+        .join("override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home.path().join("chopper/manifests/override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when CHOPPER_CACHE_DIR is set: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn whitespace_wrapped_config_and_cache_overrides_are_trimmed_and_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let override_config_root = TempDir::new().expect("create override config root");
+    let override_cache_root = TempDir::new().expect("create override cache root");
+
+    let aliases_dir = override_config_root.path().join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("trimmed-override.toml"),
+        r#"
+exec = "echo"
+args = ["trimmed-override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["trimmed-override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("  {}  ", override_config_root.path().display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("  {}  ", override_cache_root.path().display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("trimmed-override-root runtime"), "{stdout}");
+
+    let override_cache_file = override_cache_root
+        .path()
+        .join("manifests")
+        .join("trimmed-override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at trimmed override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/trimmed-override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when CHOPPER_CACHE_DIR is whitespace-wrapped: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn mixed_whitespace_wrapped_config_and_cache_overrides_are_trimmed_and_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let override_config_root = TempDir::new().expect("create override config root");
+    let override_cache_root = TempDir::new().expect("create override cache root");
+
+    let aliases_dir = override_config_root.path().join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixed-ws-override.toml"),
+        r#"
+exec = "echo"
+args = ["mixed-ws-override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["mixed-ws-override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("\n\t{}\t\n", override_config_root.path().display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("\n\t{}\t\n", override_cache_root.path().display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("mixed-ws-override-root runtime"),
+        "{stdout}"
+    );
+
+    let override_cache_file = override_cache_root
+        .path()
+        .join("manifests")
+        .join("mixed-ws-override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at mixed-whitespace override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/mixed-ws-override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when CHOPPER_CACHE_DIR uses mixed whitespace wrapping: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn mixed_whitespace_wrapped_symbolic_overrides_are_trimmed_and_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let roots = TempDir::new().expect("create override roots container");
+    let override_config_root = roots.path().join("cfg @🚀 root");
+    let override_cache_root = roots.path().join("cache @🚀 root");
+
+    let aliases_dir = override_config_root.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&override_cache_root).expect("create cache root");
+    fs::write(
+        aliases_dir.join("symbolic-ws-override.toml"),
+        r#"
+exec = "echo"
+args = ["symbolic-ws-override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["symbolic-ws-override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("\n\t{}\t\n", override_config_root.display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("\n\t{}\t\n", override_cache_root.display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("symbolic-ws-override-root runtime"),
+        "{stdout}"
+    );
+
+    let override_cache_file = override_cache_root
+        .join("manifests")
+        .join("symbolic-ws-override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at symbolic mixed-whitespace override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/symbolic-ws-override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when symbolic CHOPPER_CACHE_DIR override is set: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn mixed_whitespace_wrapped_symbolic_overrides_support_legacy_relative_aliases() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let roots = TempDir::new().expect("create override roots container");
+    let override_config_root = roots.path().join("cfg legacy @🚀 root");
+    let override_cache_root = roots.path().join("cache legacy @🚀 root");
+
+    let bin_dir = override_config_root.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create override bin dir");
+    fs::create_dir_all(&override_cache_root).expect("create override cache root");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_OVERRIDE=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        override_config_root.join("legacy-override-relative"),
+        "'bin/runner @v1' base",
+    )
+    .expect("write legacy alias in override root");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["legacy-override-relative", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("\n\t{}\t\n", override_config_root.display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("\n\t{}\t\n", override_cache_root.display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACY_OVERRIDE=base runtime"), "{stdout}");
+
+    let override_cache_file = override_cache_root
+        .join("manifests")
+        .join("legacy-override-relative.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache in override root: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/legacy-override-relative.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when symbolic override is set: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn empty_config_and_cache_overrides_fall_back_to_xdg_roots() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("fallback.toml"),
+        r#"
+exec = "echo"
+args = ["fallback-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallback", "runtime"],
+        [
+            ("CHOPPER_CONFIG_DIR", "   ".to_string()),
+            ("CHOPPER_CACHE_DIR", "   ".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fallback-root runtime"), "{stdout}");
+
+    let default_cache_file = cache_home.path().join("chopper/manifests/fallback.bin");
+    assert!(
+        default_cache_file.exists(),
+        "expected cache file in default XDG cache root: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
+fn cache_can_be_disabled_for_extraordinary_debugging() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass runtime"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_bypasses_existing_cache_without_rewriting_it() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-existing.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEOLDPAYLOAD001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["nocache-existing", "seed"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("CACHEOLDPAYLOAD001 seed"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-existing.bin");
+    let cached_before_disable = fs::read(&cache_file).expect("read seeded cache bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHENEWPAYLOADLONGTOK01"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-existing", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("CACHENEWPAYLOADLONGTOK01 disabled-run"),
+        "{disabled_stdout}"
+    );
+    assert!(
+        !disabled_stdout.contains("CACHEOLDPAYLOAD001 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let cached_after_disable = fs::read(&cache_file).expect("read cache after disabled run");
+    assert_eq!(
+        cached_after_disable, cached_before_disable,
+        "cache bytes should remain untouched while CHOPPER_DISABLE_CACHE is enabled"
+    );
+
+    let enabled = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-existing", "enabled-run"],
+    );
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("CACHENEWPAYLOADLONGTOK01 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    let cached_after_enabled = fs::read(&cache_file).expect("read cache after enabled run");
+    assert!(
+        cached_after_enabled
+            .windows(b"CACHENEWPAYLOADLONGTOK01".len())
+            .any(|window| window == b"CACHENEWPAYLOADLONGTOK01"),
+        "cache should refresh once cache is re-enabled"
+    );
+    assert!(
+        !cached_after_enabled
+            .windows(b"CACHEOLDPAYLOAD001".len())
+            .any(|window| window == b"CACHEOLDPAYLOAD001"),
+        "cache should no longer contain stale payload after re-enabled run"
+    );
+}
+
+#[test]
+fn cache_disable_flag_bypasses_corrupted_cache_without_pruning_until_reenabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-corrupt.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHECORRUPTOLD001"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["nocache-corrupt", "seed"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("CACHECORRUPTOLD001 seed"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-corrupt.bin");
+    fs::write(&cache_file, b"corrupt-cache-bytes").expect("overwrite cache with corrupt bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHECORRUPTNEWTOK99"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-corrupt", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("CACHECORRUPTNEWTOK99 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let cache_after_disabled = fs::read(&cache_file).expect("read cache after disabled run");
+    assert_eq!(
+        cache_after_disabled, b"corrupt-cache-bytes",
+        "corrupted cache should remain untouched while cache is disabled"
+    );
+
+    let enabled = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-corrupt", "enabled-run"],
+    );
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("CACHECORRUPTNEWTOK99 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    let cache_after_enabled = fs::read(&cache_file).expect("read cache after enabled run");
+    assert!(
+        cache_after_enabled
+            .windows(b"CACHECORRUPTNEWTOK99".len())
+            .any(|window| window == b"CACHECORRUPTNEWTOK99"),
+        "cache should be healed and rewritten after cache is re-enabled"
+    );
+    assert!(
+        !cache_after_enabled
+            .windows(b"corrupt-cache-bytes".len())
+            .any(|window| window == b"corrupt-cache-bytes"),
+        "healed cache should not retain corrupt disabled-run bytes"
+    );
+}
+
+#[test]
+fn cache_disable_flag_bypasses_existing_unsafe_alias_cache_entries_until_reenabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("alpha:beta.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["DISABLEOLDPAYLOAD01"]
+"#,
+    )
+    .expect("write initial alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["alpha:beta", "seed-old"]);
+    assert!(
+        first.status.success(),
+        "seed run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("DISABLEOLDPAYLOAD01 seed-old"),
+        "{first_stdout}"
+    );
+
+    let manifests_dir = cache_home.path().join("chopper/manifests");
+    let hashed_file = fs::read_dir(&manifests_dir)
+        .expect("read manifests dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| name.starts_with("alpha_beta-") && name.ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .expect("expected hashed cache file");
+    let legacy_file = manifests_dir.join("alpha_beta.bin");
+    fs::copy(&hashed_file, &legacy_file).expect("copy hashed cache to legacy path");
+
+    let hashed_before_disabled = fs::read(&hashed_file).expect("read hashed cache bytes");
+    let legacy_before_disabled = fs::read(&legacy_file).expect("read legacy cache bytes");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["DISABLENEWPAYLOADLONG9"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let disabled = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["alpha:beta", "disabled-run"],
+        [("CHOPPER_DISABLE_CACHE", "1".to_string())],
+    );
+    assert!(
+        disabled.status.success(),
+        "disabled-cache run failed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_stdout = String::from_utf8_lossy(&disabled.stdout);
+    assert!(
+        disabled_stdout.contains("DISABLENEWPAYLOADLONG9 disabled-run"),
+        "{disabled_stdout}"
+    );
+
+    let hashed_after_disabled = fs::read(&hashed_file).expect("read hashed after disabled run");
+    let legacy_after_disabled = fs::read(&legacy_file).expect("read legacy after disabled run");
+    assert_eq!(
+        hashed_after_disabled, hashed_before_disabled,
+        "hashed cache should remain untouched while cache is disabled"
+    );
+    assert_eq!(
+        legacy_after_disabled, legacy_before_disabled,
+        "legacy cache should remain untouched while cache is disabled"
+    );
+
+    let enabled = run_chopper(&config_home, &cache_home, &["alpha:beta", "enabled-run"]);
+    assert!(
+        enabled.status.success(),
+        "enabled-cache run failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("DISABLENEWPAYLOADLONG9 enabled-run"),
+        "{enabled_stdout}"
+    );
+
+    assert!(
+        hashed_file.exists(),
+        "hashed cache should be rebuilt once re-enabled"
+    );
+    assert!(
+        !legacy_file.exists(),
+        "legacy cache should be pruned during re-enabled cache refresh"
+    );
+    let hashed_after_enabled = fs::read(&hashed_file).expect("read hashed after enabled run");
+    assert!(
+        hashed_after_enabled
+            .windows(b"DISABLENEWPAYLOADLONG9".len())
+            .any(|window| window == b"DISABLENEWPAYLOADLONG9"),
+        "hashed cache should refresh to new payload once cache is re-enabled"
+    );
+    assert!(
+        !hashed_after_enabled
+            .windows(b"DISABLEOLDPAYLOAD01".len())
+            .any(|window| window == b"DISABLEOLDPAYLOAD01"),
+        "hashed cache should no longer contain stale payload after re-enabled run"
+    );
+}
+
+#[test]
+fn cache_disable_flag_is_case_insensitive_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-case.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-case"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-case", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "TrUe".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-case runtime"), "{stdout}");
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache-case.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with mixed-case value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_trims_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-trimmed.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-trimmed"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "  on  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-trimmed runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-trimmed.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with trimmed truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_trimmed_mixed_case_yes_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-yes-trimmed.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-yes-trimmed"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-yes-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "  yEs  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-yes-trimmed runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-yes-trimmed.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with trimmed mixed-case `yes`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-truthy", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nTrUe\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-crlf-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_nbsp_wrapped_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-nbsp-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-nbsp-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-nbsp-truthy", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\u{00A0}TrUe\u{00A0}".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-nbsp-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-nbsp-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with NBSP-wrapped truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_ideographic_space_wrapped_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-ideographic-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-ideographic-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-ideographic-truthy", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\u{3000}TrUe\u{3000}".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-ideographic-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-ideographic-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with ideographic-space wrapped truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_and_nbsp_wrapped_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-nbsp-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-nbsp-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-nbsp-truthy", "runtime"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\r\n\u{00A0}TrUe\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-crlf-nbsp-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-nbsp-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF + NBSP-wrapped truthy value: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_numeric_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-numeric-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-numeric-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-numeric-truthy", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\n1\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-crlf-numeric-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-numeric-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped numeric truthy `1`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_yes_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-yes.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-yes"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-yes", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nYeS\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-crlf-yes runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-yes.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped mixed-case `yes`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_on_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-on.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-on"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-on", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nOn\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-crlf-on runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-on.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped mixed-case `on`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_trims_numeric_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-numeric-trimmed.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-numeric-trimmed"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-numeric-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "  1  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-numeric-trimmed runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-numeric-trimmed.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with trimmed numeric truthy `1`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_falsey_value_keeps_cache_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-falsey.toml"),
+        r#"
+exec = "echo"
+args = ["cache-enabled"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-falsey"],
+        [("CHOPPER_DISABLE_CACHE", "0".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-falsey.bin");
+    assert!(
+        cache_file.exists(),
+        "cache file should be written when disable flag is falsey: {:?}",
+        cache_file
+    );
+}
+
+#[test]
+fn cache_disable_flag_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNKNOWNSRC01A"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-unknown", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNKNOWNSRC01A seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNKNOWNSRC01A",
+        b"CACHEUNKNOWNHIT99B",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "definitely-not".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNKNOWNHIT99B runtime"),
+        "unknown disable-flag values should keep cache enabled and use cached payload: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNKNOWNSRC01A runtime"),
+        "unknown disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_unicode_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown-unicode.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNICODESRC01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNICODESRC01 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown-unicode.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNICODESRC01",
+        b"CACHEUNICODEHIT02",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "ＴＲＵＥ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNICODEHIT02 runtime"),
+        "unicode unknown disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNICODESRC01 runtime"),
+        "unicode unknown disable-flag values must not bypass cache: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "runtime2"],
+        [("CHOPPER_DISABLE_CACHE", "Ｔrue".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("CACHEUNICODEHIT02 runtime2"),
+        "mixed-script unknown disable-flag values should keep cache enabled: {mixed_stdout}"
+    );
+    assert!(
+        !mixed_stdout.contains("CACHEUNICODESRC01 runtime2"),
+        "mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
+    );
+
+    let nbsp_wrapped_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\u{00A0}ＴＲＵＥ\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        nbsp_wrapped_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&nbsp_wrapped_output.stderr)
+    );
+    let nbsp_wrapped_stdout = String::from_utf8_lossy(&nbsp_wrapped_output.stdout);
+    assert!(
+        nbsp_wrapped_stdout.contains("CACHEUNICODEHIT02 runtime3"),
+        "NBSP-wrapped unicode lookalike values should keep cache enabled: {nbsp_wrapped_stdout}"
+    );
+    assert!(
+        !nbsp_wrapped_stdout.contains("CACHEUNICODESRC01 runtime3"),
+        "NBSP-wrapped unicode lookalike values must not bypass cache: {nbsp_wrapped_stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown-unicode-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNICODECRLFSRC"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNICODECRLFSRC seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown-unicode-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNICODECRLFSRC",
+        b"CACHEUNICODECRLFHIT",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nＴＲＵＥ\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNICODECRLFHIT runtime"),
+        "CRLF-wrapped unicode unknown disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNICODECRLFSRC runtime"),
+        "CRLF-wrapped unicode unknown disable-flag values must not bypass cache: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime2"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nＴrue\r\n".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("CACHEUNICODECRLFHIT runtime2"),
+        "CRLF-wrapped mixed-script unknown disable-flag values should keep cache enabled: {mixed_stdout}"
+    );
+    assert!(
+        !mixed_stdout.contains("CACHEUNICODECRLFSRC runtime2"),
+        "CRLF-wrapped mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
+    );
+
+    let crlf_nbsp_mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\r\n\u{00A0}Ｔrue\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        crlf_nbsp_mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&crlf_nbsp_mixed_output.stderr)
+    );
+    let crlf_nbsp_mixed_stdout = String::from_utf8_lossy(&crlf_nbsp_mixed_output.stdout);
+    assert!(
+        crlf_nbsp_mixed_stdout.contains("CACHEUNICODECRLFHIT runtime3"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes should keep cache enabled: {crlf_nbsp_mixed_stdout}"
+    );
+    assert!(
+        !crlf_nbsp_mixed_stdout.contains("CACHEUNICODECRLFSRC runtime3"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes must not bypass cache: {crlf_nbsp_mixed_stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNKNOWNSRC01A"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-unknown-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNKNOWNSRC01A seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNKNOWNSRC01A",
+        b"CACHEUNKNOWNHIT99B",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nmaybe\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNKNOWNHIT99B runtime"),
+        "CRLF-wrapped unknown disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNKNOWNSRC01A runtime"),
+        "CRLF-wrapped unknown disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_blank_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-blank.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEBLANKSRCVALUEA"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-blank", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEBLANKSRCVALUEA seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-blank.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEBLANKSRCVALUEA",
+        b"CACHEBLANKCACHEHITB",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-blank", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEBLANKCACHEHITB runtime"),
+        "blank disable-flag values should keep cache enabled and use cached payload: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEBLANKSRCVALUEA runtime"),
+        "blank disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_tab_only_blank_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-blank-tab-only.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEBLANKTABSRC1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-blank-tab-only", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEBLANKTABSRC1 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-blank-tab-only.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEBLANKTABSRC1",
+        b"CACHEBLANKTABHIT2",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-blank-tab-only", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\t\t".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEBLANKTABHIT2 runtime"),
+        "tab-only blank disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEBLANKTABSRC1 runtime"),
+        "tab-only blank disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_blank_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-blank-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEBLANKCRLFSRC1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-blank-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEBLANKCRLFSRC1 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-blank-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEBLANKCRLFSRC1",
+        b"CACHEBLANKCRLFHIT2",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-blank-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\n   \r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEBLANKCRLFHIT2 runtime"),
+        "CRLF-wrapped blank disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEBLANKCRLFSRC1 runtime"),
+        "CRLF-wrapped blank disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_tabbed_blank_value_keeps_cache_enabled_and_uses_existing_cache_entry(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-blank-tab-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHETABBLANKSRC1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-blank-tab-crlf", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHETABBLANKSRC1 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-blank-tab-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHETABBLANKSRC1",
+        b"CACHETABBLANKHIT2",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-blank-tab-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\n\t \r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHETABBLANKHIT2 runtime"),
+        "CRLF-wrapped tabbed blank disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHETABBLANKSRC1 runtime"),
+        "CRLF-wrapped tabbed blank disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_off_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-off.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEOFFSRCVALUE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-off", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEOFFSRCVALUE01 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache-off.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEOFFSRCVALUE01",
+        b"CACHEOFFCACHEHIT02",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-off", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "off".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEOFFCACHEHIT02 runtime"),
+        "falsey `off` disable-flag value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEOFFSRCVALUE01 runtime"),
+        "falsey `off` disable-flag value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_falsey_value_keeps_cache_enabled_and_uses_existing_cache_entry()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-off-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEOFFCRLFSRC001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-off-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEOFFCRLFSRC001 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-off-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEOFFCRLFSRC001",
+        b"CACHEOFFCRLFHIT002",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-off-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\noFf\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEOFFCRLFHIT002 runtime"),
+        "CRLF-wrapped falsey `off` value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEOFFCRLFSRC001 runtime"),
+        "CRLF-wrapped falsey `off` value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_no_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-no.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHENOSRCVALUE001"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-no", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHENOSRCVALUE001 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home.path().join("chopper/manifests/nocache-no.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHENOSRCVALUE001",
+        b"CACHENOCACHEHIT002",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-no", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "no".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHENOCACHEHIT002 runtime"),
+        "falsey `no` disable-flag value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHENOSRCVALUE001 runtime"),
+        "falsey `no` disable-flag value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_no_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-no-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHENOCRLFSRC01A"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-no-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHENOCRLFSRC01A seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-no-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHENOCRLFSRC01A",
+        b"CACHENOCRLFHIT02B",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-no-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nNo\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHENOCRLFHIT02B runtime"),
+        "CRLF-wrapped falsey `no` value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHENOCRLFSRC01A runtime"),
+        "CRLF-wrapped falsey `no` value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_false_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-false-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEFALSECRLFSRC01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-false-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEFALSECRLFSRC01 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-false-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEFALSECRLFSRC01",
+        b"CACHEFALSECRLFHIT02",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-false-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nFaLsE\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEFALSECRLFHIT02 runtime"),
+        "CRLF-wrapped falsey `false` value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEFALSECRLFSRC01 runtime"),
+        "CRLF-wrapped falsey `false` value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_nbsp_wrapped_false_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-false-nbsp.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEFALSENBSPSRC1"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-false-nbsp", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEFALSENBSPSRC1 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-false-nbsp.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEFALSENBSPSRC1",
+        b"CACHEFALSENBSPHIT2",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-false-nbsp", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\u{00A0}FaLsE\u{00A0}".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEFALSENBSPHIT2 runtime"),
+        "NBSP-wrapped falsey `false` values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEFALSENBSPSRC1 runtime"),
+        "NBSP-wrapped falsey `false` values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_ideographic_space_wrapped_false_value_keeps_cache_enabled_and_uses_existing_cache_entry(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-false-ideographic.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEIDEOFALSESRC01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-false-ideographic", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEIDEOFALSESRC01 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-false-ideographic.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEIDEOFALSESRC01",
+        b"CACHEIDEOFALSEHIT02",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-false-ideographic", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\u{3000}FaLsE\u{3000}".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEIDEOFALSEHIT02 runtime"),
+        "ideographic-space wrapped falsey `false` values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEIDEOFALSESRC01 runtime"),
+        "ideographic-space wrapped falsey `false` values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_and_nbsp_wrapped_false_value_keeps_cache_enabled_and_uses_existing_cache_entry(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-false-crlf-nbsp.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEFCRLFNBSPSOURCE01"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-false-crlf-nbsp", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEFCRLFNBSPSOURCE01 seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-false-crlf-nbsp.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEFCRLFNBSPSOURCE01",
+        b"CACHEFCRLFNBSPHITRCE01",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-false-crlf-nbsp", "runtime"],
+        [(
+            "CHOPPER_DISABLE_CACHE",
+            "\r\n\u{00A0}FaLsE\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEFCRLFNBSPHITRCE01 runtime"),
+        "CRLF + NBSP-wrapped falsey `false` values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEFCRLFNBSPSOURCE01 runtime"),
+        "CRLF + NBSP-wrapped falsey `false` values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_disable_flag_crlf_wrapped_zero_value_keeps_cache_enabled_and_uses_existing_cache_entry() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-zero-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEZEROCRLFSRC01A"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(&config_home, &cache_home, &["nocache-zero-crlf", "seed"]);
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEZEROCRLFSRC01A seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-zero-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEZEROCRLFSRC01A",
+        b"CACHEZEROCRLFHIT02B",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-zero-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\n0\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEZEROCRLFHIT02B runtime"),
+        "CRLF-wrapped falsey `0` value should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEZEROCRLFSRC01A runtime"),
+        "CRLF-wrapped falsey `0` value must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
+fn cache_invalidation_applies_updated_alias_config() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("mutable.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["before-change"]
+"#,
+    )
+    .expect("write alias config");
+
+    let first = run_chopper(&config_home, &cache_home, &["mutable"]);
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first_stdout.contains("before-change"), "{first_stdout}");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["after-change"]
+"#,
+    )
+    .expect("rewrite alias config");
+
+    let second = run_chopper(&config_home, &cache_home, &["mutable"]);
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(second_stdout.contains("after-change"), "{second_stdout}");
+    assert!(!second_stdout.contains("before-change"), "{second_stdout}");
+}
+
+#[test]
+fn cache_invalidation_applies_when_symlinked_alias_target_changes() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let shared_dir = chopper_dir.join("shared");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::create_dir_all(&shared_dir).expect("create shared dir");
+
+    let target_path = shared_dir.join("mutable-target.toml");
+    fs::write(
+        &target_path,
+        r#"
+exec = "echo"
+args = ["before-symlink-change"]
+"#,
+    )
+    .expect("write target alias config");
+    symlink(&target_path, aliases_dir.join("mutable-link.toml")).expect("create alias symlink");
+
+    let first = run_chopper(&config_home, &cache_home, &["mutable-link"]);
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("before-symlink-change"),
+        "{first_stdout}"
+    );
+
+    fs::write(
+        &target_path,
+        r#"
+exec = "echo"
+args = ["after-symlink-change"]
+"#,
+    )
+    .expect("rewrite target alias config");
+
+    let second = run_chopper(&config_home, &cache_home, &["mutable-link"]);
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("after-symlink-change"),
+        "{second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains("before-symlink-change"),
+        "{second_stdout}"
+    );
+}
+
+#[test]
+fn reconcile_script_can_append_args_and_override_env() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("hook.reconcile.rhai"),
+        r#"
+fn reconcile(ctx) {
+  let out = #{};
+  if ctx.runtime_args.contains("--loud") {
+    out["append_args"] = ["from_reconcile"];
+    out["set_env"] = #{ "CHOPPER_E2E": "from_reconcile" };
+  }
+  out
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("hooked.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"; printf 'ENV=%s\n' \"$CHOPPER_E2E\"", "_", "base"]
+
+[env]
+CHOPPER_E2E = "from_alias"
+
+[reconcile]
+script = "hook.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["hooked", "--loud", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base --loud runtime from_reconcile"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("ENV=from_reconcile"), "{stdout}");
+}
+
+#[test]
+fn reconcile_can_read_runtime_environment_from_context() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("runtime-env.reconcile.rhai"),
+        r#"
+fn reconcile(ctx) {
+  let out = #{};
+  out["set_env"] = #{ "CHOPPER_E2E": ctx.runtime_env["RUNTIME_MARKER"] };
+  out
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("runtime-env.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+CHOPPER_E2E = "from_alias"
+
+[reconcile]
+script = "runtime-env.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["runtime-env"],
+        [("RUNTIME_MARKER", "from_runtime_env".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_runtime_env"), "{stdout}");
+}
+
+#[test]
+fn reconcile_can_be_disabled_for_extraordinary_debugging() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile"],
+    set_env: #{ "CHOPPER_E2E": "from_reconcile" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"; printf 'ENV=%s\n' \"$CHOPPER_E2E\"", "_", "base"]
+
+[env]
+CHOPPER_E2E = "from_alias"
+
+[reconcile]
+script = "toggle.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "1".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_reconcile"), "{stdout}");
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
+fn reconcile_disable_flag_is_case_insensitive_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-case.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_case"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-case.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-case.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-case", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "YeS".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_reconcile_case"), "{stdout}");
+}
+
+#[test]
+fn reconcile_disable_flag_falsey_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-falsey.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_falsey"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-falsey.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-falsey.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-falsey", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "0".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_falsey"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_unknown_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_unknown"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-unknown.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "definitely-not".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_unknown"),
+        "unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_unicode_unknown_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_unknown_unicode"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-unknown-unicode.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "ＴＲＵＥ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode"),
+        "unicode unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode", "runtime2"],
+        [("CHOPPER_DISABLE_RECONCILE", "Ｔrue".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode"),
+        "mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
+    );
+
+    let nbsp_wrapped_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{00A0}ＴＲＵＥ\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        nbsp_wrapped_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&nbsp_wrapped_output.stderr)
+    );
+    let nbsp_wrapped_stdout = String::from_utf8_lossy(&nbsp_wrapped_output.stdout);
+    assert!(
+        nbsp_wrapped_stdout.contains("ARGS=base runtime3 from_reconcile_unknown_unicode"),
+        "NBSP-wrapped unicode lookalike values should not disable reconcile: {nbsp_wrapped_stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_unknown_unicode_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-unknown-unicode-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nＴＲＵＥ\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode_crlf"),
+        "CRLF-wrapped unicode unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime2"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nＴrue\r\n".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode_crlf"),
+        "CRLF-wrapped mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
+    );
+
+    let crlf_nbsp_mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime3"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\r\n\u{00A0}Ｔrue\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        crlf_nbsp_mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&crlf_nbsp_mixed_output.stderr)
+    );
+    let crlf_nbsp_mixed_stdout = String::from_utf8_lossy(&crlf_nbsp_mixed_output.stdout);
+    assert!(
+        crlf_nbsp_mixed_stdout.contains("ARGS=base runtime3 from_reconcile_unknown_unicode_crlf"),
+        "CRLF + NBSP-wrapped mixed-script lookalikes should not disable reconcile: {crlf_nbsp_mixed_stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_unknown_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_unknown_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-unknown-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nmaybe\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_unknown_crlf"),
+        "CRLF-wrapped unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_blank_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-blank.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_blank"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-blank.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-blank.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-blank", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "   ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_blank"),
+        "blank disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_tab_only_blank_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-tab-only.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_blank_tab_only"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-tab-only.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-blank-tab-only.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-blank-tab-only", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\t\t".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_blank_tab_only"),
+        "tab-only blank disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_blank_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_blank_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-blank-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-blank-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\n   \r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_blank_crlf"),
+        "CRLF-wrapped blank disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_tabbed_blank_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-tab-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_blank_tab_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-blank-tab-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-blank-tab-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-blank-tab-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\n\t \r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_blank_tab_crlf"),
+        "CRLF-wrapped tabbed blank disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_off_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-off.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_off"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-off.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-off.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-off", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "off".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_off"),
+        "falsey `off` disable-flag value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_falsey_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-off-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_off_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-off-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-off-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-off-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\noFf\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_off_crlf"),
+        "CRLF-wrapped falsey `off` value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_no_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-no.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_no"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-no.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-no.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-no", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "no".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_no"),
+        "falsey `no` disable-flag value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_no_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-no-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_no_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-no-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-no-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-no-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nNo\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_no_crlf"),
+        "CRLF-wrapped falsey `no` value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_false_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-false-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_false_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-false-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-false-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-false-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nFaLsE\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_false_crlf"),
+        "CRLF-wrapped falsey `false` value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_nbsp_wrapped_false_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-false-nbsp.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_false_nbsp"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-false-nbsp.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-false-nbsp.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-false-nbsp", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{00A0}FaLsE\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_false_nbsp"),
+        "NBSP-wrapped falsey `false` values should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_ideographic_space_wrapped_false_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-false-ideographic.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_false_ideographic"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-false-ideographic.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-false-ideographic.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-false-ideographic", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{3000}FaLsE\u{3000}".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_false_ideographic"),
+        "ideographic-space wrapped falsey `false` values should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_and_nbsp_wrapped_false_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-false-crlf-nbsp.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_false_crlf_nbsp"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-false-crlf-nbsp.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-false-crlf-nbsp.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-false-crlf-nbsp", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\r\n\u{00A0}FaLsE\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_false_crlf_nbsp"),
+        "CRLF + NBSP-wrapped falsey `false` values should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_zero_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-zero-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_zero_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-zero-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-zero-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-zero-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\n0\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_zero_crlf"),
+        "CRLF-wrapped falsey `0` value should keep reconcile enabled: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_trims_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-trimmed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_trimmed_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-trimmed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "  TRUE  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_trimmed_truthy"),
+        "trimmed truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_trimmed_mixed_case_yes_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-yes-trimmed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_yes_trimmed"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-yes-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-yes-trimmed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-yes-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "  yEs  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_yes_trimmed"),
+        "trimmed mixed-case `yes` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-truthy", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nTrUe\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_truthy"),
+        "CRLF-wrapped truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_nbsp_wrapped_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-nbsp-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_nbsp_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-nbsp-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-nbsp-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-nbsp-truthy", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{00A0}TrUe\u{00A0}".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_nbsp_truthy"),
+        "NBSP-wrapped truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_ideographic_space_wrapped_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-ideographic-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_ideographic_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-ideographic-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-ideographic-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-ideographic-truthy", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\u{3000}TrUe\u{3000}".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_ideographic_truthy"),
+        "ideographic-space wrapped truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_and_nbsp_wrapped_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-nbsp-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_nbsp_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-nbsp-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-nbsp-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-nbsp-truthy", "runtime"],
+        [(
+            "CHOPPER_DISABLE_RECONCILE",
+            "\r\n\u{00A0}TrUe\u{00A0}\r\n".to_string(),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_nbsp_truthy"),
+        "CRLF + NBSP-wrapped truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_numeric_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-numeric-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_numeric_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-numeric-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-numeric-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-numeric-truthy", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\n1\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_numeric_truthy"),
+        "CRLF-wrapped numeric truthy `1` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_yes_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-yes.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_yes"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-yes.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-yes.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-yes", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nYeS\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_yes"),
+        "CRLF-wrapped mixed-case `yes` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_on_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-on.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_on"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-on.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-on.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-on", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nOn\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_on"),
+        "CRLF-wrapped mixed-case `on` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_trims_numeric_truthy_value_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-numeric-trimmed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_numeric_trimmed"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-numeric-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-numeric-trimmed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-numeric-trimmed", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "  1  ".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_numeric_trimmed"),
+        "trimmed numeric truthy `1` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn journal_config_surfaces_systemd_cat_failure_with_hint() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-fail.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        "#!/usr/bin/env bash\ncat >/dev/null\nexit 17\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-fail"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("OUT_STREAM"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("journal namespace requires systemd-cat --namespace support"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_failure_before_child_spawn_avoids_side_effects() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let side_effect = config_home.path().join("should-not-exist");
+
+    fs::write(
+        aliases_dir.join("journal-no-child.toml"),
+        format!(
+            r#"
+exec = "/bin/sh"
+args = ["-c", "touch \"$1\"", "_", "{}"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+            side_effect.display()
+        ),
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-no-child"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to spawn systemd-cat"), "{stderr}");
+    assert!(
+        !side_effect.exists(),
+        "child command should not run when journal spawn fails"
+    );
+}
+
+#[test]
+fn journal_immediate_sink_exit_before_child_spawn_avoids_side_effects() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let side_effect = config_home.path().join("should-not-exist-early-exit");
+
+    fs::write(
+        aliases_dir.join("journal-early-exit.toml"),
+        format!(
+            r#"
+exec = "/bin/sh"
+args = ["-c", "touch \"$1\"", "_", "{}"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+            side_effect.display()
+        ),
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(&script_path, "#!/usr/bin/env bash\nexit 17\n");
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-early-exit"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("exited before child spawn"), "{stderr}");
+    assert!(
+        !side_effect.exists(),
+        "child command should not run when systemd-cat exits immediately"
+    );
+}
+
+#[test]
+fn journal_stderr_false_skips_systemd_cat_dependency() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-no-stderr.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = false
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-no-stderr"],
+        [("PATH", "/nonexistent".to_string())],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("OUT_STREAM"), "{stdout}");
+    assert!(stderr.contains("ERR_STREAM"), "{stderr}");
+}
+
+#[test]
+fn reconcile_can_replace_args_and_remove_env() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("replace.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: [
+      "-c",
+      "printf 'ARGS=%s\n' \"$*\"; printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\"",
+      "_",
+      "replaced"
+    ],
+    remove_env: ["CHOPPER_DROP"],
+    set_env: #{ "CHOPPER_KEEP": "overridden" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("replace.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[env]
+CHOPPER_DROP = "drop-me"
+CHOPPER_KEEP = "from-alias"
+
+[reconcile]
+script = "replace.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["replace", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=replaced"), "{stdout}");
+    assert!(!stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(stdout.contains("KEEP=overridden"), "{stdout}");
+}
+
+#[test]
+fn reconcile_set_env_overrides_alias_env_remove() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("promote.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "PROMOTE": "from_reconcile" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("promote.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'PROMOTE=%s\n' \"$PROMOTE\""]
+env_remove = ["PROMOTE"]
+
+[reconcile]
+script = "promote.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["promote"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PROMOTE=from_reconcile"), "{stdout}");
+}
+
+#[test]
+fn reconcile_env_key_and_remove_entries_are_trimmed_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-trim.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "  CHOPPER_PROMOTE  ": "from_reconcile" },
+    remove_env: ["  CHOPPER_DROP  ", "   "]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'PROMOTE=%s\n' \"$CHOPPER_PROMOTE\"; printf 'DROP=%s\n' \"$CHOPPER_DROP\""]
+
+[reconcile]
+script = "reconcile-trim.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-trim"],
+        [("CHOPPER_DROP", "from_runtime".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PROMOTE=from_reconcile"), "{stdout}");
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+}
+
+#[test]
+fn reconcile_remove_env_duplicates_are_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-dedup.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["CHOPPER_DROP", " CHOPPER_DROP ", "CHOPPER_DROP"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-dedup.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+
+[reconcile]
+script = "reconcile-remove-dedup.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-dedup"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn reconcile_blank_set_env_key_after_trim_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "   ": "bad" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-bad-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-bad-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_blank_set_env_key_with_mixed_whitespace_after_trim_fails_validation_in_end_to_end_flow(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-mixed-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "\n\t  \t\n": "bad" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-mixed-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-bad-mixed-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-bad-mixed-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_duplicate_set_env_keys_after_trim_fail_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "CHOPPER_DUP": "a", " CHOPPER_DUP ": "b" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-dup-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-dup-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_duplicate_set_env_keys_after_mixed_whitespace_trim_fail_validation_in_end_to_end_flow()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-mixed-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "CHOPPER_DUP": "a", "\n\t CHOPPER_DUP \t\n": "b" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-mixed-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-dup-mixed-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-dup-mixed-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_set_env_key_with_equals_sign_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-equals-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "BAD=KEY": "value" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-equals-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-equals-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-equals-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` keys cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_set_env_key_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  let bad_key = "BAD" + "\x00" + "KEY";
+  let env = #{};
+  env[bad_key] = "value";
+  #{
+    set_env: env
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-nul-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-nul-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` keys cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_set_env_value_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-value.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "GOOD_KEY": "bad\x00value" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-nul-value.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-nul-value.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-nul-value"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` values cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_append_args_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-append-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-append-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-append-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-append-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`append_args` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_replace_args_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-replace-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: ["ok", "bad\x00arg"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-replace-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-replace-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-replace-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`replace_args` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_equals_sign_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["BAD=KEY"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-equals.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-equals"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_mixed_whitespace_equals_sign_fails_validation_in_end_to_end_flow(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["\n\t BAD=KEY \t\n"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-equals-mixed.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-equals-mixed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-equals-mixed"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  let bad_key = "BAD" + "\x00" + "KEY";
+  #{
+    remove_env: [bad_key]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-nul.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_remove_env_entry_with_mixed_whitespace_nul_byte_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: ["\n\t BAD\x00KEY \t\n"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-nul-mixed.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-remove-nul-mixed.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-remove-nul-mixed"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`remove_env` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_unsupported_patch_key_fails_validation_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-unsupported-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    bogus_key: "value"
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-unsupported-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-unsupported-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-unsupported-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported reconcile patch key `bogus_key`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn static_env_remove_unsets_inherited_environment_values() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+env_remove = ["CHOPPER_DROP"]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["envremove"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn env_remove_trimming_applies_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-trimmed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+env_remove = ["  CHOPPER_DROP  ", "   "]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["envremove-trimmed"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn env_remove_duplicates_are_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-dedup.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'DROP=%s\n' \"$CHOPPER_DROP\"; printf 'KEEP=%s\n' \"$CHOPPER_KEEP\""]
+env_remove = ["CHOPPER_DROP", " CHOPPER_DROP ", "CHOPPER_DROP"]
+
+[env]
+CHOPPER_KEEP = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["envremove-dedup"],
+        [
+            ("CHOPPER_DROP", "from_runtime".to_string()),
+            ("CHOPPER_KEEP", "from_runtime".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP="), "{stdout}");
+    assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
+    assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn env_remove_entry_with_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-invalid.toml"),
+        r#"
+exec = "echo"
+env_remove = ["BAD=KEY"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-invalid"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn env_remove_entry_with_mixed_whitespace_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-invalid-mixed.toml"),
+        r#"
+exec = "echo"
+env_remove = ["\n\t BAD=KEY \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-invalid-mixed"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn env_remove_entry_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-nul.toml"),
+        r#"
+exec = "echo"
+env_remove = ["BAD\u0000KEY"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-nul"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn env_remove_entry_with_mixed_whitespace_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("envremove-nul-mixed.toml"),
+        r#"
+exec = "echo"
+env_remove = ["\n\t BAD\u0000KEY \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["envremove-nul-mixed"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env_remove` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_function_name_override_is_honored() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("customfn.reconcile.rhai"),
+        r#"
+fn custom_reconcile(_ctx) {
+  #{
+    append_args: ["from_custom_function"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("customfn.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "customfn.reconcile.rhai"
+function = "custom_reconcile"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["customfn", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_custom_function"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn reconcile_blank_function_defaults_to_reconcile_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blankfn.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_default_function"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("blankfn.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "blankfn.reconcile.rhai"
+function = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blankfn", "runtime"]);
+    assert!(
+        output.status.success(),
+        "blankfn command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_default_function"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn reconcile_mixed_whitespace_blank_function_defaults_to_reconcile_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blankfn-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_mixed_default_function"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("blankfn-mixed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "blankfn-mixed.reconcile.rhai"
+function = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blankfn-mixed", "runtime"]);
+    assert!(
+        output.status.success(),
+        "blankfn-mixed command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_mixed_default_function"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_remains_supported() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy"), "echo legacy").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("legacy runtime"), "{stdout}");
+}
+
+#[test]
+fn legacy_one_line_alias_resolves_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(chopper_dir.join("legacy-relative"), "'bin/runner @v1' base")
+        .expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-relative", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACY_REL_EXEC=base runtime"), "{stdout}");
+}
+
+#[test]
+fn legacy_one_line_alias_resolves_dot_prefixed_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-dot @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_DOT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        chopper_dir.join("legacy-dot-relative"),
+        "'./bin/runner-dot @v1' base",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-dot-relative", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_DOT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_resolves_parent_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let outside_bin = config_home.path().join("outside-bin");
+    fs::create_dir_all(&outside_bin).expect("create outside bin dir");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+
+    write_executable_script(
+        &outside_bin.join("runner-parent @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_PARENT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        chopper_dir.join("legacy-parent-relative"),
+        "'../outside-bin/runner-parent @v1' base",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-parent-relative", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_PARENT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create shared bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-target");
+    fs::write(&target, "'bin/runner @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-link", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn symlinked_legacy_alias_resolves_dot_prefixed_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create shared bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-dot @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_DOT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-dot-target");
+    fs::write(&target, "'./bin/runner-dot @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-dot-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-dot-link", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_DOT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn symlinked_legacy_alias_resolves_parent_relative_command_from_target_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let shared_bin = shared_dir.join("bin");
+    let outside_bin = chopper_dir.join("outside-bin");
+    fs::create_dir_all(&shared_bin).expect("create shared bin dir");
+    fs::create_dir_all(&outside_bin).expect("create outside bin dir");
+
+    write_executable_script(
+        &outside_bin.join("runner-parent @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_PARENT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+
+    let target = shared_dir.join("legacy-parent-target");
+    fs::write(&target, "'../outside-bin/runner-parent @v1' base").expect("write symlink target");
+    symlink(&target, chopper_dir.join("legacy-parent-link")).expect("create legacy symlink config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-parent-link", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_SYMLINK_PARENT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn legacy_relative_command_cache_invalidation_reparses_updated_command() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-a"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_CACHE=RUNNER_A %s\\n' \"$*\"\n",
+    );
+    write_executable_script(
+        &bin_dir.join("runner-b"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_CACHE=RUNNER_B %s\\n' \"$*\"\n",
+    );
+
+    let alias_path = chopper_dir.join("legacy-rel-cache");
+    fs::write(&alias_path, "'bin/runner-a' baseA").expect("write initial legacy alias");
+
+    let first = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-rel-cache", "runtime-a"],
+    );
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("LEGACY_CACHE=RUNNER_A baseA runtime-a"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/legacy-rel-cache.bin");
+    assert!(
+        cache_file.exists(),
+        "expected cache file at {:?}",
+        cache_file
+    );
+
+    fs::write(&alias_path, "'bin/runner-b' base-UPDATED-PAYLOAD")
+        .expect("rewrite legacy alias with updated command");
+
+    let second = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-rel-cache", "runtime-b"],
+    );
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("LEGACY_CACHE=RUNNER_B base-UPDATED-PAYLOAD runtime-b"),
+        "{second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains("LEGACY_CACHE=RUNNER_A"),
+        "{second_stdout}"
+    );
+}
+
+#[test]
+fn symlinked_legacy_relative_command_cache_invalidation_reparses_updated_target() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let shared_dir = chopper_dir.join("shared");
+    let bin_dir = shared_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create shared bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-a"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_CACHE=RUNNER_A %s\\n' \"$*\"\n",
+    );
+    write_executable_script(
+        &bin_dir.join("runner-b"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_SYMLINK_CACHE=RUNNER_B %s\\n' \"$*\"\n",
+    );
+
+    let target_path = shared_dir.join("legacy-cache-target");
+    fs::write(&target_path, "'bin/runner-a' baseA").expect("write initial symlink target");
+    let alias_path = chopper_dir.join("legacy-cache-link");
+    symlink(&target_path, &alias_path).expect("create legacy cache symlink");
+
+    let first = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-cache-link", "runtime-a"],
+    );
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("LEGACY_SYMLINK_CACHE=RUNNER_A baseA runtime-a"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/legacy-cache-link.bin");
+    assert!(
+        cache_file.exists(),
+        "expected cache file at {:?}",
+        cache_file
+    );
+
+    fs::write(&target_path, "'bin/runner-b' base-UPDATED-PAYLOAD")
+        .expect("rewrite symlink target with updated command");
+
+    let second = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-cache-link", "runtime-b"],
+    );
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("LEGACY_SYMLINK_CACHE=RUNNER_B base-UPDATED-PAYLOAD runtime-b"),
+        "{second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains("LEGACY_SYMLINK_CACHE=RUNNER_A"),
+        "{second_stdout}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-symbolic"),
+        r#"sh -c "printf 'ARG=<%s>\n' \"$@\"" _ --flag=value ../relative/path 'semi;colon&and' '$DOLLAR' 'brace{value}' 'windows\path'"#,
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-symbolic", "runtime=1", "literal*star"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<runtime=1>"), "{stdout}");
+    assert!(stdout.contains("ARG=<literal*star>"), "{stdout}");
+}
+
+#[test]
+fn legacy_one_line_alias_ignores_blank_and_comment_lines() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-comments"),
+        r#"
+
+# heading comment
+   # indented comment
+echo legacy-commented
+"#,
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-comments", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("legacy-commented runtime"), "{stdout}");
+}
+
+#[test]
+fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-bom"), "\u{feff}echo bom-ok").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-bom", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bom-ok runtime"), "{stdout}");
+}
+
+#[test]
+fn legacy_one_line_alias_with_nul_in_command_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-nul-command"), b"ec\0ho legacy")
+        .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-nul-command", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_nul_in_args_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-nul-args"), b"echo ok\0bad").expect("write legacy alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacy-nul-args", "runtime"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias args entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_empty_command_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-empty-command"), "\"\" runtime")
+        .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-empty-command", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_dot_command_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-dot-command"), ". runtime").expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-dot-command", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_parent_command_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-parent-command"), ".. runtime").expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-parent-command", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_trailing_separator_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-trailing-separator"),
+        "bin/ runtime",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-trailing-separator", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_trailing_backslash_separator_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-trailing-backslash-separator"),
+        "'bin\\' runtime",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-trailing-backslash-separator", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(chopper_dir.join("legacy-dot-component"), "bin/.. runtime")
+        .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-dot-component", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_with_backslash_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-backslash-dot-component"),
+        "'bin\\..' runtime",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-backslash-dot-component", "runtime"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy alias command cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_alias_accepts_utf8_bom_prefixed_document() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("bom.toml"),
+        "\u{feff}exec = \"sh\"\nargs = [\"-c\", \"printf '%s\\n' \\\"$*\\\"\", \"_\", \"bom\"]\n",
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["bom", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bom runtime"), "{stdout}");
+}
+
+#[test]
+fn toml_env_duplicate_keys_after_trim_fail_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dup-env.toml"),
+        r#"
+exec = "echo"
+
+[env]
+FOO = "base"
+" FOO " = "collision"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dup-env"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_duplicate_keys_after_mixed_whitespace_trim_fail_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dup-mixed-env.toml"),
+        r#"
+exec = "echo"
+
+[env]
+FOO = "base"
+"\n\t FOO \t\n" = "collision"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dup-mixed-env"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_blank_key_after_trim_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"   " = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_blank_key_with_mixed_whitespace_after_trim_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-mixed-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"\n\t  \t\n" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-mixed-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_key_with_equals_sign_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("equals-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"BAD=KEY" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["equals-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` keys cannot contain `=`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_key_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"BAD\u0000KEY" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` keys cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_value_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-env-value.toml"),
+        r#"
+exec = "echo"
+
+[env]
+GOOD_KEY = "bad\u0000value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-env-value"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` values cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_args_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-args.toml"),
+        r#"
+exec = "echo"
+args = ["ok", "bad\u0000arg"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-args"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `args` entries cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_dot_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-exec.toml"),
+        r#"
+exec = "."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-exec.toml"),
+        "exec = \"echo\\u0000tool\"\n",
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-exec.toml"),
+        r#"
+exec = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("field `exec` cannot be empty"), "{stderr}");
+}
+
+#[test]
+fn toml_exec_mixed_whitespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("mixed-blank-exec.toml"),
+        r#"
+exec = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["mixed-blank-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("field `exec` cannot be empty"), "{stderr}");
+}
+
+#[test]
+fn toml_exec_parent_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("parent-exec.toml"),
+        r#"
+exec = ".."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parent-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_path_ending_in_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-component-exec.toml"),
+        r#"
+exec = "bin/.."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-component-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_absolute_path_ending_in_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-component-absolute-exec.toml"),
+        r#"
+exec = "/usr/bin/.."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-component-absolute-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_dot_slash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-slash-exec.toml"),
+        r#"
+exec = "./"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-slash-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_dot_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-backslash-exec.toml"),
+        r#"
+exec = '.\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-backslash-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("trailing-exec.toml"),
+        r#"
+exec = "./bin/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["trailing-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_absolute_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-exec.toml"),
+        r#"
+exec = "/usr/bin/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["absolute-trailing-exec"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_exec_absolute_trailing_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-backslash-exec.toml"),
+        r#"
+exec = '/usr/bin\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["absolute-trailing-backslash-exec"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `exec` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_dot_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-reconcile-script.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-reconcile-script"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_mixed_whitespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("mixed-blank-reconcile-script.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["mixed-blank-reconcile-script"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-reconcile-script.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile\u0000.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-reconcile-script"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_function_with_nul_escape_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nul-reconcile-function.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+function = "reconcile\u0000hook"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["nul-reconcile-function"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.function` cannot contain NUL bytes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_parent_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("parent-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = ".."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["parent-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot be `.` or `..`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_ending_in_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-component-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/.."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-component-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_absolute_path_ending_in_dot_component_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-component-absolute-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "/tmp/.."
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["dot-component-absolute-reconcile"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with `.` or `..` path components"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_dot_slash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-slash-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "./"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-slash-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_dot_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dot-backslash-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = '.\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dot-backslash-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("trailing-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "./hooks/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["trailing-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_absolute_trailing_separator_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "/tmp/"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["absolute-trailing-reconcile"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_reconcile_script_absolute_trailing_backslash_path_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("absolute-trailing-backslash-reconcile.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = '/tmp\'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["absolute-trailing-backslash-reconcile"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `reconcile.script` cannot end with a path separator"),
+        "{stderr}"
+    );
+}
