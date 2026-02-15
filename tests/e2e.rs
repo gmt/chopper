@@ -15629,6 +15629,77 @@ fn legacy_one_line_alias_resolves_relative_command_from_config_directory() {
 }
 
 #[test]
+fn legacy_one_line_alias_resolves_dot_prefixed_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-dot @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_DOT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        chopper_dir.join("legacy-dot-relative"),
+        "'./bin/runner-dot @v1' base",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-dot-relative", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_DOT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn legacy_one_line_alias_resolves_parent_relative_command_from_config_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let outside_bin = config_home.path().join("outside-bin");
+    fs::create_dir_all(&outside_bin).expect("create outside bin dir");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+
+    write_executable_script(
+        &outside_bin.join("runner-parent @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_PARENT_REL_EXEC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        chopper_dir.join("legacy-parent-relative"),
+        "'../outside-bin/runner-parent @v1' base",
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-parent-relative", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("LEGACY_PARENT_REL_EXEC=base runtime"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

@@ -427,6 +427,33 @@ mod tests {
     }
 
     #[test]
+    fn resolves_dot_prefixed_legacy_command_against_config_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config_dir = temp.path().join("chopper");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let alias = config_dir.join("legacy-dot-relative");
+        fs::write(&alias, "'./bin/runner @v1' base").expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(manifest.exec, config_dir.join("./bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
+    }
+
+    #[test]
+    fn resolves_parent_relative_legacy_command_against_config_directory() {
+        let temp = TempDir::new().expect("create tempdir");
+        let root_dir = temp.path().join("root");
+        let config_dir = root_dir.join("chopper");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let alias = config_dir.join("legacy-parent-relative");
+        fs::write(&alias, "'../outside-bin/runner @v1' base").expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(manifest.exec, config_dir.join("../outside-bin/runner @v1"));
+        assert_eq!(manifest.args, vec!["base"]);
+    }
+
+    #[test]
     fn resolves_relative_legacy_command_against_symlink_target_directory() {
         let temp = TempDir::new().expect("create tempdir");
         let aliases_dir = temp.path().join("aliases");
