@@ -3104,6 +3104,50 @@ fn print_dir_builtins_trim_whitespace_wrapped_override_paths() {
 }
 
 #[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_override_paths() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_cmd() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
