@@ -14,6 +14,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - copy/paste alias patterns
   - common workflows
   - quick recipes for env/journal/reconcile/legacy usage
+- [`migration.md`](migration.md)
+  - phased migration from legacy one-line aliases to TOML
+  - practical conversion flow for env/journal/reconcile adoption
 - [`templates/`](templates)
   - starter files for common alias/reconcile setups
   - quick copy source for first working configs
