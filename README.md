@@ -124,6 +124,8 @@ The first executable token must be a non-empty command.
 Legacy command token cannot be `.` or `..`, and cannot end with path separators
 or trailing `.` / `..` path components.
 Legacy command and argument tokens cannot contain NUL bytes.
+Legacy arguments are otherwise preserved as provided (for example
+`--flag=value`, `../relative/path`, `$DOLLAR`, and `windows\path`).
 
 ---
 
@@ -164,6 +166,23 @@ Relative `exec` forms like `./` or `.\` must include a path segment
 If `exec` is a relative path (for example `bin/runner`), it is resolved against
 the alias config file's real directory (following symlinks).
 TOML documents may optionally start with a UTF-8 BOM.
+
+### String-shape policy (what is intentionally allowed)
+
+`chopper` intentionally rejects only values that are structurally unsafe for
+process execution and environment mutation:
+
+- NUL bytes in command/arg/env/journal/reconcile string fields
+- `=` in env keys / env_remove / remove_env entries
+- blank-after-trim values for fields that require non-empty tokens
+
+Other symbolic/path-like shapes are intentionally preserved (for example
+slashes, backslashes, dots, dashes, braces, dollar signs, and semicolons),
+including for alias args, reconcile args, env values, env keys, env_remove
+entries, journal namespace/identifier, and legacy one-line alias args.
+
+When authoring TOML that contains backslashes, prefer literal strings
+(`'windows\path'`) if you want raw backslashes preserved exactly.
 
 ### Argument merge order
 
