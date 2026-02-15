@@ -1219,6 +1219,32 @@ identifier = "   "
     }
 
     #[test]
+    fn trims_mixed_whitespace_exec_and_journal_fields() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed-mixed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "\n\t echo \t\n"
+
+[journal]
+namespace = "\n\t ops \t\n"
+identifier = "\n\t  \t\n"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        let journal = manifest.journal.expect("journal config");
+        assert_eq!(journal.namespace, "ops");
+        assert_eq!(journal.identifier, None);
+        Ok(())
+    }
+
+    #[test]
     fn trims_reconcile_script_and_function() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("trimmed.toml");
@@ -1230,6 +1256,28 @@ exec = "echo"
 [reconcile]
 script = "  hooks/reconcile.rhai  "
 function = "  custom_reconcile  "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let reconcile = manifest.reconcile.expect("reconcile config");
+        assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
+        assert_eq!(reconcile.function, "custom_reconcile");
+        Ok(())
+    }
+
+    #[test]
+    fn trims_mixed_whitespace_reconcile_script_and_function() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("trimmed-mixed.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "\n\thooks/reconcile.rhai\t\n"
+function = "\n\tcustom_reconcile\t\n"
 "#,
         )?;
 

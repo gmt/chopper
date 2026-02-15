@@ -11548,6 +11548,36 @@ function = "  trimmed_reconcile  "
 }
 
 #[test]
+fn parser_mixed_whitespace_trimming_applies_to_exec_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("exec-trimmed-mixed.toml"),
+        r#"
+exec = "\n\t sh \t\n"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["exec-trimmed-mixed", "runtime"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+}
+
+#[test]
 fn parser_mixed_whitespace_trimming_applies_to_reconcile_script_and_function_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
