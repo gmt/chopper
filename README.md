@@ -119,21 +119,12 @@ Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
 
 ## Detailed documentation
 
-Not sure where to look?
+Use [`doc/README.md`](doc/README.md) as the documentation entry point.
 
-- start with [`doc/quick-reference.md`](doc/quick-reference.md) for command lookup
-- use [`doc/examples.md`](doc/examples.md) for copy/paste workflows
-- use [`doc/troubleshooting.md`](doc/troubleshooting.md) when something fails
-- use [`doc/operational-spec.md`](doc/operational-spec.md) for full semantics
+Fast routing:
 
-For full operational behavior, edge cases, validation rules, merge semantics,
-journald behavior, reconciliation contract, and cache lifecycle details, see:
-
-- [`doc/README.md`](doc/README.md)
-- [`doc/templates/`](doc/templates)
-- [`doc/quick-reference.md`](doc/quick-reference.md)
-- [`doc/faq.md`](doc/faq.md)
-- [`doc/examples.md`](doc/examples.md)
-- [`doc/migration.md`](doc/migration.md)
-- [`doc/troubleshooting.md`](doc/troubleshooting.md)
-- [`doc/operational-spec.md`](doc/operational-spec.md)
+- command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
+- copy/paste workflows: [`doc/examples.md`](doc/examples.md)
+- migration from legacy aliases: [`doc/migration.md`](doc/migration.md)
+- troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
+- complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)

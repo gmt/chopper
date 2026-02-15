@@ -2,6 +2,15 @@
 
 Use this directory when you need behavior details beyond quickstart usage.
 
+## If you need...
+
+- **one command quickly** → [`quick-reference.md`](quick-reference.md)
+- **a working example to copy** → [`examples.md`](examples.md)
+- **starter files to drop in** → [`templates/`](templates)
+- **migration steps from legacy aliases** → [`migration.md`](migration.md)
+- **help diagnosing a failure** → [`troubleshooting.md`](troubleshooting.md)
+- **full exact semantics** → [`operational-spec.md`](operational-spec.md)
+
 ## Docs map
 
 - [`operational-spec.md`](operational-spec.md)
