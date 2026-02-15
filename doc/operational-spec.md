@@ -285,7 +285,8 @@ CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 
 `CHOPPER_DISABLE_RECONCILE` uses trimmed, case-insensitive truthy parsing:
 `1`, `true`, `yes`, and `on` disable reconcile. Blank, falsey (`0`, `false`,
-`no`, `off`), or unknown values leave reconcile enabled.
+`no`, `off`), or unknown values leave reconcile enabled. This includes
+whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.
 
 ---
 
@@ -339,4 +340,5 @@ CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 
 `CHOPPER_DISABLE_CACHE` uses the same trimmed, case-insensitive truthy parsing:
 `1`, `true`, `yes`, and `on` disable cache. Blank, falsey (`0`, `false`, `no`,
-`off`), or unknown values keep cache enabled.
+`off`), or unknown values keep cache enabled. This includes
+whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.

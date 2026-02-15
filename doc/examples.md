@@ -109,6 +109,12 @@ Bypass reconcile:
 CHOPPER_DISABLE_RECONCILE=1 chopper myalias
 ```
 
+Notes:
+
+- only truthy values disable (`1`, `true`, `yes`, `on`; trimmed,
+  case-insensitive)
+- blank/unknown values (including CRLF-wrapped strings) keep features enabled
+
 ---
 
 ## 8) Override config/cache roots
