@@ -485,6 +485,60 @@ mod tests {
     }
 
     #[test]
+    fn cache_round_trip_preserves_symbolic_string_shapes() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let home = TempDir::new().expect("create tempdir");
+        env::set_var("XDG_CACHE_HOME", home.path());
+
+        let config_dir = TempDir::new().expect("create config dir");
+        let source_file = config_dir.path().join("symbolic.toml");
+        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
+
+        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.args = vec![
+            "--flag=value".to_string(),
+            "../relative/path".to_string(),
+            "semi;colon&and".to_string(),
+            "$DOLLAR".to_string(),
+            "brace{value}".to_string(),
+            r"windows\path".to_string(),
+        ];
+        manifest.env.insert("KEY-WITH-DASH".into(), "dash".into());
+        manifest.env.insert("KEY.WITH.DOT".into(), "dot".into());
+        manifest.env.insert("KEY/WITH/SLASH".into(), "slash".into());
+        manifest
+            .env
+            .insert(r"KEY\WITH\BACKSLASH".into(), "backslash".into());
+        manifest.env_remove = vec![
+            "KEY-WITH-DASH".into(),
+            "KEY.WITH.DOT".into(),
+            "KEY/WITH/SLASH".into(),
+            r"KEY\WITH\BACKSLASH".into(),
+        ];
+        manifest.journal = Some(JournalConfig {
+            namespace: "ops/ns.prod@2026".into(),
+            stderr: true,
+            identifier: Some(r"svc.id/worker\edge@2026".into()),
+        });
+        manifest.reconcile = Some(ReconcileConfig {
+            script: PathBuf::from("hooks/reconcile@v1.rhai"),
+            function: "reconcile_v1".into(),
+        });
+
+        store("symbolic", &fingerprint, &manifest).expect("store cache");
+        let cached = load("symbolic", &fingerprint).expect("cache hit");
+        assert_eq!(cached.exec, PathBuf::from("echo"));
+        assert_eq!(cached.args, manifest.args);
+        assert_eq!(cached.env, manifest.env);
+        assert_eq!(cached.env_remove, manifest.env_remove);
+        assert_eq!(cached.journal, manifest.journal);
+        assert_eq!(cached.reconcile, manifest.reconcile);
+
+        env::remove_var("XDG_CACHE_HOME");
+    }
+
+    #[test]
     fn corrupted_cache_entry_is_ignored() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
