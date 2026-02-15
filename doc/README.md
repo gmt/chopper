@@ -8,6 +8,16 @@ Use this directory when you need behavior details beyond quickstart usage.
   - role/task-based navigation
   - quickest path to the right doc set
 
+## Audience map
+
+| Audience | Recommended doc |
+| --- | --- |
+| Day-to-day CLI user | [`quick-reference.md`](quick-reference.md) |
+| Alias author | [`config-reference.md`](config-reference.md) |
+| Migrating from legacy aliases | [`migration.md`](migration.md) |
+| Debugging runtime issues | [`troubleshooting.md`](troubleshooting.md) |
+| Contributor/maintainer | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
+
 ## If you need...
 
 - **one command quickly** → [`quick-reference.md`](quick-reference.md)

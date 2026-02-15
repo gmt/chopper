@@ -157,6 +157,16 @@ Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
 Use [`doc/start-here.md`](doc/start-here.md) if you're unsure where to begin.
 For full docs map, use [`doc/README.md`](doc/README.md).
 
+Documentation by audience:
+
+| You are... | Start here |
+| --- | --- |
+| CLI user needing commands fast | [`doc/quick-reference.md`](doc/quick-reference.md) |
+| Operator debugging behavior | [`doc/troubleshooting.md`](doc/troubleshooting.md) |
+| User migrating legacy aliases | [`doc/migration.md`](doc/migration.md) |
+| User authoring alias files | [`doc/config-reference.md`](doc/config-reference.md) |
+| Contributor changing code | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+
 Fast routing:
 
 - command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
