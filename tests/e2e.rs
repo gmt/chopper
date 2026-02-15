@@ -14888,6 +14888,50 @@ args = ["cache-bypass-crlf-truthy"]
 }
 
 #[test]
+fn cache_disable_flag_crlf_wrapped_numeric_truthy_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-numeric-truthy.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-numeric-truthy"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-numeric-truthy", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\n1\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cache-bypass-crlf-numeric-truthy runtime"),
+        "{stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-numeric-truthy.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped numeric truthy `1`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_disable_flag_crlf_wrapped_yes_disables_cache_in_e2e_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -16200,6 +16244,57 @@ script = "toggle-crlf-truthy.reconcile.rhai"
     assert!(
         !stdout.contains("from_reconcile_crlf_truthy"),
         "CRLF-wrapped truthy values should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_numeric_truthy_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-numeric-truthy.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_numeric_truthy"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-numeric-truthy.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-numeric-truthy.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-numeric-truthy", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\n1\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_numeric_truthy"),
+        "CRLF-wrapped numeric truthy `1` should disable reconcile hooks: {stdout}"
     );
 }
 
