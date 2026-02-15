@@ -1379,6 +1379,37 @@ env_remove = ["  FOO  ", "FOO", "BAR", " BAR "]
     }
 
     #[test]
+    fn preserves_env_remove_entries_with_symbolic_and_pathlike_shapes() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("env-remove.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+env_remove = [
+  " KEY-WITH-DASH ",
+  "KEY.WITH.DOT",
+  "KEY/WITH/SLASH",
+  'KEY\WITH\BACKSLASH',
+  "KEY/WITH/SLASH"
+]
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest.env_remove,
+            vec![
+                "KEY-WITH-DASH".to_string(),
+                "KEY.WITH.DOT".to_string(),
+                "KEY/WITH/SLASH".to_string(),
+                r"KEY\WITH\BACKSLASH".to_string()
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn preserves_env_values_with_symbolic_and_pathlike_shapes() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("env-values.toml");

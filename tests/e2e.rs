@@ -12001,6 +12001,122 @@ script = "env-key-symbols.reconcile.rhai"
 }
 
 #[test]
+fn toml_env_remove_allows_symbolic_and_pathlike_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-remove-symbols.toml"),
+        r#"
+exec = "env"
+env_remove = [
+  " KEY-WITH-DASH ",
+  "KEY.WITH.DOT",
+  "KEY/WITH/SLASH",
+  "KEY\\WITH\\BACKSLASH",
+  "KEY/WITH/SLASH"
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["env-remove-symbols"],
+        [
+            ("KEY-WITH-DASH", "drop-dash".to_string()),
+            ("KEY.WITH.DOT", "drop-dot".to_string()),
+            ("KEY/WITH/SLASH", "drop-slash".to_string()),
+            (r"KEY\WITH\BACKSLASH", "drop-backslash".to_string()),
+            ("KEEP_ME", "keep".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "env-remove-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("KEY-WITH-DASH=drop-dash"), "{stdout}");
+    assert!(!stdout.contains("KEY.WITH.DOT=drop-dot"), "{stdout}");
+    assert!(!stdout.contains("KEY/WITH/SLASH=drop-slash"), "{stdout}");
+    assert!(
+        !stdout.contains(r"KEY\WITH\BACKSLASH=drop-backslash"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("KEEP_ME=keep"), "{stdout}");
+}
+
+#[test]
+fn reconcile_remove_env_allows_symbolic_and_pathlike_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("remove-env-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: [
+      " KEY-WITH-DASH ",
+      "KEY.WITH.DOT",
+      "KEY/WITH/SLASH",
+      "KEY\\WITH\\BACKSLASH",
+      "KEY/WITH/SLASH"
+    ]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-remove-env-symbols.toml"),
+        r#"
+exec = "env"
+
+[reconcile]
+script = "remove-env-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["reconcile-remove-env-symbols"],
+        [
+            ("KEY-WITH-DASH", "drop-dash".to_string()),
+            ("KEY.WITH.DOT", "drop-dot".to_string()),
+            ("KEY/WITH/SLASH", "drop-slash".to_string()),
+            (r"KEY\WITH\BACKSLASH", "drop-backslash".to_string()),
+            ("KEEP_ME", "keep".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "reconcile-remove-env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("KEY-WITH-DASH=drop-dash"), "{stdout}");
+    assert!(!stdout.contains("KEY.WITH.DOT=drop-dot"), "{stdout}");
+    assert!(!stdout.contains("KEY/WITH/SLASH=drop-slash"), "{stdout}");
+    assert!(
+        !stdout.contains(r"KEY\WITH\BACKSLASH=drop-backslash"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("KEEP_ME=keep"), "{stdout}");
+}
+
+#[test]
 fn toml_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

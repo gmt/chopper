@@ -742,6 +742,50 @@ fn reconcile(_ctx) {
     }
 
     #[test]
+    fn reconcile_preserves_symbolic_and_pathlike_remove_env_entries() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("remove-env-symbols.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    remove_env: [
+      " KEY-WITH-DASH ",
+      "KEY.WITH.DOT",
+      "KEY/WITH/SLASH",
+      "KEY\\WITH\\BACKSLASH",
+      "KEY/WITH/SLASH"
+    ]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.remove_env,
+            vec![
+                "KEY-WITH-DASH".to_string(),
+                "KEY.WITH.DOT".to_string(),
+                "KEY/WITH/SLASH".to_string(),
+                r"KEY\WITH\BACKSLASH".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn reconcile_rejects_remove_env_entries_containing_equals_sign() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");
