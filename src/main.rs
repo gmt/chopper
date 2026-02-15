@@ -1085,17 +1085,23 @@ mod tests {
     #[test]
     fn cache_disable_flag_truthy_values_are_case_insensitive() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\n1\r\n");
+        assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "TRUE");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "YeS");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "  yEs  ");
         assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\nYeS\r\n");
+        assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\nTrUe\r\n");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "On");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "  ON  ");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\nOn\r\n");
         assert!(!cache_enabled());
         env::remove_var("CHOPPER_DISABLE_CACHE");
     }
