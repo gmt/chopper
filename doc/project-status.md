@@ -42,3 +42,21 @@ Current implementation status against the DSL implementation goals.
 
 At this time: **no major feature gaps are identified** against the planned DSL
 scope. Ongoing work is primarily doc UX polish and optional future iteration.
+
+---
+
+## How to verify status locally
+
+Use these commands in your checkout:
+
+```bash
+git log --oneline -n 20
+cargo test -- --nocapture
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+This gives you:
+
+- recent implementation history on the active branch
+- current behavioral regression status
+- lint/quality gate status

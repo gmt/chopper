@@ -25,6 +25,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 - **starter files to drop in** → [`templates/`](templates)
 - **migration steps from legacy aliases** → [`migration.md`](migration.md)
 - **help diagnosing a failure** → [`troubleshooting.md`](troubleshooting.md)
+- **current completion snapshot** → [`project-status.md`](project-status.md)
 - **full exact semantics** → [`operational-spec.md`](operational-spec.md)
 
 ## Docs map
