@@ -161,6 +161,8 @@ Blank or unknown values (including whitespace/CRLF-wrapped values) keep the
 feature enabled.
 Common falsey values that also keep features enabled: `0`, `false`, `no`,
 `off`.
+Truthy matching is ASCII-based; non-ASCII lookalikes (for example `ＴＲＵＥ`)
+are treated as unknown values and keep features enabled.
 
 ---
 
