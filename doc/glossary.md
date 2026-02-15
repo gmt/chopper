@@ -55,3 +55,11 @@ provided.
 
 Normalized disable flag value considered enabled:
 `1`, `true`, `yes`, `on` (trimmed and case-insensitive).
+
+---
+
+## See also
+
+- [`config-reference.md`](config-reference.md)
+- [`cli-reference.md`](cli-reference.md)
+- [`README.md`](README.md)

@@ -76,3 +76,11 @@ High-level map of the runtime flow and main modules.
 - Keep advanced behavior explicit (journal and reconcile opt-in).
 - Reject only structurally unsafe strings; preserve useful symbolic/path shapes.
 - Make cache behavior transparent and self-healing.
+
+---
+
+## See also
+
+- [`testing.md`](testing.md)
+- [`operational-spec.md`](operational-spec.md)
+- [`README.md`](README.md)

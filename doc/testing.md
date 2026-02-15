@@ -59,3 +59,11 @@ cargo test reconcile_disable_flag_crlf_wrapped_falsey_value_keeps_reconcile_enab
 - Unit tests live alongside source modules in `src/*`.
 - For behavior/edge-case semantics while interpreting failures, use
   `doc/operational-spec.md`.
+
+---
+
+## See also
+
+- [`release-checklist.md`](release-checklist.md)
+- [`troubleshooting.md`](troubleshooting.md)
+- [`README.md`](README.md)

@@ -120,3 +120,11 @@ identifier = "kpods"
 script = "kpods.reconcile.rhai"
 function = "reconcile"
 ```
+
+---
+
+## See also
+
+- [`cli-reference.md`](cli-reference.md)
+- [`operational-spec.md`](operational-spec.md)
+- [`README.md`](README.md)

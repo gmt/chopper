@@ -119,3 +119,11 @@ Useful checks:
 3. Enable journald on aliases needing stderr namespace routing.
 4. Add reconcile only where static args/env are insufficient.
 5. Remove legacy files after each alias is validated.
+
+---
+
+## See also
+
+- [`examples.md`](examples.md)
+- [`templates/`](templates)
+- [`operational-spec.md`](operational-spec.md)

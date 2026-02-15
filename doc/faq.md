@@ -47,3 +47,11 @@ Lookup order:
 3. `<name>`
 4. `<name>.conf`
 5. `<name>.rhai`
+
+---
+
+## See also
+
+- [`quick-reference.md`](quick-reference.md)
+- [`troubleshooting.md`](troubleshooting.md)
+- [`README.md`](README.md)

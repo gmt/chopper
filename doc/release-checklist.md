@@ -37,3 +37,11 @@ Use this checklist before cutting a release tag.
 - [ ] changelog/release notes drafted (if used)
 - [ ] git working tree is clean
 - [ ] release commit/tag message prepared
+
+---
+
+## See also
+
+- [`testing.md`](testing.md)
+- [`troubleshooting.md`](troubleshooting.md)
+- [`README.md`](README.md)
