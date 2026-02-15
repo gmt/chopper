@@ -3478,6 +3478,150 @@ fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_up
 }
 
 #[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_cmd = bin_dir.path().join("CHOPPER.CMD");
+    symlink(chopper_bin(), &uppercase_chopper_cmd).expect("create uppercase chopper.cmd symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_cmd,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_bat = bin_dir.path().join("CHOPPER.BAT");
+    symlink(chopper_bin(), &uppercase_chopper_bat).expect("create uppercase chopper.bat symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_bat,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_overrides_when_invoked_as_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let override_config = TempDir::new().expect("create override config");
+    let override_cache = TempDir::new().expect("create override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let uppercase_chopper_exe = bin_dir.path().join("CHOPPER.EXE");
+    symlink(chopper_bin(), &uppercase_chopper_exe).expect("create uppercase chopper.exe symlink");
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.path().display().to_string());
+
+    let output = run_chopper_with(
+        uppercase_chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.path().display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via uppercase CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.path().display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_exe() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
