@@ -54,6 +54,9 @@ Truthy values (case-insensitive, trimmed):
 - `yes`
 - `on`
 
+Blank/unknown values (including whitespace or CRLF-wrapped values) keep cache
+and reconcile enabled.
+
 ---
 
 ## Alias file locations

@@ -60,7 +60,8 @@ Truthy values (trimmed, case-insensitive):
 - `yes`
 - `on`
 
-Falsey/blank/unknown values leave the feature enabled.
+Falsey/blank/unknown values (including whitespace/CRLF-wrapped values) leave
+the feature enabled.
 
 ---
 

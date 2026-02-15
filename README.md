@@ -157,6 +157,8 @@ CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 ```
 
 Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
+Blank or unknown values (including whitespace/CRLF-wrapped values) keep the
+feature enabled.
 
 ---
 

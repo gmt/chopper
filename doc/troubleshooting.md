@@ -64,6 +64,7 @@ Checks:
 3. Confirm `function` name exists in the script.
 4. Check if reconcile is intentionally disabled:
    - `CHOPPER_DISABLE_RECONCILE=1|true|yes|on`
+   - blank/unknown values do **not** disable reconcile.
 
 ---
 
@@ -77,6 +78,8 @@ Checks:
 
 1. Try a one-off bypass:
    - `CHOPPER_DISABLE_CACHE=1 chopper <alias> ...`
+   - note: only `1|true|yes|on` disable cache; blank/unknown values keep cache
+     enabled.
 2. Confirm you edited the source file that is actually resolved by lookup order.
 3. Re-run; cache entries are invalidated by source metadata and self-heal when corrupted.
 
