@@ -14080,6 +14080,46 @@ script = "reconcile-bad-key.reconcile.rhai"
 }
 
 #[test]
+fn reconcile_blank_set_env_key_with_mixed_whitespace_after_trim_fails_validation_in_end_to_end_flow(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-mixed-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "\n\t  \t\n": "bad" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-bad-mixed-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-bad-mixed-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-bad-mixed-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn reconcile_duplicate_set_env_keys_after_trim_fail_validation_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -14110,6 +14150,46 @@ script = "reconcile-dup-key.reconcile.rhai"
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["reconcile-dup-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`set_env` contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reconcile_duplicate_set_env_keys_after_mixed_whitespace_trim_fail_validation_in_end_to_end_flow()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-mixed-key.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{ "CHOPPER_DUP": "a", "\n\t CHOPPER_DUP \t\n": "b" }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-dup-mixed-key.toml"),
+        r#"
+exec = "echo"
+
+[reconcile]
+script = "reconcile-dup-mixed-key.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-dup-mixed-key"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
