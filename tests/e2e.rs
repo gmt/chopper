@@ -6581,6 +6581,56 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
 }
 
 #[test]
+fn symlink_invocation_preserves_symbolic_and_pathlike_runtime_args() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("kpods-symbolic.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=<%s>\n' \"$@\"", "_", "base"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("kpods-symbolic");
+    symlink(chopper_bin(), &symlink_path).expect("create symlink to chopper");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &[
+            "--",
+            "--flag=value",
+            "../relative/path",
+            "semi;colon&and",
+            "$DOLLAR",
+            "brace{value}",
+            r"windows\path",
+        ],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=<base>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARGS=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARGS=<windows\path>"), "{stdout}");
+}
+
+#[test]
 fn missing_alias_config_falls_back_to_path_command_resolution() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
