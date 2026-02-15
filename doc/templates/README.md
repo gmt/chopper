@@ -24,4 +24,5 @@ chopper hello
 
 If you use one-off debug toggles while validating templates, only truthy values
 disable features (`1`, `true`, `yes`, `on`; trimmed/case-insensitive).
-Blank/unknown values (including CRLF-wrapped strings) keep features enabled.
+Falsey values (`0`, `false`, `no`, `off`), blank, and unknown values
+(including CRLF-wrapped strings) keep features enabled.

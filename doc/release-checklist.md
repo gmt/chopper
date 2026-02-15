@@ -19,7 +19,7 @@ Use this checklist before cutting a release tag.
 - [ ] built-ins (`--help`, `--version`, print dirs) behave as documented
 - [ ] cache bypass works with `CHOPPER_DISABLE_CACHE=1`
 - [ ] reconcile bypass works with `CHOPPER_DISABLE_RECONCILE=1`
-- [ ] unknown/blank disable-flag values keep cache + reconcile enabled
+- [ ] falsey/blank/unknown disable-flag values keep cache + reconcile enabled
 
 ---
 

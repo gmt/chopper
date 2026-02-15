@@ -110,7 +110,8 @@ Useful checks:
 - `CHOPPER_DISABLE_CACHE=1 chopper <alias> ...` (source-only run)
 - `CHOPPER_DISABLE_RECONCILE=1 chopper <alias> ...` (skip reconcile)
 - disable toggles are truthy-only (`1|true|yes|on`, trimmed/case-insensitive);
-  blank/unknown values (including CRLF wrappers) keep features enabled.
+  falsey (`0|false|no|off`), blank, and unknown values (including CRLF
+  wrappers) keep features enabled.
 
 ---
 
