@@ -703,6 +703,40 @@ args = ["", "emoji🚀", " spaced value "]
     }
 
     #[test]
+    fn preserves_toml_args_with_symbolic_and_pathlike_values() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("ok.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+args = [
+  "--flag=value",
+  "../relative/path",
+  "semi;colon&and",
+  "$DOLLAR",
+  "brace{value}",
+  'windows\path'
+]
+"#,
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse args with symbolic/pathlike values");
+        assert_eq!(
+            manifest.args,
+            vec![
+                "--flag=value".to_string(),
+                "../relative/path".to_string(),
+                "semi;colon&and".to_string(),
+                "$DOLLAR".to_string(),
+                "brace{value}".to_string(),
+                r"windows\path".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_dot_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");

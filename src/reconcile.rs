@@ -326,6 +326,60 @@ fn reconcile(_ctx) {
     }
 
     #[test]
+    fn reconcile_accepts_symbolic_and_pathlike_arg_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("arg-symbols.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: [
+      "--replace=value",
+      "../relative/path",
+      "semi;colon&and"
+    ],
+    append_args: [
+      "$DOLLAR",
+      "brace{value}",
+      "windows\\path"
+    ]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.replace_args,
+            Some(vec![
+                "--replace=value".to_string(),
+                "../relative/path".to_string(),
+                "semi;colon&and".to_string()
+            ])
+        );
+        assert_eq!(
+            patch.append_args,
+            vec![
+                "$DOLLAR".to_string(),
+                "brace{value}".to_string(),
+                r"windows\path".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn reconcile_accepts_empty_and_unicode_set_env_values() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");

@@ -11821,6 +11821,122 @@ script = "value-shapes.reconcile.rhai"
 }
 
 #[test]
+fn toml_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toml-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "--flag=value",
+  "../relative/path",
+  "semi;colon&and",
+  "$DOLLAR",
+  "brace{value}",
+  'windows\path'
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["toml-arg-symbols", "runtime=1", "literal*star"],
+    );
+    assert!(
+        output.status.success(),
+        "toml-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<runtime=1>"), "{stdout}");
+    assert!(stdout.contains("ARG=<literal*star>"), "{stdout}");
+}
+
+#[test]
+fn reconcile_patch_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("arg-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: [
+      "-c",
+      "printf 'ARG=<%s>\\n' \"$@\"",
+      "_",
+      "--replace=value",
+      "../from-reconcile",
+      "semi;colon&and"
+    ],
+    append_args: [
+      "$PATCH_DOLLAR",
+      "brace{patch}",
+      "windows\\patch"
+    ]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "base"
+]
+
+[reconcile]
+script = "arg-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["reconcile-arg-symbols", "runtime-ignored"],
+    );
+    assert!(
+        output.status.success(),
+        "reconcile-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--replace=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../from-reconcile>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$PATCH_DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{patch}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\patch>"), "{stdout}");
+    assert!(!stdout.contains("ARG=<base>"), "{stdout}");
+    assert!(!stdout.contains("ARG=<runtime-ignored>"), "{stdout}");
+}
+
+#[test]
 fn direct_invocation_strips_double_dash_separator() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
