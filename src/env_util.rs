@@ -81,6 +81,12 @@ mod tests {
             env_path_override("CHOPPER_TEST_PATH"),
             Some(PathBuf::from("/tmp/chopper"))
         );
+
+        env::set_var("CHOPPER_TEST_PATH", "\n\t/tmp/chopper-mixed\t\n");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from("/tmp/chopper-mixed"))
+        );
         env::remove_var("CHOPPER_TEST_PATH");
     }
 }

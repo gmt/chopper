@@ -10458,6 +10458,71 @@ args = ["trimmed-override-root"]
 }
 
 #[test]
+fn mixed_whitespace_wrapped_config_and_cache_overrides_are_trimmed_and_honored() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let override_config_root = TempDir::new().expect("create override config root");
+    let override_cache_root = TempDir::new().expect("create override cache root");
+
+    let aliases_dir = override_config_root.path().join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("mixed-ws-override.toml"),
+        r#"
+exec = "echo"
+args = ["mixed-ws-override-root"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["mixed-ws-override", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("\n\t{}\t\n", override_config_root.path().display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("\n\t{}\t\n", override_cache_root.path().display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("mixed-ws-override-root runtime"),
+        "{stdout}"
+    );
+
+    let override_cache_file = override_cache_root
+        .path()
+        .join("manifests")
+        .join("mixed-ws-override.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache at mixed-whitespace override path: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/mixed-ws-override.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when CHOPPER_CACHE_DIR uses mixed whitespace wrapping: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
 fn empty_config_and_cache_overrides_fall_back_to_xdg_roots() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");
