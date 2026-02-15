@@ -132,6 +132,7 @@ journald behavior, reconciliation contract, and cache lifecycle details, see:
 - [`doc/README.md`](doc/README.md)
 - [`doc/templates/`](doc/templates)
 - [`doc/quick-reference.md`](doc/quick-reference.md)
+- [`doc/faq.md`](doc/faq.md)
 - [`doc/examples.md`](doc/examples.md)
 - [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - [`doc/operational-spec.md`](doc/operational-spec.md)

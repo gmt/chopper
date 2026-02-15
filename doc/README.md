@@ -21,6 +21,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - compact command lookup
   - env override/toggle cheat sheet
   - alias discovery path summary
+- [`faq.md`](faq.md)
+  - short answers to common "where do I look?" questions
+  - quick links to the right doc for each task
 - [`troubleshooting.md`](troubleshooting.md)
   - common failure modes
   - quick diagnosis checklist
