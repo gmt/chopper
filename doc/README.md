@@ -2,6 +2,12 @@
 
 Use this directory when you need behavior details beyond quickstart usage.
 
+## First stop
+
+- [`start-here.md`](start-here.md)
+  - role/task-based navigation
+  - quickest path to the right doc set
+
 ## If you need...
 
 - **one command quickly** → [`quick-reference.md`](quick-reference.md)

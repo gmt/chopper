@@ -154,7 +154,8 @@ Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
 
 ## Detailed documentation
 
-Use [`doc/README.md`](doc/README.md) as the documentation entry point.
+Use [`doc/start-here.md`](doc/start-here.md) if you're unsure where to begin.
+For full docs map, use [`doc/README.md`](doc/README.md).
 
 Fast routing:
 
