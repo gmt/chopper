@@ -52,6 +52,7 @@ cargo test reconcile_disable_flag_crlf_wrapped_tabbed_blank_value_keeps_reconcil
 cargo test cache_disable_flag_unicode_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry -- --nocapture
 cargo test reconcile_disable_flag_unicode_unknown_value_keeps_reconcile_enabled -- --nocapture
 cargo test cache_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry -- --nocapture
+cargo test reconcile_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_reconcile_enabled -- --nocapture
 ```
 
 ---

@@ -15226,6 +15226,28 @@ args = ["CACHEUNICODESRC01"]
         !stdout.contains("CACHEUNICODESRC01 runtime"),
         "unicode unknown disable-flag values must not bypass cache: {stdout}"
     );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode", "runtime2"],
+        [("CHOPPER_DISABLE_CACHE", "Ｔrue".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("CACHEUNICODEHIT02 runtime2"),
+        "mixed-script unknown disable-flag values should keep cache enabled: {mixed_stdout}"
+    );
+    assert!(
+        !mixed_stdout.contains("CACHEUNICODESRC01 runtime2"),
+        "mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
+    );
 }
 
 #[test]
@@ -15294,6 +15316,28 @@ args = ["CACHEUNICODECRLFSRC"]
     assert!(
         !stdout.contains("CACHEUNICODECRLFSRC runtime"),
         "CRLF-wrapped unicode unknown disable-flag values must not bypass cache: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime2"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nＴrue\r\n".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("CACHEUNICODECRLFHIT runtime2"),
+        "CRLF-wrapped mixed-script unknown disable-flag values should keep cache enabled: {mixed_stdout}"
+    );
+    assert!(
+        !mixed_stdout.contains("CACHEUNICODECRLFSRC runtime2"),
+        "CRLF-wrapped mixed-script unknown disable-flag values must not bypass cache: {mixed_stdout}"
     );
 }
 
@@ -16395,6 +16439,24 @@ script = "toggle-unknown-unicode.reconcile.rhai"
         stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode"),
         "unicode unknown disable-flag values should not disable reconcile: {stdout}"
     );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode", "runtime2"],
+        [("CHOPPER_DISABLE_RECONCILE", "Ｔrue".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode"),
+        "mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
+    );
 }
 
 #[test]
@@ -16444,6 +16506,24 @@ script = "toggle-unknown-unicode-crlf.reconcile.rhai"
     assert!(
         stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode_crlf"),
         "CRLF-wrapped unicode unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+
+    let mixed_output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime2"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nＴrue\r\n".to_string())],
+    );
+    assert!(
+        mixed_output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&mixed_output.stderr)
+    );
+    let mixed_stdout = String::from_utf8_lossy(&mixed_output.stdout);
+    assert!(
+        mixed_stdout.contains("ARGS=base runtime2 from_reconcile_unknown_unicode_crlf"),
+        "CRLF-wrapped mixed-script unknown disable-flag values should not disable reconcile: {mixed_stdout}"
     );
 }
 
