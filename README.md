@@ -165,4 +165,5 @@ Fast routing:
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - architecture overview: [`doc/architecture.md`](doc/architecture.md)
 - local validation/testing commands: [`doc/testing.md`](doc/testing.md)
+- release prep checklist: [`doc/release-checklist.md`](doc/release-checklist.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)

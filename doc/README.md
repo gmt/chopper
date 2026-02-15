@@ -27,6 +27,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - local validation commands
   - targeted/full test run patterns
   - suggested verification sequence
+- [`release-checklist.md`](release-checklist.md)
+  - pre-release validation checklist
+  - docs/runtime sanity gates before tagging
 - [`examples.md`](examples.md)
   - copy/paste alias patterns
   - common workflows
