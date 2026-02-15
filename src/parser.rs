@@ -1814,6 +1814,34 @@ script = "./hooks/reconcile.rhai"
     }
 
     #[test]
+    fn resolves_symbolic_relative_reconcile_script_against_config_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir)?;
+        let config = aliases_dir.join("local.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = './hooks/reconcile @v1.rhai'
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .expect("reconcile config")
+                .script,
+            aliases_dir.join("hooks/reconcile @v1.rhai")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn resolves_relative_exec_path_against_config_directory() -> Result<()> {
         let temp = TempDir::new()?;
         let aliases_dir = temp.path().join("aliases");
@@ -1846,6 +1874,24 @@ exec = "./bin/runner"
 
         let manifest = parse(&config)?;
         assert_eq!(manifest.exec, aliases_dir.join("./bin/runner"));
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_symbolic_relative_exec_path_against_config_directory() -> Result<()> {
+        let temp = TempDir::new()?;
+        let aliases_dir = temp.path().join("aliases");
+        fs::create_dir_all(&aliases_dir)?;
+        let config = aliases_dir.join("local.toml");
+        fs::write(
+            &config,
+            r#"
+exec = './bin/runner @v1'
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(manifest.exec, aliases_dir.join("./bin/runner @v1"));
         Ok(())
     }
 

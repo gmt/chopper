@@ -6936,6 +6936,50 @@ script = "./hooks/reconcile.rhai"
 }
 
 #[test]
+fn alias_config_resolves_symbolic_reconcile_script_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let hooks_dir = aliases_dir.join("hooks");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+
+    fs::write(
+        hooks_dir.join("reconcile @v1.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_symbolic_relative_script"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+    fs::write(
+        aliases_dir.join("symbolicreconcile.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = './hooks/reconcile @v1.rhai'
+"#,
+    )
+    .expect("write symbolic reconcile alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["symbolicreconcile", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_symbolic_relative_script"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn symlinked_alias_config_resolves_relative_exec_path_to_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -7031,6 +7075,40 @@ args = ["base"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("REL_EXEC_DOT=base runtime"), "{stdout}");
+}
+
+#[test]
+fn alias_config_resolves_symbolic_relative_exec_path_from_its_own_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    let bin_dir = aliases_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'REL_EXEC_SYMBOLIC=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("symbolicexec.toml"),
+        r#"
+exec = './bin/runner @v1'
+args = ["base"]
+"#,
+    )
+    .expect("write symbolic exec alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["symbolicexec", "runtime"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("REL_EXEC_SYMBOLIC=base runtime"),
+        "{stdout}"
+    );
 }
 
 #[test]
