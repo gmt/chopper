@@ -21060,3 +21060,313 @@ script = '/tmp\'
         "{stderr}"
     );
 }
+
+// ------------------------------------------------------------------
+// Bash completion feature tests
+// ------------------------------------------------------------------
+
+#[test]
+fn bashcomp_flag_emits_valid_bash_script() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--bashcomp"]);
+    assert!(
+        output.status.success(),
+        "bashcomp command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("_chopper_complete"),
+        "expected _chopper_complete function in output"
+    );
+    assert!(
+        stdout.contains("_chopper_cache_bust"),
+        "expected _chopper_cache_bust function in output"
+    );
+
+    // Validate that the output is valid bash syntax
+    let temp = TempDir::new().expect("create temp dir");
+    let script_path = temp.path().join("bashcomp.bash");
+    fs::write(&script_path, stdout.as_ref()).expect("write script");
+    let bash_check = Command::new("bash")
+        .arg("-n")
+        .arg(&script_path)
+        .output()
+        .expect("failed to run bash -n");
+    assert!(
+        bash_check.status.success(),
+        "bashcomp output is not valid bash: {}",
+        String::from_utf8_lossy(&bash_check.stderr)
+    );
+}
+
+#[test]
+fn list_aliases_enumerates_config_files() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(aliases_dir.join("alpha.toml"), "exec = \"echo\"\n").expect("write alpha");
+    fs::write(aliases_dir.join("beta.toml"), "exec = \"echo\"\n").expect("write beta");
+    fs::write(config_dir.join("gamma.toml"), "exec = \"echo\"\n").expect("write gamma");
+
+    let output = run_chopper(&config_home, &cache_home, &["--list-aliases"]);
+    assert!(
+        output.status.success(),
+        "list-aliases failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let aliases: Vec<&str> = stdout.lines().collect();
+    assert!(aliases.contains(&"alpha"), "missing alpha: {stdout}");
+    assert!(aliases.contains(&"beta"), "missing beta: {stdout}");
+    assert!(aliases.contains(&"gamma"), "missing gamma: {stdout}");
+}
+
+#[test]
+fn list_aliases_empty_config_produces_no_output() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&config_dir).expect("create config dir");
+
+    let output = run_chopper(&config_home, &cache_home, &["--list-aliases"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.is_empty(), "expected no output but got: {stdout}");
+}
+
+#[test]
+fn print_exec_returns_resolved_path_for_toml_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("myalias.toml"),
+        "exec = \"/usr/bin/echo\"\n",
+    )
+    .expect("write alias");
+
+    let output = run_chopper(&config_home, &cache_home, &["--print-exec", "myalias"]);
+    assert!(
+        output.status.success(),
+        "print-exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "/usr/bin/echo");
+}
+
+#[test]
+fn print_exec_returns_error_for_missing_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&config_dir).expect("create config dir");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-exec", "nonexistent-alias-xyz"],
+    );
+    assert!(
+        !output.status.success(),
+        "expected failure for missing alias"
+    );
+}
+
+#[test]
+fn print_bashcomp_mode_returns_normal_by_default() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(aliases_dir.join("demo.toml"), "exec = \"echo\"\n").expect("write alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "demo"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "normal");
+}
+
+#[test]
+fn print_bashcomp_mode_returns_disabled_when_configured() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("nodemo.toml"),
+        "exec = \"echo\"\n\n[bashcomp]\ndisabled = true\n",
+    )
+    .expect("write alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "nodemo"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "disabled");
+}
+
+#[test]
+fn print_bashcomp_mode_returns_passthrough_when_configured() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("pt.toml"),
+        "exec = \"echo\"\n\n[bashcomp]\npassthrough = true\n",
+    )
+    .expect("write alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "pt"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "passthrough");
+}
+
+#[test]
+fn print_bashcomp_mode_returns_custom_when_script_configured() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("cust.toml"),
+        "exec = \"echo\"\n\n[bashcomp]\nscript = \"comp/cust.bash\"\n",
+    )
+    .expect("write alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "cust"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "custom");
+}
+
+#[test]
+fn print_bashcomp_mode_returns_normal_for_unconfigured_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&config_dir).expect("create config dir");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "nonexistent"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "normal");
+}
+
+#[test]
+fn print_bashcomp_mode_disabled_takes_precedence_over_script() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("both.toml"),
+        "exec = \"echo\"\n\n[bashcomp]\ndisabled = true\nscript = \"comp/both.bash\"\n",
+    )
+    .expect("write alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "both"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "disabled");
+}
+
+#[test]
+fn help_output_includes_new_builtins() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--help"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--bashcomp"), "{stdout}");
+    assert!(stdout.contains("--list-aliases"), "{stdout}");
+    assert!(stdout.contains("--print-exec"), "{stdout}");
+    assert!(stdout.contains("--print-bashcomp-mode"), "{stdout}");
+}
+
+#[test]
+fn bashcomp_toml_with_disabled_field_round_trips_through_cache() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let config_dir = config_home.path().join("chopper");
+    let aliases_dir = config_dir.join("aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("cached.toml"),
+        "exec = \"echo\"\n\n[bashcomp]\ndisabled = true\npassthrough = true\n",
+    )
+    .expect("write alias");
+
+    // First invocation: populates cache
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "cached"],
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "disabled"
+    );
+
+    // Second invocation: reads from cache
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--print-bashcomp-mode", "cached"],
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "disabled"
+    );
+}

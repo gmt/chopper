@@ -94,6 +94,39 @@ For full behavioral semantics and edge cases, see `operational-spec.md`.
 
 ---
 
+## `[bashcomp]` table (optional)
+
+Controls bash tab completion behavior for the alias.
+
+### `disabled` (optional)
+
+- Type: boolean
+- Default: `false`
+- Notes:
+  - when `true`, completion is entirely suppressed
+  - the completion function returns immediately with no side effects
+
+### `passthrough` (optional)
+
+- Type: boolean
+- Default: `false`
+- Notes:
+  - when `true`, completion delegates directly to the underlying command
+  - Rhai argument transformation is not applied
+
+### `script` (optional)
+
+- Type: string
+- Notes:
+  - trimmed
+  - blank values treated as unset
+  - cannot contain NUL
+  - relative paths resolved from alias file directory
+  - cannot be `.` / `..` or end in invalid path components
+  - must define `_chopper_bashcomp_<alias>()` function
+
+---
+
 ## Minimal valid example
 
 ```toml
@@ -119,6 +152,9 @@ identifier = "kpods"
 [reconcile]
 script = "kpods.reconcile.rhai"
 function = "reconcile"
+
+[bashcomp]
+passthrough = true
 ```
 
 ---

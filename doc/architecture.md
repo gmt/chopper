@@ -30,7 +30,8 @@ High-level map of the runtime flow and main modules.
   - field-level validation handoff
 
 - `src/manifest.rs`
-  - core manifest data model (`Invocation`, `JournalConfig`, `ReconcileConfig`)
+  - core manifest data model (`Invocation`, `JournalConfig`, `ReconcileConfig`,
+    `BashcompConfig`)
   - deterministic merge helpers for args/env mutation
 
 - `src/cache.rs`
@@ -50,6 +51,12 @@ High-level map of the runtime flow and main modules.
 - `src/env_util.rs`
   - env toggle/override parsing (`CHOPPER_*`)
   - trimmed, ASCII case-insensitive truthy handling
+
+- `src/bashcomp.bash`
+  - static bash completion script, embedded via `include_str!`
+  - decorator/proxy pattern delegating to underlying command completers
+  - per-session caching, self-healing, graceful degradation
+  - see [`bashcomp-design.md`](bashcomp-design.md) for design rationale
 
 - validation helpers
   - `alias_validation.rs`
@@ -83,5 +90,6 @@ High-level map of the runtime flow and main modules.
 
 - [`testing.md`](testing.md)
 - [`operational-spec.md`](operational-spec.md)
+- [`bashcomp-design.md`](bashcomp-design.md)
 - [`docs index`](README.md)
 - [`root README`](../README.md)

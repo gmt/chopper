@@ -84,6 +84,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - common failure modes
   - quick diagnosis checklist
   - where to look first for cache/reconcile/journal/config issues
+- [`bashcomp-design.md`](bashcomp-design.md)
+  - bash completion research and design rationale
+  - scop/bash-completion, complete-alias, Cobra, and Nix patterns
+  - performance rules and self-healing strategies
 
 ## Suggested reading path
 

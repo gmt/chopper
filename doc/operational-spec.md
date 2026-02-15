@@ -18,6 +18,7 @@ For a concise overview and quickstart, see the root `README.md`.
   - [Environment merge order](#environment-merge-order)
 - [Journald namespace behavior](#journald-namespace-behavior)
 - [Optional runtime reconciliation (Rhai)](#optional-runtime-reconciliation-rhai)
+- [Bash completion](#bash-completion)
 - [Caching](#caching)
 
 ---
@@ -49,6 +50,10 @@ chopper --help
 chopper --version
 chopper --print-config-dir
 chopper --print-cache-dir
+chopper --bashcomp
+chopper --list-aliases
+chopper --print-exec <alias>
+chopper --print-bashcomp-mode <alias>
 ```
 
 A binary named `chopper.exe`, `chopper.com`, `chopper.cmd`, or `chopper.bat`
@@ -165,6 +170,11 @@ identifier = "kpods"             # optional (blank values are treated as unset)
 [reconcile]                      # optional
 script = "kpods.reconcile.rhai"  # required
 function = "reconcile"           # optional, default "reconcile"
+
+[bashcomp]                       # optional
+disabled = false                 # optional, default false
+passthrough = false              # optional, default false
+script = "comp/kpods.bash"       # optional custom completion script
 ```
 
 ### Parsing / validation rules
@@ -304,6 +314,89 @@ Examples that **leave reconcile enabled**:
 - `CHOPPER_DISABLE_RECONCILE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\u3000Ｔrue\u3000"` (ideographic-space wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\r\n\u00A0Ｔrue\u00A0\r\n"` (CRLF + NBSP-wrapped mixed-script lookalike)
+
+---
+
+## Bash completion
+
+When `[bashcomp]` is configured, it controls how bash tab completion behaves
+for the alias.
+
+```toml
+[bashcomp]
+disabled = false       # optional, default false
+passthrough = false    # optional, default false
+script = "comp/x.bash" # optional custom completion script
+```
+
+### `bashcomp.disabled`
+
+When `true`, completion is entirely suppressed for this alias. The completion
+function returns immediately with no subprocess invocations, no file reads,
+and no blocking of any kind. Bash falls through to its default filename
+completion.
+
+Use this for aliases that wrap commands with pathologically slow or broken
+completion, or for aliases where completion is not meaningful.
+
+### `bashcomp.passthrough`
+
+When `true`, completion delegates directly to the underlying command's native
+completer without applying any Rhai argument transformation. The completion
+context is rewritten to reference the underlying `exec`, and the underlying
+command's completer handles everything.
+
+### `bashcomp.script`
+
+Optional path to a custom bash completion script. Resolved relative to the
+alias config file's real directory (following symlinks), using the same path
+resolution rules as `reconcile.script`.
+
+The script must define a function named `_chopper_bashcomp_<alias>()` (with
+non-alphanumeric characters replaced by `_`). This function is called instead
+of the default delegation logic.
+
+Validation rules for `bashcomp.script`:
+
+- Cannot contain NUL bytes.
+- Cannot be `.` or `..`.
+- Cannot end with a path separator.
+- Cannot end with `.` or `..` path components.
+- Relative forms like `./` or `.\` must include a file path segment.
+- Blank values are treated as unset.
+
+### Completion mode precedence
+
+When `--print-bashcomp-mode <alias>` is queried, the mode is determined by:
+
+1. If `bashcomp.disabled` is `true`: `disabled`
+2. If `bashcomp.script` is set: `custom`
+3. If `bashcomp.passthrough` is `true`: `passthrough`
+4. Otherwise: `normal`
+
+### Reconcile integration
+
+Reconcile scripts may return a `bashcomp_script` key (a string path) in their
+patch map to dynamically override the completion script for an alias.
+
+### Setup
+
+Enable bash completion by sourcing the output of `chopper --bashcomp`:
+
+```bash
+source <(chopper --bashcomp)
+```
+
+Or save it persistently:
+
+```bash
+chopper --bashcomp > ~/.local/share/bash-completion/completions/chopper
+```
+
+The script registers completion handlers for all configured aliases and
+projects per-alias shims into `BASH_COMPLETION_USER_DIR` (best-effort).
+
+See [`bashcomp-design.md`](bashcomp-design.md) for the full design rationale.
 
 ---
 

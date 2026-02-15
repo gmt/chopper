@@ -1,0 +1,7 @@
+exec = "kubectl"
+args = ["get", "pods"]
+
+[bashcomp]
+# disabled = true      # suppress completion entirely
+# passthrough = true   # delegate to underlying command without munging
+# script = "completions/kpods.bash"  # custom completion script

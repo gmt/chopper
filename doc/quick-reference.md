@@ -27,6 +27,10 @@ chopper --help
 chopper --version
 chopper --print-config-dir
 chopper --print-cache-dir
+chopper --bashcomp
+chopper --list-aliases
+chopper --print-exec <alias>
+chopper --print-bashcomp-mode <alias>
 ```
 
 ---
@@ -89,6 +93,22 @@ Lookup order for alias `<name>`:
 3. `<name>`
 4. `<name>.conf`
 5. `<name>.rhai`
+
+---
+
+## Bash completion
+
+Enable bash completion for all chopper-managed aliases:
+
+```bash
+source <(chopper --bashcomp)
+```
+
+Or save persistently:
+
+```bash
+chopper --bashcomp > ~/.local/share/bash-completion/completions/chopper
+```
 
 ---
 

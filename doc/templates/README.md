@@ -10,6 +10,10 @@ Starter files for common setups:
   - alias wired to Rhai reconcile script
 - `reconcile-script.rhai`
   - example reconcile function with runtime-based patches
+- `bashcomp-alias.toml`
+  - alias with `[bashcomp]` configuration options
+- `bashcomp-custom.bash`
+  - example custom bash completion script for a chopper alias
 
 Copy these into your config root (typically
 `${XDG_CONFIG_HOME:-~/.config}/chopper/aliases`) and adapt as needed.

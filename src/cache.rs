@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const CACHE_ENTRY_VERSION: u32 = 1;
+const CACHE_ENTRY_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
@@ -241,6 +241,12 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
             return Err(anyhow!(
                 "cached manifest reconcile function cannot contain NUL bytes"
             ));
+        }
+    }
+
+    if let Some(bashcomp) = &manifest.bashcomp {
+        if let Some(script) = &bashcomp.script {
+            validate_cached_command_path(script, "cached manifest bashcomp script path")?;
         }
     }
 

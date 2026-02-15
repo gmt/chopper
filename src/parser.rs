@@ -1,7 +1,7 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
-use crate::manifest::{JournalConfig, Manifest, ReconcileConfig};
+use crate::manifest::{BashcompConfig, JournalConfig, Manifest, ReconcileConfig};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -167,6 +167,50 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             None => "reconcile".to_string(),
         };
         manifest = manifest.with_reconcile(ReconcileConfig { script, function });
+    }
+
+    if let Some(bashcomp) = parsed.bashcomp {
+        let script = if let Some(script_str) = bashcomp.script {
+            let script = script_str.trim();
+            if script.is_empty() {
+                None
+            } else {
+                if script.contains('\0') {
+                    return Err(anyhow!(
+                        "field `bashcomp.script` cannot contain NUL bytes"
+                    ));
+                }
+                if script == "." || script == ".." {
+                    return Err(anyhow!(
+                        "field `bashcomp.script` cannot be `.` or `..`"
+                    ));
+                }
+                if script.ends_with('/') || script.ends_with('\\') {
+                    return Err(anyhow!(
+                        "field `bashcomp.script` cannot end with a path separator"
+                    ));
+                }
+                if ends_with_dot_component(script) {
+                    return Err(anyhow!(
+                        "field `bashcomp.script` cannot end with `.` or `..` path components"
+                    ));
+                }
+                if !Path::new(script).is_absolute() && !has_meaningful_relative_segment(script) {
+                    return Err(anyhow!(
+                        "field `bashcomp.script` must include a file path when using relative path notation"
+                    ));
+                }
+                Some(resolve_script_path(&base_dir, script))
+            }
+        } else {
+            None
+        };
+
+        manifest.bashcomp = Some(BashcompConfig {
+            disabled: bashcomp.disabled,
+            passthrough: bashcomp.passthrough,
+            script,
+        });
     }
 
     Ok(manifest)
@@ -341,6 +385,7 @@ struct AliasConfig {
     env_remove: Vec<String>,
     journal: Option<JournalConfigInput>,
     reconcile: Option<ReconcileConfigInput>,
+    bashcomp: Option<BashcompConfigInput>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -355,6 +400,15 @@ struct JournalConfigInput {
 struct ReconcileConfigInput {
     script: String,
     function: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BashcompConfigInput {
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    passthrough: bool,
+    script: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -2043,5 +2097,243 @@ exec = "bin/runner"
         let manifest = parse(&symlink_config)?;
         assert_eq!(manifest.exec, target_dir.join("bin/runner"));
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // [bashcomp] table parsing tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn parses_bashcomp_disabled_field() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+disabled = true
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(bashcomp.disabled);
+        assert!(!bashcomp.passthrough);
+        assert!(bashcomp.script.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bashcomp_passthrough_field() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+passthrough = true
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(!bashcomp.disabled);
+        assert!(bashcomp.passthrough);
+        assert!(bashcomp.script.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bashcomp_script_field() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "completions/custom.bash"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(!bashcomp.disabled);
+        assert!(!bashcomp.passthrough);
+        assert_eq!(
+            bashcomp.script,
+            Some(temp.path().join("completions/custom.bash"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bashcomp_all_fields() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+disabled = true
+passthrough = true
+script = "completions/custom.bash"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(bashcomp.disabled);
+        assert!(bashcomp.passthrough);
+        assert!(bashcomp.script.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn bashcomp_defaults_to_none_when_absent() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert!(manifest.bashcomp.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn bashcomp_empty_table_defaults_fields_to_false() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(!bashcomp.disabled);
+        assert!(!bashcomp.passthrough);
+        assert!(bashcomp.script.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn bashcomp_script_blank_value_is_treated_as_none() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "   "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(bashcomp.script.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_bashcomp_script_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "comp\u0000lete.bash"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.script` cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_script_dot_value() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.script` cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_script_trailing_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "completions/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_script_ending_in_dot_component() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+script = "completions/.."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.script` cannot end with `.` or `..` path components"));
     }
 }

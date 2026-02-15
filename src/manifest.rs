@@ -10,6 +10,7 @@ pub struct Manifest {
     pub env_remove: Vec<String>,
     pub journal: Option<JournalConfig>,
     pub reconcile: Option<ReconcileConfig>,
+    pub bashcomp: Option<BashcompConfig>,
 }
 
 impl Manifest {
@@ -21,6 +22,7 @@ impl Manifest {
             env_remove: Vec::new(),
             journal: None,
             reconcile: None,
+            bashcomp: None,
         }
     }
 
@@ -91,12 +93,20 @@ pub struct ReconcileConfig {
     pub function: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BashcompConfig {
+    pub disabled: bool,
+    pub passthrough: bool,
+    pub script: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimePatch {
     pub replace_args: Option<Vec<String>>,
     pub append_args: Vec<String>,
     pub set_env: HashMap<String, String>,
     pub remove_env: Vec<String>,
+    pub bashcomp_script: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

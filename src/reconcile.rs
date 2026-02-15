@@ -95,11 +95,14 @@ fn parse_patch(value: Dynamic) -> Result<RuntimePatch> {
     let remove_env =
         normalize_patch_remove_env(optional_string_array(&map, "remove_env")?.unwrap_or_default())?;
 
+    let bashcomp_script = optional_string_value(&map, "bashcomp_script")?;
+
     Ok(RuntimePatch {
         replace_args,
         append_args,
         set_env,
         remove_env,
+        bashcomp_script,
     })
 }
 
@@ -107,11 +110,11 @@ fn validate_patch_keys(map: &Map) -> Result<()> {
     for key in map.keys() {
         let supported = matches!(
             key.as_str(),
-            "append_args" | "replace_args" | "set_env" | "remove_env"
+            "append_args" | "replace_args" | "set_env" | "remove_env" | "bashcomp_script"
         );
         if !supported {
             return Err(anyhow!(
-                "unsupported reconcile patch key `{}`; supported keys: append_args, replace_args, set_env, remove_env",
+                "unsupported reconcile patch key `{}`; supported keys: append_args, replace_args, set_env, remove_env, bashcomp_script",
                 key
             ));
         }
@@ -149,6 +152,13 @@ fn optional_string_map(map: &Map, key: &str) -> Result<Option<HashMap<String, St
         out.insert(k.to_string(), dynamic_to_string(v, key)?);
     }
     Ok(Some(out))
+}
+
+fn optional_string_value(map: &Map, key: &str) -> Result<Option<String>> {
+    let Some(value) = map.get(key) else {
+        return Ok(None);
+    };
+    Ok(Some(dynamic_to_string(value.clone(), key)?))
 }
 
 fn normalize_patch_set_env(values: HashMap<String, String>) -> Result<HashMap<String, String>> {
@@ -1024,6 +1034,102 @@ fn reconcile(_ctx) {
             .to_string();
         assert!(
             err.contains("unsupported reconcile patch key `bogus_key`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reconcile_accepts_bashcomp_script_key() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("bashcomp-script.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    bashcomp_script: "/path/to/custom-completion.bash"
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.bashcomp_script,
+            Some("/path/to/custom-completion.bash".to_string())
+        );
+    }
+
+    #[test]
+    fn reconcile_bashcomp_script_defaults_to_none() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("no-bashcomp.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["test"]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert!(patch.bashcomp_script.is_none());
+    }
+
+    #[test]
+    fn reconcile_rejects_non_string_bashcomp_script() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("bad-bashcomp.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    bashcomp_script: 42
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let err = maybe_reconcile(&manifest, &[])
+            .expect_err("expected bashcomp_script validation error")
+            .to_string();
+        assert!(
+            err.contains("all values in `bashcomp_script` must be strings"),
             "{err}"
         );
     }
