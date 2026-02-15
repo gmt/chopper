@@ -44,6 +44,16 @@ mod tests {
     }
 
     #[test]
+    fn env_value_validator_accepts_symbolic_and_pathlike_values() {
+        assert!(validate_env_value("--flag=value").is_ok());
+        assert!(validate_env_value("../relative/path").is_ok());
+        assert!(validate_env_value("semi;colon&and").is_ok());
+        assert!(validate_env_value("$DOLLAR").is_ok());
+        assert!(validate_env_value("brace{value}").is_ok());
+        assert!(validate_env_value(r"windows\path").is_ok());
+    }
+
+    #[test]
     fn env_key_validator_rejects_equals_sign() {
         let err = validate_env_key("BAD=KEY").expect_err("expected invalid key");
         assert_eq!(err, EnvKeyViolation::ContainsEquals);

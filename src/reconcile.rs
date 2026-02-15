@@ -422,6 +422,66 @@ fn reconcile(_ctx) {
     }
 
     #[test]
+    fn reconcile_accepts_symbolic_and_pathlike_set_env_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("env-symbols.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      "CHOPPER_EQ": "--flag=value",
+      "CHOPPER_REL": "../relative/path",
+      "CHOPPER_SHELL": "semi;colon&and",
+      "CHOPPER_DOLLAR": "$DOLLAR",
+      " CHOPPER_BRACE ": "brace{value}",
+      "CHOPPER_WIN": "windows\\path"
+    }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.set_env.get("CHOPPER_EQ"),
+            Some(&"--flag=value".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("CHOPPER_REL"),
+            Some(&"../relative/path".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("CHOPPER_SHELL"),
+            Some(&"semi;colon&and".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("CHOPPER_DOLLAR"),
+            Some(&"$DOLLAR".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("CHOPPER_BRACE"),
+            Some(&"brace{value}".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("CHOPPER_WIN"),
+            Some(&r"windows\path".to_string())
+        );
+    }
+
+    #[test]
     fn reconcile_requires_map_return_type() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");

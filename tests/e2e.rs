@@ -11821,6 +11821,104 @@ script = "value-shapes.reconcile.rhai"
 }
 
 #[test]
+fn toml_env_values_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'EQ=<%s>\nREL=<%s>\nSHELL=<%s>\nDOLLAR=<%s>\nBRACE=<%s>\nWIN=<%s>\n' \"$CHOPPER_EQ\" \"$CHOPPER_REL\" \"$CHOPPER_SHELL\" \"$CHOPPER_DOLLAR\" \"$CHOPPER_BRACE\" \"$CHOPPER_WIN\""
+]
+
+[env]
+CHOPPER_EQ = "--flag=value"
+CHOPPER_REL = "../relative/path"
+CHOPPER_SHELL = "semi;colon&and"
+CHOPPER_DOLLAR = "$DOLLAR"
+CHOPPER_BRACE = "brace{value}"
+CHOPPER_WIN = 'windows\path'
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-symbols"]);
+    assert!(
+        output.status.success(),
+        "env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EQ=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("REL=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("SHELL=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("DOLLAR=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("BRACE=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"WIN=<windows\path>"), "{stdout}");
+}
+
+#[test]
+fn reconcile_set_env_values_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-symbols.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      "CHOPPER_EQ": "--replace=value",
+      "CHOPPER_REL": "../from-reconcile",
+      "CHOPPER_SHELL": "semi;colon&and",
+      "CHOPPER_DOLLAR": "$PATCH_DOLLAR",
+      " CHOPPER_BRACE ": "brace{patch}",
+      "CHOPPER_WIN": "windows\\patch"
+    }
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("reconcile-env-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'EQ=<%s>\nREL=<%s>\nSHELL=<%s>\nDOLLAR=<%s>\nBRACE=<%s>\nWIN=<%s>\n' \"$CHOPPER_EQ\" \"$CHOPPER_REL\" \"$CHOPPER_SHELL\" \"$CHOPPER_DOLLAR\" \"$CHOPPER_BRACE\" \"$CHOPPER_WIN\""
+]
+
+[reconcile]
+script = "env-symbols.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["reconcile-env-symbols"]);
+    assert!(
+        output.status.success(),
+        "reconcile-env-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EQ=<--replace=value>"), "{stdout}");
+    assert!(stdout.contains("REL=<../from-reconcile>"), "{stdout}");
+    assert!(stdout.contains("SHELL=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("DOLLAR=<$PATCH_DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("BRACE=<brace{patch}>"), "{stdout}");
+    assert!(stdout.contains(r"WIN=<windows\patch>"), "{stdout}");
+}
+
+#[test]
 fn toml_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

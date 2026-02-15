@@ -1379,6 +1379,53 @@ env_remove = ["  FOO  ", "FOO", "BAR", " BAR "]
     }
 
     #[test]
+    fn preserves_env_values_with_symbolic_and_pathlike_shapes() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("env-values.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[env]
+CHOPPER_EQ = "--flag=value"
+CHOPPER_REL = "../relative/path"
+CHOPPER_SHELL = "semi;colon&and"
+CHOPPER_DOLLAR = "$DOLLAR"
+" CHOPPER_BRACE " = "brace{value}"
+CHOPPER_WIN = 'windows\path'
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest.env.get("CHOPPER_EQ").map(String::as_str),
+            Some("--flag=value")
+        );
+        assert_eq!(
+            manifest.env.get("CHOPPER_REL").map(String::as_str),
+            Some("../relative/path")
+        );
+        assert_eq!(
+            manifest.env.get("CHOPPER_SHELL").map(String::as_str),
+            Some("semi;colon&and")
+        );
+        assert_eq!(
+            manifest.env.get("CHOPPER_DOLLAR").map(String::as_str),
+            Some("$DOLLAR")
+        );
+        assert_eq!(
+            manifest.env.get("CHOPPER_BRACE").map(String::as_str),
+            Some("brace{value}")
+        );
+        assert_eq!(
+            manifest.env.get("CHOPPER_WIN").map(String::as_str),
+            Some(r"windows\path")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn rejects_env_remove_entries_containing_equals_sign() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
