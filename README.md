@@ -12,6 +12,19 @@ It is designed for:
 
 ---
 
+## Section map
+
+- [Install / run](#install--run)
+- [Quickstart](#quickstart)
+- [Minimal DSL example](#minimal-dsl-example)
+- [Invocation styles](#invocation-styles)
+- [Useful built-ins (direct mode)](#useful-built-ins-direct-mode)
+- [Override directories](#override-directories)
+- [Optional feature toggles (per invocation)](#optional-feature-toggles-per-invocation)
+- [Detailed documentation](#detailed-documentation)
+
+---
+
 ## Install / run
 
 Build and run directly from source:
