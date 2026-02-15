@@ -6,19 +6,19 @@ Start at the root `README.md` for quickstart and common commands.
 
 ## I just need command snippets. Where?
 
-Use `doc/quick-reference.md`.
+Use [`quick-reference.md`](quick-reference.md).
 
 ## I want copy/paste alias examples. Where?
 
-Use `doc/examples.md` and `doc/templates/`.
+Use [`examples.md`](examples.md) and [`templates/`](templates).
 
 ## Something is broken. Where do I debug first?
 
-Use `doc/troubleshooting.md`.
+Use [`troubleshooting.md`](troubleshooting.md).
 
 ## Where are the exact edge-case semantics documented?
 
-Use `doc/operational-spec.md`.
+Use [`operational-spec.md`](operational-spec.md).
 
 ## How do I disable cache for one invocation?
 

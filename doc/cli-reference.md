@@ -77,6 +77,6 @@ CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 
 ## Related docs
 
-- `doc/quick-reference.md` for rapid lookup
-- `doc/operational-spec.md` for full semantics
-- `doc/troubleshooting.md` for failure diagnosis
+- [`quick-reference.md`](quick-reference.md) for rapid lookup
+- [`operational-spec.md`](operational-spec.md) for full semantics
+- [`troubleshooting.md`](troubleshooting.md) for failure diagnosis

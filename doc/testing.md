@@ -58,7 +58,7 @@ cargo test reconcile_disable_flag_crlf_wrapped_falsey_value_keeps_reconcile_enab
 - E2E tests live in `tests/e2e.rs`.
 - Unit tests live alongside source modules in `src/*`.
 - For behavior/edge-case semantics while interpreting failures, use
-  `doc/operational-spec.md`.
+  [`operational-spec.md`](operational-spec.md).
 
 ---
 

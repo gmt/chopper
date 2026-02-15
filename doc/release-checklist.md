@@ -25,9 +25,9 @@ Use this checklist before cutting a release tag.
 ## Documentation checks
 
 - [ ] root `README.md` reflects current quickstart/install usage
-- [ ] `doc/README.md` links all relevant docs
-- [ ] `doc/examples.md` and `doc/templates/` remain consistent
-- [ ] `doc/operational-spec.md` reflects current semantics for changed behavior
+- [ ] [`README.md`](README.md) links all relevant docs
+- [ ] [`examples.md`](examples.md) and [`templates/`](templates) remain consistent
+- [ ] [`operational-spec.md`](operational-spec.md) reflects current semantics for changed behavior
 
 ---
 
