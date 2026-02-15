@@ -46,6 +46,7 @@ cargo test cache_disable_flag_crlf_wrapped_no_value_keeps_cache_enabled_and_uses
 cargo test reconcile_disable_flag_crlf_wrapped_on_disables_reconcile_in_e2e_flow -- --nocapture
 cargo test cache_disable_flag_crlf_wrapped_false_value_keeps_cache_enabled_and_uses_existing_cache_entry -- --nocapture
 cargo test reconcile_disable_flag_crlf_wrapped_false_value_keeps_reconcile_enabled -- --nocapture
+cargo test cache_disable_flag_crlf_wrapped_zero_value_keeps_cache_enabled_and_uses_existing_cache_entry -- --nocapture
 ```
 
 ---

@@ -1065,6 +1065,8 @@ mod tests {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::set_var("CHOPPER_DISABLE_CACHE", "0");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\n0\r\n");
+        assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "false");
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\nFaLsE\r\n");
