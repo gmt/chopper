@@ -1071,6 +1071,8 @@ mod tests {
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "off");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\noFf\r\n");
+        assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "   ");
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "definitely-not");
@@ -1086,6 +1088,8 @@ mod tests {
         env::set_var("CHOPPER_DISABLE_CACHE", "YeS");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "  yEs  ");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\r\nTrUe\r\n");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "On");
         assert!(!cache_enabled());
