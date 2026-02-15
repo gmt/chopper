@@ -23,6 +23,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - runtime flow overview
   - module ownership map
   - testing-layer summary
+- [`testing.md`](testing.md)
+  - local validation commands
+  - targeted/full test run patterns
+  - suggested verification sequence
 - [`examples.md`](examples.md)
   - copy/paste alias patterns
   - common workflows

@@ -164,4 +164,5 @@ Fast routing:
 - terminology lookup: [`doc/glossary.md`](doc/glossary.md)
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - architecture overview: [`doc/architecture.md`](doc/architecture.md)
+- local validation/testing commands: [`doc/testing.md`](doc/testing.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
