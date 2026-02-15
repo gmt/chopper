@@ -5,8 +5,11 @@ pub fn env_flag_enabled(name: &str) -> bool {
     let Ok(value) = env::var(name) else {
         return false;
     };
-    let normalized = value.trim().to_ascii_lowercase();
-    matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+    let normalized = value.trim();
+    normalized == "1"
+        || normalized.eq_ignore_ascii_case("true")
+        || normalized.eq_ignore_ascii_case("yes")
+        || normalized.eq_ignore_ascii_case("on")
 }
 
 pub fn env_path_override(name: &str) -> Option<PathBuf> {
@@ -44,7 +47,13 @@ mod tests {
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", " ON ");
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\n1\r\n");
+        assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "\r\nTrUe\r\n");
+        assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\nYeS\r\n");
+        assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\nOn\r\n");
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "0");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
