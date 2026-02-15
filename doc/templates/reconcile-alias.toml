@@ -1,0 +1,6 @@
+exec = "kubectl"
+args = ["get", "pods"]
+
+[reconcile]
+script = "kpods.reconcile.rhai"
+function = "reconcile"

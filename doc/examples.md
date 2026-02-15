@@ -3,6 +3,7 @@
 Practical patterns you can copy/paste.
 
 For full semantics and edge-case details, see `operational-spec.md`.
+If you want ready-to-copy starter files, see `templates/`.
 
 ---
 

@@ -1,0 +1,5 @@
+exec = "echo"
+args = ["hello from chopper"]
+
+[env]
+APP_ENV = "dev"

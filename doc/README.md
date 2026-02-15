@@ -14,6 +14,9 @@ Use this directory when you need behavior details beyond quickstart usage.
   - copy/paste alias patterns
   - common workflows
   - quick recipes for env/journal/reconcile/legacy usage
+- [`templates/`](templates)
+  - starter files for common alias/reconcile setups
+  - quick copy source for first working configs
 - [`quick-reference.md`](quick-reference.md)
   - compact command lookup
   - env override/toggle cheat sheet
