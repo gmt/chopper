@@ -342,6 +342,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_invocation_preserves_symbolic_and_pathlike_passthrough_args() {
+        let invocation = parse_invocation(&[
+            "chopper".to_string(),
+            "kpods".to_string(),
+            "--".to_string(),
+            "--flag=value".to_string(),
+            "../relative/path".to_string(),
+            "semi;colon&and".to_string(),
+            "$DOLLAR".to_string(),
+            "brace{value}".to_string(),
+            r"windows\path".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kpods");
+        assert_eq!(
+            invocation.passthrough_args,
+            vec![
+                "--flag=value",
+                "../relative/path",
+                "semi;colon&and",
+                "$DOLLAR",
+                "brace{value}",
+                r"windows\path"
+            ]
+        );
+    }
+
+    #[test]
     fn strips_double_dash_separator_for_direct_invocation() {
         let invocation = parse_invocation(&[
             "chopper".to_string(),
@@ -408,6 +437,34 @@ mod tests {
 
         assert_eq!(invocation.alias, "kubectl-prod");
         assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
+    }
+
+    #[test]
+    fn symlink_invocation_preserves_symbolic_and_pathlike_passthrough_args() {
+        let invocation = parse_invocation(&[
+            "kubectl.prod".to_string(),
+            "--".to_string(),
+            "--flag=value".to_string(),
+            "../relative/path".to_string(),
+            "semi;colon&and".to_string(),
+            "$DOLLAR".to_string(),
+            "brace{value}".to_string(),
+            r"windows\path".to_string(),
+        ])
+        .expect("valid invocation");
+
+        assert_eq!(invocation.alias, "kubectl.prod");
+        assert_eq!(
+            invocation.passthrough_args,
+            vec![
+                "--flag=value",
+                "../relative/path",
+                "semi;colon&and",
+                "$DOLLAR",
+                "brace{value}",
+                r"windows\path"
+            ]
+        );
     }
 
     #[test]

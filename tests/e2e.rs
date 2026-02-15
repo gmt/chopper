@@ -12302,6 +12302,56 @@ args = [
 }
 
 #[test]
+fn runtime_passthrough_args_preserve_symbolic_and_pathlike_values_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("runtime-arg-symbols.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'ARG=<%s>\n' \"$@\"",
+  "_",
+  "base"
+]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "runtime-arg-symbols",
+            "--",
+            "--flag=value",
+            "../relative/path",
+            "semi;colon&and",
+            "$DOLLAR",
+            "brace{value}",
+            r"windows\path",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "runtime-arg-symbols command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<base>"), "{stdout}");
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+}
+
+#[test]
 fn reconcile_patch_args_allow_symbolic_and_pathlike_values_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
