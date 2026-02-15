@@ -7211,6 +7211,66 @@ identifier = "   "
 }
 
 #[test]
+fn journal_parser_trimming_drops_mixed_whitespace_blank_identifier() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-trimmed-mixed-id.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "  ops-e2e  "
+stderr = true
+identifier = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-trimmed-mixed-id"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=ops-e2e"),
+        "captured args: {captured_args_text}"
+    );
+    assert!(
+        !captured_args_text.contains("--identifier="),
+        "mixed-whitespace blank identifier should be omitted: {captured_args_text}"
+    );
+}
+
+#[test]
 fn journal_identifier_is_trimmed_before_forwarding() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
