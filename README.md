@@ -12,6 +12,14 @@ It is designed for:
 
 ---
 
+## Current implementation status
+
+Need a concise “what is done vs what remains” snapshot?
+
+- [`doc/project-status.md`](doc/project-status.md)
+
+---
+
 ## Section map
 
 - [Install / run](#install--run)

@@ -36,6 +36,12 @@ If you're not sure where to begin, use this page.
 
 ---
 
+## I want a quick "where we stand" snapshot
+
+- Read [`project-status.md`](project-status.md).
+
+---
+
 ## See also
 
 - [`README.md`](README.md)
