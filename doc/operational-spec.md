@@ -7,6 +7,21 @@ For a concise overview and quickstart, see the root `README.md`.
 
 ---
 
+## Section map
+
+- [Installation / invocation model](#installation--invocation-model)
+- [Alias config discovery](#alias-config-discovery)
+- [DSL reference (TOML)](#dsl-reference-toml)
+  - [Parsing / validation rules](#parsing--validation-rules)
+  - [String-shape policy (what is intentionally allowed)](#string-shape-policy-what-is-intentionally-allowed)
+  - [Argument merge order](#argument-merge-order)
+  - [Environment merge order](#environment-merge-order)
+- [Journald namespace behavior](#journald-namespace-behavior)
+- [Optional runtime reconciliation (Rhai)](#optional-runtime-reconciliation-rhai)
+- [Caching](#caching)
+
+---
+
 ## Installation / invocation model
 
 `chopper` supports two invocation styles:
