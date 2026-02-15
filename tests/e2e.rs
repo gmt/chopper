@@ -7298,6 +7298,64 @@ namespace = "ops\u0000prod"
 }
 
 #[test]
+fn journal_namespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-blank-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "   "
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["journal-blank-namespace"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn journal_namespace_mixed_whitespace_blank_value_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-mixed-blank-namespace.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["journal-mixed-blank-namespace"],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `journal.namespace` cannot be empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn journal_identifier_with_nul_escape_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
