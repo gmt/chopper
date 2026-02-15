@@ -288,6 +288,14 @@ CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 `no`, `off`), or unknown values leave reconcile enabled. This includes
 whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.
 
+Examples that **leave reconcile enabled**:
+
+- `CHOPPER_DISABLE_RECONCILE="\r\n0\r\n"`
+- `CHOPPER_DISABLE_RECONCILE="\r\nfalse\r\n"`
+- `CHOPPER_DISABLE_RECONCILE="\r\nno\r\n"`
+- `CHOPPER_DISABLE_RECONCILE="\r\noff\r\n"`
+- `CHOPPER_DISABLE_RECONCILE="\r\n   \r\n"`
+
 ---
 
 ## Caching
@@ -342,3 +350,11 @@ CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 `1`, `true`, `yes`, and `on` disable cache. Blank, falsey (`0`, `false`, `no`,
 `off`), or unknown values keep cache enabled. This includes
 whitespace/CRLF-wrapped unknown values such as `"\r\nmaybe\r\n"`.
+
+Examples that **keep cache enabled**:
+
+- `CHOPPER_DISABLE_CACHE="\r\n0\r\n"`
+- `CHOPPER_DISABLE_CACHE="\r\nfalse\r\n"`
+- `CHOPPER_DISABLE_CACHE="\r\nno\r\n"`
+- `CHOPPER_DISABLE_CACHE="\r\noff\r\n"`
+- `CHOPPER_DISABLE_CACHE="\r\n   \r\n"`

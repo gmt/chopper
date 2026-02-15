@@ -57,6 +57,13 @@ Truthy values (case-insensitive, trimmed):
 Blank/unknown values (including whitespace or CRLF-wrapped values) keep cache
 and reconcile enabled.
 
+Common falsey values that also keep features enabled:
+
+- `0`
+- `false`
+- `no`
+- `off`
+
 ---
 
 ## Alias file locations
