@@ -11554,6 +11554,75 @@ args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
 }
 
 #[test]
+fn parser_mixed_whitespace_trimming_applies_to_env_keys_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-key-mixed-trim.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ENV=%s\n' \"$CHOPPER_E2E\""]
+
+[env]
+"\n\t CHOPPER_E2E \t\n" = "from_alias"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["env-key-mixed-trim"]);
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ENV=from_alias"), "{stdout}");
+}
+
+#[test]
+fn parser_mixed_whitespace_env_remove_entries_are_trimmed_and_deduped_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("env-remove-mixed-trim.toml"),
+        r#"
+exec = "sh"
+args = [
+  "-c",
+  "printf 'DROP=%s\nKEEP=%s\n' \"${CHOPPER_DROP-unset}\" \"${CHOPPER_KEEP-unset}\""
+]
+env_remove = ["\n\t CHOPPER_DROP \t\n", "CHOPPER_DROP", "\n\t   \t\n"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["env-remove-mixed-trim"],
+        [
+            ("CHOPPER_DROP", "remove-me".to_string()),
+            ("CHOPPER_KEEP", "keep-me".to_string()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("DROP=unset"), "{stdout}");
+    assert!(stdout.contains("KEEP=keep-me"), "{stdout}");
+}
+
+#[test]
 fn toml_args_and_env_values_preserve_empty_unicode_and_whitespace_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
