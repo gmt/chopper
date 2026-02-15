@@ -12,6 +12,28 @@ It is designed for:
 
 ---
 
+## Install / run
+
+Build and run directly from source:
+
+```bash
+cargo run -- <alias> [args...]
+```
+
+Install to your Cargo bin dir:
+
+```bash
+cargo install --path .
+```
+
+Then invoke:
+
+```bash
+chopper <alias> [args...]
+```
+
+---
+
 ## Quickstart
 
 ### 1) Create an alias
