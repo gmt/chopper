@@ -104,6 +104,9 @@ CHOPPER_CONFIG_DIR=/path/to/config-root chopper <alias> [args...]
 ```
 
 When this override is set, paths are resolved directly under that root.
+Leading/trailing whitespace wrappers are trimmed, but internal path shape is
+preserved (including symbolic/unicode segments, UNC-like strings, mixed
+separators, and trailing separators).
 Blank values are ignored and fall back to XDG/default resolution.
 
 Lookup order for alias `foo`:
@@ -290,6 +293,9 @@ For advanced scenarios, cache root can be overridden explicitly:
 CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias> [args...]
 ```
 Blank values are ignored and fall back to XDG/default resolution.
+As with `CHOPPER_CONFIG_DIR`, wrapped whitespace is trimmed while preserving
+path shape (for example unicode/symbolic segments, UNC-like strings, mixed
+separator strings, and trailing separators).
 
 Cache invalidation is automatic and based on source file path + metadata
 (size, mtime, and on Unix also ctime/device/inode). Users do not need to
