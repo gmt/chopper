@@ -297,6 +297,9 @@ Examples that **leave reconcile enabled**:
 - `CHOPPER_DISABLE_RECONCILE="\r\nno\r\n"`
 - `CHOPPER_DISABLE_RECONCILE="\r\noff\r\n"`
 - `CHOPPER_DISABLE_RECONCILE="\r\n   \r\n"`
+- `CHOPPER_DISABLE_RECONCILE="\t\t"` (tab-only blank)
+- `CHOPPER_DISABLE_RECONCILE="Ｔrue"` (mixed-script lookalike)
+- `CHOPPER_DISABLE_RECONCILE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)
 
 ---
 
@@ -363,3 +366,6 @@ Examples that **keep cache enabled**:
 - `CHOPPER_DISABLE_CACHE="\r\nno\r\n"`
 - `CHOPPER_DISABLE_CACHE="\r\noff\r\n"`
 - `CHOPPER_DISABLE_CACHE="\r\n   \r\n"`
+- `CHOPPER_DISABLE_CACHE="\t\t"` (tab-only blank)
+- `CHOPPER_DISABLE_CACHE="Ｔrue"` (mixed-script lookalike)
+- `CHOPPER_DISABLE_CACHE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)

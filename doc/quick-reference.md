@@ -59,6 +59,8 @@ Matching is ASCII case-insensitive; non-ASCII lookalike tokens (for example
 
 Blank/unknown values (including whitespace or CRLF-wrapped values) keep cache
 and reconcile enabled.
+This includes tab-only blanks (for example `"\t\t"`) and unicode lookalike
+tokens such as `Ｔrue`.
 
 Common falsey values that also keep features enabled:
 
