@@ -10,8 +10,13 @@ Use this directory when you need behavior details beyond quickstart usage.
   - validation and normalization rules
   - journald and Rhai reconciliation semantics
   - cache lifecycle and self-healing behavior
+- [`troubleshooting.md`](troubleshooting.md)
+  - common failure modes
+  - quick diagnosis checklist
+  - where to look first for cache/reconcile/journal/config issues
 
 ## Suggested reading path
 
 1. Start at the root `README.md` for setup and common usage.
-2. Come here for edge-case behavior and operational details.
+2. Use `troubleshooting.md` if something is not behaving as expected.
+3. Use `operational-spec.md` for full edge-case and semantic detail.
