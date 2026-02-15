@@ -44,6 +44,7 @@ If you're not sure where to begin, use this page.
 
 ## See also
 
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)
 - [`quick-reference.md`](quick-reference.md)
 - [`operational-spec.md`](operational-spec.md)

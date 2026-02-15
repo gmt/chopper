@@ -83,4 +83,5 @@ High-level map of the runtime flow and main modules.
 
 - [`testing.md`](testing.md)
 - [`operational-spec.md`](operational-spec.md)
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)

@@ -66,4 +66,5 @@ cargo test reconcile_disable_flag_crlf_wrapped_falsey_value_keeps_reconcile_enab
 
 - [`release-checklist.md`](release-checklist.md)
 - [`troubleshooting.md`](troubleshooting.md)
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)

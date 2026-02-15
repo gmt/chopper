@@ -61,4 +61,5 @@ Lookup order:
 
 - [`quick-reference.md`](quick-reference.md)
 - [`troubleshooting.md`](troubleshooting.md)
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)

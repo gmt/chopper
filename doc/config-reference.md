@@ -127,4 +127,5 @@ function = "reconcile"
 
 - [`cli-reference.md`](cli-reference.md)
 - [`operational-spec.md`](operational-spec.md)
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)

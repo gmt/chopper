@@ -62,4 +62,5 @@ Normalized disable flag value considered enabled:
 
 - [`config-reference.md`](config-reference.md)
 - [`cli-reference.md`](cli-reference.md)
-- [`README.md`](README.md)
+- [`docs index`](README.md)
+- [`root README`](../README.md)
