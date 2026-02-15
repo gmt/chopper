@@ -122,4 +122,5 @@ Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
 For full operational behavior, edge cases, validation rules, merge semantics,
 journald behavior, reconciliation contract, and cache lifecycle details, see:
 
+- [`doc/README.md`](doc/README.md)
 - [`doc/operational-spec.md`](doc/operational-spec.md)
