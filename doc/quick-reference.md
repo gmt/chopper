@@ -76,6 +76,7 @@ Lookup order for alias `<name>`:
 
 ## Where to read more
 
+- `doc/start-here.md` → role/task-based entry point
 - `README.md` → concise overview + quickstart
 - `doc/templates/` → starter alias/reconcile files
 - `doc/examples.md` → copy/paste workflows
