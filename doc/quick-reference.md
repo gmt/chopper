@@ -47,7 +47,7 @@ CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]
 ```
 
-Truthy values (case-insensitive, trimmed):
+Truthy values (ASCII case-insensitive, trimmed):
 
 - `1`
 - `true`

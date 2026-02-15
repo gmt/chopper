@@ -54,7 +54,7 @@ provided.
 ## Truthy env flag
 
 Normalized disable flag value considered enabled:
-`1`, `true`, `yes`, `on` (trimmed and case-insensitive).
+`1`, `true`, `yes`, `on` (trimmed and ASCII case-insensitive).
 
 ---
 

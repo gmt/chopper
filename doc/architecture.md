@@ -49,7 +49,7 @@ High-level map of the runtime flow and main modules.
 
 - `src/env_util.rs`
   - env toggle/override parsing (`CHOPPER_*`)
-  - trimmed, case-insensitive truthy handling
+  - trimmed, ASCII case-insensitive truthy handling
 
 - validation helpers
   - `alias_validation.rs`

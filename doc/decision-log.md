@@ -68,7 +68,7 @@ cases, but preserves useful symbolic/path-like shapes.
 shell/path workflows.
 
 For disable toggles specifically, truthy-token parsing is intentionally
-ASCII-based (`1|true|yes|on`, case-insensitive) so non-ASCII lookalikes remain
+ASCII-based (`1|true|yes|on`, ASCII case-insensitive) so non-ASCII lookalikes remain
 unknown and do not accidentally disable features.
 
 ---

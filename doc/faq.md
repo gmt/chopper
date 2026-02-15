@@ -27,7 +27,7 @@ CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 ```
 
 Only truthy values disable it (`1`, `true`, `yes`, `on`; trimmed and
-case-insensitive). Blank/unknown values (including CRLF-wrapped strings) keep
+ASCII case-insensitive). Blank/unknown values (including CRLF-wrapped strings) keep
 cache enabled. Falsey values (`0`, `false`, `no`, `off`) also keep cache
 enabled. Non-ASCII lookalikes (for example `ＴＲＵＥ`) are treated as unknown.
 

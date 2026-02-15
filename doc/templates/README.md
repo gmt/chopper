@@ -23,6 +23,6 @@ chopper hello
 ```
 
 If you use one-off debug toggles while validating templates, only truthy values
-disable features (`1`, `true`, `yes`, `on`; trimmed/case-insensitive).
+disable features (`1`, `true`, `yes`, `on`; trimmed/ASCII case-insensitive).
 Falsey values (`0`, `false`, `no`, `off`), blank, and unknown values
 (including CRLF-wrapped strings) keep features enabled.
