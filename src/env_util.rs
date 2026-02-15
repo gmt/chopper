@@ -145,6 +145,12 @@ mod tests {
             Some(PathBuf::from("C:\\tmp\\chopper trailing\\"))
         );
 
+        env::set_var("CHOPPER_TEST_PATH", "\r\n/tmp/chopper crlf/@v5\r\n");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from("/tmp/chopper crlf/@v5"))
+        );
+
         env::remove_var("CHOPPER_TEST_PATH");
     }
 }
