@@ -8789,7 +8789,7 @@ args = ["STALEPAYLOAD0001"]
         &alias_config,
         r#"
 exec = "echo"
-args = ["FRESHPAYLOAD0001"]
+args = ["FRESHPAYLOAD0001X"]
 "#,
     )
     .expect("rewrite alias config");
@@ -8801,7 +8801,7 @@ args = ["FRESHPAYLOAD0001"]
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FRESHPAYLOAD0001 second-run"), "{stdout}");
+    assert!(stdout.contains("FRESHPAYLOAD0001X second-run"), "{stdout}");
     assert!(
         !stdout.contains("STALEPAYLOAD0001 second-run"),
         "stale payload should not survive stale-cache fallback: {stdout}"
@@ -8819,8 +8819,8 @@ args = ["FRESHPAYLOAD0001"]
     let rebuilt_hashed = fs::read(&hashed_file).expect("read rebuilt hashed cache");
     assert!(
         rebuilt_hashed
-            .windows(b"FRESHPAYLOAD0001".len())
-            .any(|window| window == b"FRESHPAYLOAD0001"),
+            .windows(b"FRESHPAYLOAD0001X".len())
+            .any(|window| window == b"FRESHPAYLOAD0001X"),
         "rebuilt hashed cache should contain fresh source payload"
     );
     assert!(

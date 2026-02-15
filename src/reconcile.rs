@@ -287,6 +287,87 @@ fn reconcile(ctx) {
     }
 
     #[test]
+    fn reconcile_accepts_empty_unicode_and_whitespace_arg_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("arg-shapes.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    replace_args: ["", "emoji🚀", " spaced value "],
+    append_args: ["tail", ""]
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(
+            patch.replace_args,
+            Some(vec![
+                "".to_string(),
+                "emoji🚀".to_string(),
+                " spaced value ".to_string()
+            ])
+        );
+        assert_eq!(patch.append_args, vec!["tail".to_string(), "".to_string()]);
+    }
+
+    #[test]
+    fn reconcile_accepts_empty_and_unicode_set_env_values() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        env::remove_var("CHOPPER_DISABLE_RECONCILE");
+        let dir = TempDir::new().expect("tempdir");
+        let script_path = dir.path().join("env-shapes.rhai");
+        fs::write(
+            &script_path,
+            r#"
+fn reconcile(_ctx) {
+  #{
+    set_env: #{
+      "EMPTY_VALUE": "",
+      "UNICODE_VALUE": "emoji🚀",
+      " SPACED_KEY ": " spaced value "
+    }
+  }
+}
+"#,
+        )
+        .expect("write script");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.reconcile = Some(ReconcileConfig {
+            script: script_path,
+            function: "reconcile".into(),
+        });
+
+        let patch = maybe_reconcile(&manifest, &[])
+            .expect("reconcile call")
+            .expect("patch present");
+        assert_eq!(patch.set_env.get("EMPTY_VALUE"), Some(&"".to_string()));
+        assert_eq!(
+            patch.set_env.get("UNICODE_VALUE"),
+            Some(&"emoji🚀".to_string())
+        );
+        assert_eq!(
+            patch.set_env.get("SPACED_KEY"),
+            Some(&" spaced value ".to_string())
+        );
+    }
+
+    #[test]
     fn reconcile_requires_map_return_type() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         env::remove_var("CHOPPER_DISABLE_RECONCILE");

@@ -679,6 +679,30 @@ args = ["ok", "bad\u0000arg"]
     }
 
     #[test]
+    fn preserves_toml_args_with_empty_unicode_and_whitespace_values() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("ok.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+args = ["", "emoji🚀", " spaced value "]
+"#,
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse args with empty/unicode/whitespace values");
+        assert_eq!(
+            manifest.args,
+            vec![
+                "".to_string(),
+                "emoji🚀".to_string(),
+                " spaced value ".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_dot_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
