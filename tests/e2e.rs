@@ -15660,6 +15660,75 @@ fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
 }
 
 #[test]
+fn legacy_relative_command_cache_invalidation_reparses_updated_command() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let bin_dir = chopper_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner-a"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_CACHE=RUNNER_A %s\\n' \"$*\"\n",
+    );
+    write_executable_script(
+        &bin_dir.join("runner-b"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_CACHE=RUNNER_B %s\\n' \"$*\"\n",
+    );
+
+    let alias_path = chopper_dir.join("legacy-rel-cache");
+    fs::write(&alias_path, "'bin/runner-a' baseA").expect("write initial legacy alias");
+
+    let first = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-rel-cache", "runtime-a"],
+    );
+    assert!(
+        first.status.success(),
+        "first run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first_stdout.contains("LEGACY_CACHE=RUNNER_A baseA runtime-a"),
+        "{first_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/legacy-rel-cache.bin");
+    assert!(
+        cache_file.exists(),
+        "expected cache file at {:?}",
+        cache_file
+    );
+
+    fs::write(&alias_path, "'bin/runner-b' base-UPDATED-PAYLOAD")
+        .expect("rewrite legacy alias with updated command");
+
+    let second = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-rel-cache", "runtime-b"],
+    );
+    assert!(
+        second.status.success(),
+        "second run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("LEGACY_CACHE=RUNNER_B base-UPDATED-PAYLOAD runtime-b"),
+        "{second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains("LEGACY_CACHE=RUNNER_A"),
+        "{second_stdout}"
+    );
+}
+
+#[test]
 fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
