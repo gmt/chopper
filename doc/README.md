@@ -74,3 +74,12 @@ Use this directory when you need behavior details beyond quickstart usage.
 3. Use `examples.md` for common copy/paste workflows.
 4. Use `troubleshooting.md` if something is not behaving as expected.
 5. Use `operational-spec.md` for full edge-case and semantic detail.
+
+## Contributor path
+
+If you're changing code/docs in this repo:
+
+1. Start with [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+2. Use [`testing.md`](testing.md) for local verification workflow
+3. Use [`architecture.md`](architecture.md) for module/runtime ownership
+4. Use [`release-checklist.md`](release-checklist.md) before tagging/releasing
