@@ -19,6 +19,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - validation and normalization rules
   - journald and Rhai reconciliation semantics
   - cache lifecycle and self-healing behavior
+- [`architecture.md`](architecture.md)
+  - runtime flow overview
+  - module ownership map
+  - testing-layer summary
 - [`examples.md`](examples.md)
   - copy/paste alias patterns
   - common workflows

@@ -163,4 +163,5 @@ Fast routing:
 - migration from legacy aliases: [`doc/migration.md`](doc/migration.md)
 - terminology lookup: [`doc/glossary.md`](doc/glossary.md)
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
+- architecture overview: [`doc/architecture.md`](doc/architecture.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
