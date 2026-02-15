@@ -24,6 +24,7 @@ Current implementation status against the DSL implementation goals.
 - ✅ NUL/blank/unsafe structural rejection paths covered
 - ✅ Symbolic/path-like shape preservation covered
 - ✅ CRLF + mixed-whitespace env flag/override handling covered
+- ✅ Disable-flag truthy/falsey/unknown token matrix covered end-to-end
 - ✅ Broad wrapper/invocation-shape e2e coverage for built-ins and routing
 
 ---
