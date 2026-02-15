@@ -14456,6 +14456,51 @@ function = "   "
 }
 
 #[test]
+fn reconcile_mixed_whitespace_blank_function_defaults_to_reconcile_in_end_to_end_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blankfn-mixed.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_mixed_default_function"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("blankfn-mixed.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "blankfn-mixed.reconcile.rhai"
+function = "\n\t  \t\n"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blankfn-mixed", "runtime"]);
+    assert!(
+        output.status.success(),
+        "blankfn-mixed command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_mixed_default_function"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn legacy_one_line_alias_remains_supported() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

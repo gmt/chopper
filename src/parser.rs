@@ -892,6 +892,33 @@ function = "   "
     }
 
     #[test]
+    fn defaults_reconcile_function_when_mixed_whitespace_blank() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+script = "hooks/reconcile.rhai"
+function = "\n\t  \t\n"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        assert_eq!(
+            manifest
+                .reconcile
+                .as_ref()
+                .map(|r| r.function.as_str())
+                .unwrap_or_default(),
+            "reconcile"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn rejects_empty_journal_namespace() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
