@@ -169,6 +169,7 @@ Fast routing:
 - architecture overview: [`doc/architecture.md`](doc/architecture.md)
 - local validation/testing commands: [`doc/testing.md`](doc/testing.md)
 - release prep checklist: [`doc/release-checklist.md`](doc/release-checklist.md)
+- implementation progress snapshot: [`doc/project-status.md`](doc/project-status.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
 
 Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)

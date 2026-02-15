@@ -25,6 +25,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - validation and normalization rules
   - journald and Rhai reconciliation semantics
   - cache lifecycle and self-healing behavior
+- [`project-status.md`](project-status.md)
+  - implementation status summary
+  - completed capability matrix
+  - current "what remains" snapshot
 - [`architecture.md`](architecture.md)
   - runtime flow overview
   - module ownership map

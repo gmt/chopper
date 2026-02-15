@@ -1,0 +1,44 @@
+# chopper project status
+
+Current implementation status against the DSL implementation goals.
+
+---
+
+## Core feature status
+
+- ✅ Concrete TOML alias DSL
+- ✅ Per-alias env injection (`[env]`)
+- ✅ Per-alias static args (`args`)
+- ✅ Journald namespace stderr routing (`[journal]`)
+- ✅ Optional Rhai runtime reconciliation (`[reconcile]`)
+- ✅ Legacy one-line alias compatibility
+- ✅ Automatic manifest caching + invalidation
+- ✅ Cache corruption/staleness self-healing behavior
+- ✅ Direct + symlink invocation support
+
+---
+
+## Hardening status
+
+- ✅ String validation/normalization policy documented and tested
+- ✅ NUL/blank/unsafe structural rejection paths covered
+- ✅ Symbolic/path-like shape preservation covered
+- ✅ CRLF + mixed-whitespace env flag/override handling covered
+- ✅ Broad wrapper/invocation-shape e2e coverage for built-ins and routing
+
+---
+
+## Docs status
+
+- ✅ concise quickstart README
+- ✅ full operational specification
+- ✅ CLI/config/testing/troubleshooting references
+- ✅ examples + templates + migration guide
+- ✅ contributor and release-checklist docs
+
+---
+
+## Remaining implementation work
+
+At this time: **no major feature gaps are identified** against the planned DSL
+scope. Ongoing work is primarily doc UX polish and optional future iteration.
