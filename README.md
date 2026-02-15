@@ -123,5 +123,6 @@ For full operational behavior, edge cases, validation rules, merge semantics,
 journald behavior, reconciliation contract, and cache lifecycle details, see:
 
 - [`doc/README.md`](doc/README.md)
+- [`doc/examples.md`](doc/examples.md)
 - [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - [`doc/operational-spec.md`](doc/operational-spec.md)

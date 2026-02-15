@@ -10,6 +10,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - validation and normalization rules
   - journald and Rhai reconciliation semantics
   - cache lifecycle and self-healing behavior
+- [`examples.md`](examples.md)
+  - copy/paste alias patterns
+  - common workflows
+  - quick recipes for env/journal/reconcile/legacy usage
 - [`troubleshooting.md`](troubleshooting.md)
   - common failure modes
   - quick diagnosis checklist
@@ -18,5 +22,6 @@ Use this directory when you need behavior details beyond quickstart usage.
 ## Suggested reading path
 
 1. Start at the root `README.md` for setup and common usage.
-2. Use `troubleshooting.md` if something is not behaving as expected.
-3. Use `operational-spec.md` for full edge-case and semantic detail.
+2. Use `examples.md` for common copy/paste workflows.
+3. Use `troubleshooting.md` if something is not behaving as expected.
+4. Use `operational-spec.md` for full edge-case and semantic detail.
