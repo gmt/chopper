@@ -12838,6 +12838,71 @@ args = ["symbolic-ws-override-root"]
 }
 
 #[test]
+fn mixed_whitespace_wrapped_symbolic_overrides_support_legacy_relative_aliases() {
+    let config_home = TempDir::new().expect("create xdg config home");
+    let cache_home = TempDir::new().expect("create xdg cache home");
+    let roots = TempDir::new().expect("create override roots container");
+    let override_config_root = roots.path().join("cfg legacy @🚀 root");
+    let override_cache_root = roots.path().join("cache legacy @🚀 root");
+
+    let bin_dir = override_config_root.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create override bin dir");
+    fs::create_dir_all(&override_cache_root).expect("create override cache root");
+
+    write_executable_script(
+        &bin_dir.join("runner @v1"),
+        "#!/usr/bin/env bash\nprintf 'LEGACY_OVERRIDE=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        override_config_root.join("legacy-override-relative"),
+        "'bin/runner @v1' base",
+    )
+    .expect("write legacy alias in override root");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["legacy-override-relative", "runtime"],
+        [
+            (
+                "CHOPPER_CONFIG_DIR",
+                format!("\n\t{}\t\n", override_config_root.display()),
+            ),
+            (
+                "CHOPPER_CACHE_DIR",
+                format!("\n\t{}\t\n", override_cache_root.display()),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LEGACY_OVERRIDE=base runtime"), "{stdout}");
+
+    let override_cache_file = override_cache_root
+        .join("manifests")
+        .join("legacy-override-relative.bin");
+    assert!(
+        override_cache_file.exists(),
+        "expected cache in override root: {:?}",
+        override_cache_file
+    );
+
+    let default_cache_file = cache_home
+        .path()
+        .join("chopper/manifests/legacy-override-relative.bin");
+    assert!(
+        !default_cache_file.exists(),
+        "cache should not be written into default XDG cache when symbolic override is set: {:?}",
+        default_cache_file
+    );
+}
+
+#[test]
 fn empty_config_and_cache_overrides_fall_back_to_xdg_roots() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");
