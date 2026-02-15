@@ -3247,6 +3247,58 @@ fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invo
 }
 
 #[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_chopper_exe()
+{
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let chopper_exe = bin_dir.path().join("chopper.exe");
+    symlink(chopper_bin(), &chopper_exe).expect("create chopper.exe symlink");
+
+    let output = run_chopper_with(
+        chopper_exe.clone(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with(
+        chopper_exe,
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via chopper.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_trim_wrapped_overrides_when_invoked_as_chopper_cmd() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
