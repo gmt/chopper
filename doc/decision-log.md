@@ -67,6 +67,10 @@ cases, but preserves useful symbolic/path-like shapes.
 **Why:** Balances safety with practical ergonomics; avoids over-restricting real
 shell/path workflows.
 
+For disable toggles specifically, truthy-token parsing is intentionally
+ASCII-based (`1|true|yes|on`, case-insensitive) so non-ASCII lookalikes remain
+unknown and do not accidentally disable features.
+
 ---
 
 ## 8) Docs split by audience
