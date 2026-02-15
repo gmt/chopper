@@ -385,6 +385,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_trivial_legacy_alias_with_symbolic_and_pathlike_args() {
+        let temp = TempDir::new().expect("create tempdir");
+        let alias = temp.path().join("legacy");
+        fs::write(
+            &alias,
+            r#"echo --flag=value ../relative/path 'semi;colon&and' '$DOLLAR' 'brace{value}' 'windows\path'"#,
+        )
+        .expect("write config");
+
+        let manifest = parse(&alias).expect("parse legacy config");
+        assert_eq!(
+            manifest.exec.file_name().and_then(|x| x.to_str()),
+            Some("echo")
+        );
+        assert_eq!(
+            manifest.args,
+            vec![
+                "--flag=value".to_string(),
+                "../relative/path".to_string(),
+                "semi;colon&and".to_string(),
+                "$DOLLAR".to_string(),
+                "brace{value}".to_string(),
+                r"windows\path".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn parses_trivial_legacy_alias_after_blank_and_comment_lines() {
         let temp = TempDir::new().expect("create tempdir");
         let alias = temp.path().join("legacy");

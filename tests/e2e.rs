@@ -15416,6 +15416,39 @@ fn legacy_one_line_alias_remains_supported() {
 }
 
 #[test]
+fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    fs::create_dir_all(&chopper_dir).expect("create chopper config dir");
+    fs::write(
+        chopper_dir.join("legacy-symbolic"),
+        r#"sh -c "printf 'ARG=<%s>\n' \"$@\"" _ --flag=value ../relative/path 'semi;colon&and' '$DOLLAR' 'brace{value}' 'windows\path'"#,
+    )
+    .expect("write legacy alias");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &["legacy-symbolic", "runtime=1", "literal*star"],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARG=<--flag=value>"), "{stdout}");
+    assert!(stdout.contains("ARG=<../relative/path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<semi;colon&and>"), "{stdout}");
+    assert!(stdout.contains("ARG=<$DOLLAR>"), "{stdout}");
+    assert!(stdout.contains("ARG=<brace{value}>"), "{stdout}");
+    assert!(stdout.contains(r"ARG=<windows\path>"), "{stdout}");
+    assert!(stdout.contains("ARG=<runtime=1>"), "{stdout}");
+    assert!(stdout.contains("ARG=<literal*star>"), "{stdout}");
+}
+
+#[test]
 fn legacy_one_line_alias_ignores_blank_and_comment_lines() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
