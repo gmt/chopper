@@ -63,6 +63,13 @@ Truthy values (trimmed, case-insensitive):
 Falsey/blank/unknown values (including whitespace/CRLF-wrapped values) leave
 the feature enabled.
 
+Common falsey values:
+
+- `0`
+- `false`
+- `no`
+- `off`
+
 ---
 
 ## Useful diagnostics

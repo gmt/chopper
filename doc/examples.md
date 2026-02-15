@@ -113,6 +113,7 @@ Notes:
 
 - only truthy values disable (`1`, `true`, `yes`, `on`; trimmed,
   case-insensitive)
+- common falsey values (`0`, `false`, `no`, `off`) keep features enabled
 - blank/unknown values (including CRLF-wrapped strings) keep features enabled
 
 ---
