@@ -112,6 +112,27 @@ mod tests {
             Some(PathBuf::from("./relative path/@v1"))
         );
 
+        env::set_var(
+            "CHOPPER_TEST_PATH",
+            r" \\server\share\chopper symbolic\cache@v2 ",
+        );
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from(r"\\server\share\chopper symbolic\cache@v2"))
+        );
+
+        env::set_var("CHOPPER_TEST_PATH", r" ..\parent\cfg @v3 ");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from(r"..\parent\cfg @v3"))
+        );
+
+        env::set_var("CHOPPER_TEST_PATH", r" /tmp\mixed/windows@v4 ");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from(r"/tmp\mixed/windows@v4"))
+        );
+
         env::remove_var("CHOPPER_TEST_PATH");
     }
 }
