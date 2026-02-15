@@ -133,6 +133,18 @@ mod tests {
             Some(PathBuf::from(r"/tmp\mixed/windows@v4"))
         );
 
+        env::set_var("CHOPPER_TEST_PATH", " /tmp/chopper trailing/ ");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from("/tmp/chopper trailing/"))
+        );
+
+        env::set_var("CHOPPER_TEST_PATH", " C:\\tmp\\chopper trailing\\ ");
+        assert_eq!(
+            env_path_override("CHOPPER_TEST_PATH"),
+            Some(PathBuf::from("C:\\tmp\\chopper trailing\\"))
+        );
+
         env::remove_var("CHOPPER_TEST_PATH");
     }
 }
