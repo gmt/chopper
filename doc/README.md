@@ -18,7 +18,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 | Debugging runtime issues | [`troubleshooting.md`](troubleshooting.md) |
 | Contributor/maintainer | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 
-## If you need...
+## If you need
 
 - **one command quickly** → [`quick-reference.md`](quick-reference.md)
 - **a working example to copy** → [`examples.md`](examples.md)

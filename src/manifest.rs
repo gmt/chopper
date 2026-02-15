@@ -106,7 +106,6 @@ pub struct RuntimePatch {
     pub append_args: Vec<String>,
     pub set_env: HashMap<String, String>,
     pub remove_env: Vec<String>,
-    pub bashcomp_script: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

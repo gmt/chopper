@@ -85,7 +85,7 @@ recognized.
 Built-ins are single-action commands; additional positional tokens are treated
 as regular alias parsing input and therefore should not be provided.
 
-2. **Symlinked alias**:
+1. **Symlinked alias**:
 
 ```bash
 ln -s /path/to/chopper /usr/local/bin/kpods
@@ -373,11 +373,6 @@ When `--print-bashcomp-mode <alias>` is queried, the mode is determined by:
 2. If `bashcomp.script` is set: `custom`
 3. If `bashcomp.passthrough` is `true`: `passthrough`
 4. Otherwise: `normal`
-
-### Reconcile integration
-
-Reconcile scripts may return a `bashcomp_script` key (a string path) in their
-patch map to dynamically override the completion script for an alias.
 
 ### Setup
 
