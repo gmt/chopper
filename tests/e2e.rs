@@ -3720,6 +3720,218 @@ fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invo
 }
 
 #[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_com(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.COM",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.COM failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_cmd(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.CMD",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.CMD failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_bat(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.BAT",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.BAT failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
+fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_parent_windows_relative_uppercase_chopper_exe(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let roots = TempDir::new().expect("create override roots");
+    let override_config = roots.path().join("cfg @🚀 root");
+    let override_cache = roots.path().join("cache @🚀 root");
+    fs::create_dir_all(&override_config).expect("create symbolic override config");
+    fs::create_dir_all(&override_cache).expect("create symbolic override cache");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-config-dir"],
+        [(
+            "CHOPPER_CONFIG_DIR",
+            format!("\n\t{}\t\n", override_config.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-config-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_config.display().to_string());
+
+    let output = run_chopper_with_cwd_and_argv0(
+        chopper_bin(),
+        "..\\CHOPPER.EXE",
+        bin_dir.path(),
+        &config_home,
+        &cache_home,
+        &["--print-cache-dir"],
+        [(
+            "CHOPPER_CACHE_DIR",
+            format!("\n\t{}\t\n", override_cache.display()),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "print-cache-dir via parent-windows-relative CHOPPER.EXE failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), override_cache.display().to_string());
+}
+
+#[test]
 fn print_dir_builtins_trim_mixed_whitespace_wrapped_symbolic_overrides_when_invoked_as_uppercase_chopper_cmd(
 ) {
     let config_home = TempDir::new().expect("create config home");
