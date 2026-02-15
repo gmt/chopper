@@ -61,7 +61,9 @@ Blank/unknown values (including whitespace or CRLF-wrapped values) keep cache
 and reconcile enabled.
 This includes tab-only blanks (for example `"\t\t"`) and unicode lookalike
 tokens such as `Ｔrue`, plus CRLF + NBSP-wrapped values such as
-`"\r\n\u00A0FaLsE\u00A0\r\n"` and `"\r\n\u00A0Ｔrue\u00A0\r\n"`.
+`"\r\n\u00A0FaLsE\u00A0\r\n"` and `"\r\n\u00A0Ｔrue\u00A0\r\n"`, as well as
+ideographic-space wrapped values like `"\u3000FaLsE\u3000"` and
+`"\u3000Ｔrue\u3000"`.
 
 Common falsey values that also keep features enabled:
 

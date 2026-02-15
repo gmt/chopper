@@ -1071,6 +1071,8 @@ mod tests {
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\u{00A0}FaLsE\u{00A0}");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\u{3000}FaLsE\u{3000}");
+        assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\n\u{00A0}FaLsE\u{00A0}\r\n");
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\nFaLsE\r\n");
@@ -1103,6 +1105,8 @@ mod tests {
         assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\u{00A0}ＴＲＵＥ\u{00A0}");
         assert!(cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\u{3000}ＴＲＵＥ\u{3000}");
+        assert!(cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\n\u{00A0}Ｔrue\u{00A0}\r\n");
         assert!(cache_enabled());
         env::remove_var("CHOPPER_DISABLE_CACHE");
@@ -1124,6 +1128,8 @@ mod tests {
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\nTrUe\r\n");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\u{00A0}TrUe\u{00A0}");
+        assert!(!cache_enabled());
+        env::set_var("CHOPPER_DISABLE_CACHE", "\u{3000}TrUe\u{3000}");
         assert!(!cache_enabled());
         env::set_var("CHOPPER_DISABLE_CACHE", "\r\n\u{00A0}TrUe\u{00A0}\r\n");
         assert!(!cache_enabled());

@@ -297,10 +297,12 @@ Examples that **leave reconcile enabled**:
 - `CHOPPER_DISABLE_RECONCILE="\r\nno\r\n"`
 - `CHOPPER_DISABLE_RECONCILE="\r\noff\r\n"`
 - `CHOPPER_DISABLE_RECONCILE="\r\n\u00A0FaLsE\u00A0\r\n"` (CRLF + NBSP-wrapped falsey token)
+- `CHOPPER_DISABLE_RECONCILE="\u3000FaLsE\u3000"` (ideographic-space wrapped falsey token)
 - `CHOPPER_DISABLE_RECONCILE="\r\n   \r\n"`
 - `CHOPPER_DISABLE_RECONCILE="\t\t"` (tab-only blank)
 - `CHOPPER_DISABLE_RECONCILE="Ｔrue"` (mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)
+- `CHOPPER_DISABLE_RECONCILE="\u3000Ｔrue\u3000"` (ideographic-space wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\r\n\u00A0Ｔrue\u00A0\r\n"` (CRLF + NBSP-wrapped mixed-script lookalike)
 
 ---
@@ -368,8 +370,10 @@ Examples that **keep cache enabled**:
 - `CHOPPER_DISABLE_CACHE="\r\nno\r\n"`
 - `CHOPPER_DISABLE_CACHE="\r\noff\r\n"`
 - `CHOPPER_DISABLE_CACHE="\r\n\u00A0FaLsE\u00A0\r\n"` (CRLF + NBSP-wrapped falsey token)
+- `CHOPPER_DISABLE_CACHE="\u3000FaLsE\u3000"` (ideographic-space wrapped falsey token)
 - `CHOPPER_DISABLE_CACHE="\r\n   \r\n"`
 - `CHOPPER_DISABLE_CACHE="\t\t"` (tab-only blank)
 - `CHOPPER_DISABLE_CACHE="Ｔrue"` (mixed-script lookalike)
 - `CHOPPER_DISABLE_CACHE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)
+- `CHOPPER_DISABLE_CACHE="\u3000Ｔrue\u3000"` (ideographic-space wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_CACHE="\r\n\u00A0Ｔrue\u00A0\r\n"` (CRLF + NBSP-wrapped mixed-script lookalike)
