@@ -31,10 +31,11 @@ Current implementation status against the DSL implementation goals.
 ## Docs status
 
 - ✅ concise quickstart README
+- ✅ docs entrypoint and role-based start-here routing
 - ✅ full operational specification
-- ✅ CLI/config/testing/troubleshooting references
-- ✅ examples + templates + migration guide
-- ✅ contributor and release-checklist docs
+- ✅ CLI/config/testing/troubleshooting/config references
+- ✅ examples + templates + migration + FAQ + glossary docs
+- ✅ contributor, architecture, decision-log, and release-checklist docs
 
 ---
 
