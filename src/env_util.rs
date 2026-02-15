@@ -44,6 +44,8 @@ mod tests {
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", " ON ");
         assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\nTrUe\r\n");
+        assert!(env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "0");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::remove_var("CHOPPER_TEST_FLAG");
@@ -59,6 +61,8 @@ mod tests {
         env::set_var("CHOPPER_TEST_FLAG", "off");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", " OFF ");
+        assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
+        env::set_var("CHOPPER_TEST_FLAG", "\r\noFf\r\n");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
         env::set_var("CHOPPER_TEST_FLAG", "  ");
         assert!(!env_flag_enabled("CHOPPER_TEST_FLAG"));
