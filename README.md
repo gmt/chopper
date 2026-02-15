@@ -119,6 +119,13 @@ Truthy values are: `1`, `true`, `yes`, `on` (case-insensitive, trimmed).
 
 ## Detailed documentation
 
+Not sure where to look?
+
+- start with [`doc/quick-reference.md`](doc/quick-reference.md) for command lookup
+- use [`doc/examples.md`](doc/examples.md) for copy/paste workflows
+- use [`doc/troubleshooting.md`](doc/troubleshooting.md) when something fails
+- use [`doc/operational-spec.md`](doc/operational-spec.md) for full semantics
+
 For full operational behavior, edge cases, validation rules, merge semantics,
 journald behavior, reconciliation contract, and cache lifecycle details, see:
 
