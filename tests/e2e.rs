@@ -14973,6 +14973,47 @@ args = ["cache-bypass-crlf-yes"]
 }
 
 #[test]
+fn cache_disable_flag_crlf_wrapped_on_disables_cache_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("nocache-crlf-on.toml"),
+        r#"
+exec = "echo"
+args = ["cache-bypass-crlf-on"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-crlf-on", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nOn\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache-bypass-crlf-on runtime"), "{stdout}");
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-crlf-on.bin");
+    assert!(
+        !cache_file.exists(),
+        "cache file should not be written when disabled with CRLF-wrapped mixed-case `on`: {:?}",
+        cache_file
+    );
+}
+
+#[test]
 fn cache_disable_flag_trims_numeric_truthy_value_in_e2e_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -16346,6 +16387,57 @@ script = "toggle-crlf-yes.reconcile.rhai"
     assert!(
         !stdout.contains("from_reconcile_crlf_yes"),
         "CRLF-wrapped mixed-case `yes` should disable reconcile hooks: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_on_disables_reconcile_in_e2e_flow() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-on.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_crlf_on"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-crlf-on.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-crlf-on.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-crlf-on", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nOn\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(
+        !stdout.contains("from_reconcile_crlf_on"),
+        "CRLF-wrapped mixed-case `on` should disable reconcile hooks: {stdout}"
     );
 }
 
