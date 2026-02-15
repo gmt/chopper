@@ -5,3 +5,5 @@ args = ["get", "pods"]
 # disabled = true      # suppress completion entirely
 # passthrough = true   # delegate to underlying command without munging
 # script = "completions/kpods.bash"  # custom completion script
+# rhai_script = "completions/kpods.rhai"  # Rhai completion script
+# rhai_function = "complete"              # function name (default: "complete")

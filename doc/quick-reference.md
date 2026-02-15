@@ -31,6 +31,7 @@ chopper --bashcomp
 chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
+chopper --complete <alias> <cword> [--] <words...>
 ```
 
 ---

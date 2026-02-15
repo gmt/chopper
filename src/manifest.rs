@@ -98,6 +98,8 @@ pub struct BashcompConfig {
     pub disabled: bool,
     pub passthrough: bool,
     pub script: Option<PathBuf>,
+    pub rhai_script: Option<PathBuf>,
+    pub rhai_function: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

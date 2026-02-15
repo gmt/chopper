@@ -49,7 +49,8 @@ Key constraints for completion code:
 
 - **No Rhai in the hot path**: Completion queries (`--print-exec`,
   `--print-bashcomp-mode`) must not execute reconcile scripts. They read
-  the manifest only.
+  the manifest only. Exception: aliases with `bashcomp.rhai_script`
+  explicitly opt in to Rhai execution via `--complete` per TAB press.
 - **No blocking**: The bash completion function must never hang or block.
   All external calls are guarded with existence checks.
 - **Session caching**: Completion state is cached in shell variables to

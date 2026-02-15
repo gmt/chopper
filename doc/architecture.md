@@ -58,6 +58,11 @@ High-level map of the runtime flow and main modules.
   - per-session caching, self-healing, graceful degradation
   - see [`bashcomp-design.md`](bashcomp-design.md) for design rationale
 
+- `src/completion.rs`
+  - Rhai-based completion engine for `--complete` introspection
+  - builds context map, calls Rhai function, returns candidate strings
+  - opt-in per-alias (requires `bashcomp.rhai_script` config)
+
 - validation helpers
   - `alias_validation.rs`
   - `arg_validation.rs`

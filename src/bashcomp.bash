@@ -19,7 +19,7 @@ fi
 # ---------------------------------------------------------------------------
 # Associative arrays for per-alias caching.
 # _chopper_cache_exec[alias] = resolved exec path
-# _chopper_cache_mode[alias] = disabled|passthrough|custom|normal
+# _chopper_cache_mode[alias] = disabled|passthrough|custom|rhai|normal
 declare -gA _chopper_cache_exec=()
 declare -gA _chopper_cache_mode=()
 
@@ -149,6 +149,19 @@ _chopper_complete() {
         # Fall through to normal delegation if custom func not loaded.
     fi
 
+    # ----- rhai mode: call chopper --complete for Rhai-based completion -----
+    if [[ "$mode" == "rhai" ]]; then
+        local cur="${COMP_WORDS[$COMP_CWORD]}"
+        COMPREPLY=()
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if [[ "$line" == "$cur"* ]]; then
+                COMPREPLY+=("$line")
+            fi
+        done < <(chopper --complete "$alias_name" "$COMP_CWORD" -- "${COMP_WORDS[@]}" 2>/dev/null)
+        return 0
+    fi
+
     # ----- passthrough / normal: delegate to underlying completer -----
     if [[ -z "$target" ]]; then
         # No target resolved; fall back to default completion.
@@ -272,7 +285,7 @@ _chopper_complete_direct() {
 
     if (( COMP_CWORD == 1 )); then
         # First arg: complete built-in flags or alias names.
-        local builtins="--help --version --print-config-dir --print-cache-dir --bashcomp --list-aliases --print-exec --print-bashcomp-mode"
+        local builtins="--help --version --print-config-dir --print-cache-dir --bashcomp --list-aliases --print-exec --print-bashcomp-mode --complete"
         local aliases
         aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
         COMPREPLY=($(compgen -W "$builtins $aliases" -- "$cur"))
@@ -280,7 +293,7 @@ _chopper_complete_direct() {
     fi
 
     local flag="${COMP_WORDS[1]}"
-    if (( COMP_CWORD == 2 )) && [[ "$flag" == "--print-exec" || "$flag" == "--print-bashcomp-mode" ]]; then
+    if (( COMP_CWORD == 2 )) && [[ "$flag" == "--print-exec" || "$flag" == "--print-bashcomp-mode" || "$flag" == "--complete" ]]; then
         # Second arg for these flags: complete alias names.
         local aliases
         aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""

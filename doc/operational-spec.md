@@ -54,6 +54,7 @@ chopper --bashcomp
 chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
+chopper --complete <alias> <cword> [--] <words...>
 ```
 
 A binary named `chopper.exe`, `chopper.com`, `chopper.cmd`, or `chopper.bat`
@@ -175,6 +176,8 @@ function = "reconcile"           # optional, default "reconcile"
 disabled = false                 # optional, default false
 passthrough = false              # optional, default false
 script = "comp/kpods.bash"       # optional custom completion script
+rhai_script = "comp/kpods.rhai"  # optional Rhai completion script
+rhai_function = "complete"       # optional, default "complete"
 ```
 
 ### Parsing / validation rules
@@ -365,14 +368,55 @@ Validation rules for `bashcomp.script`:
 - Relative forms like `./` or `.\` must include a file path segment.
 - Blank values are treated as unset.
 
+### `bashcomp.rhai_script`
+
+Optional path to a Rhai script that provides completion logic. Resolved
+relative to the alias config file's real directory (following symlinks),
+using the same path resolution rules as `reconcile.script`.
+
+The script must define a function (default name: `complete`) that receives
+a context map and returns an array of candidate strings.
+
+Validation rules match `bashcomp.script` (NUL rejection, dot/separator
+checks, relative path segment requirement).
+
+### `bashcomp.rhai_function`
+
+Optional function name within the `rhai_script`. Defaults to `"complete"`.
+Requires `rhai_script` to be set. Trimmed; blank values treated as unset.
+
 ### Completion mode precedence
 
 When `--print-bashcomp-mode <alias>` is queried, the mode is determined by:
 
 1. If `bashcomp.disabled` is `true`: `disabled`
 2. If `bashcomp.script` is set: `custom`
-3. If `bashcomp.passthrough` is `true`: `passthrough`
-4. Otherwise: `normal`
+3. If `bashcomp.rhai_script` is set: `rhai`
+4. If `bashcomp.passthrough` is `true`: `passthrough`
+5. Otherwise: `normal`
+
+### Rhai completion (`--complete`)
+
+When mode is `rhai`, the bash completion script calls:
+
+```bash
+chopper --complete <alias> <cword> -- <words...>
+```
+
+This loads the Rhai script from `bashcomp.rhai_script`, calls the named
+function with a context map containing:
+
+- `words`: array of strings (COMP_WORDS from bash)
+- `cword`: integer (0-based index of word being completed)
+- `current`: string (the partial word, i.e. `words[cword]`)
+- `exec`: string (resolved exec path for the alias)
+- `alias_args`: array of strings (alias's configured args)
+- `alias_env`: map of string to string (alias's configured env)
+
+The function returns an array of candidate strings, printed one per line.
+
+This is an opt-in per-alias feature that relaxes the "no Rhai in the hot
+path" constraint. The Rhai function should return quickly (<100ms).
 
 ### Setup
 

@@ -9,7 +9,7 @@ Research findings, design patterns, and rationale for the `--bashcomp` feature.
 - [Problem statement](#problem-statement)
 - [Research: scop/bash-completion internals](#research-scopbash-completion-internals)
 - [Research: decorator/proxy pattern](#research-decoratorproxy-pattern)
-- [Research: cykerway/complete-alias](#research-cykerwaycompletealias)
+- [Research: cykerway/complete-alias](#research-cykerwaycomplete-alias)
 - [Research: Cobra and clap\_complete dynamic models](#research-cobra-and-clap_complete-dynamic-models)
 - [Research: Nix and Debian alternatives](#research-nix-and-debian-alternatives)
 - [Performance rules](#performance-rules)
@@ -220,7 +220,7 @@ TAB press):
 The completion system must handle these scenarios without manual intervention:
 
 | Scenario | Behavior |
-|---|---|
+| --- | --- |
 | `chopper` binary removed from PATH | Falls back to filename completion |
 | Alias config file deleted | `--print-exec` returns error; falls back to filename completion |
 | Alias retargeted to different exec | Next completion (or new shell) picks up new target |
@@ -280,14 +280,33 @@ is silently skipped. The main `_chopper_complete` function works regardless,
 as long as `complete -F _chopper_complete <alias>` is registered (which the
 sourced `--bashcomp` script handles directly).
 
-### Rhai-in-completion deferred
+### Rhai-based completion (`--complete`)
 
-Full Rhai transformation of completion results (where the reconcile script
-filters or transforms what the underlying completer returns) is deferred to
-a follow-up. It requires a completion-specific Rhai entry point and careful
-performance budgeting. The initial implementation supports `bashcomp.passthrough`
-(bypass munging entirely) and `bashcomp.script` (custom completion handler),
-which covers the most important use cases.
+For aliases where the underlying command has no usable completer, or where
+argument transformation makes upstream completion meaningless, chopper
+supports Rhai-based completion via the `--complete` introspection command.
+
+This follows the Cobra/clap_complete pattern: the binary itself computes
+completions when asked. The bash completion script calls
+`chopper --complete <alias> <cword> -- <words...>` and reads candidates
+from stdout.
+
+Configuration:
+
+    [bashcomp]
+    rhai_script = "completions/myalias.rhai"
+    rhai_function = "complete"   # optional, default "complete"
+
+The Rhai function receives a context map (`words`, `cword`, `current`,
+`exec`, `alias_args`, `alias_env`) and returns an array of candidate
+strings. The completion script (`src/completion.rs`) handles Rhai engine
+setup, context building, and candidate extraction.
+
+This is an explicit opt-in that relaxes the "no Rhai in the hot path"
+constraint for aliases that specifically request it. The Rhai function is
+expected to be lightweight and return in <100ms. Session caching of
+mode/exec metadata still applies; only the candidate generation invokes
+Rhai per TAB press.
 
 ---
 

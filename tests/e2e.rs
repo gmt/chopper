@@ -21242,11 +21242,7 @@ fn print_bashcomp_mode_returns_passthrough_when_configured() {
     )
     .expect("write alias");
 
-    let output = run_chopper(
-        &config_home,
-        &cache_home,
-        &["--print-bashcomp-mode", "pt"],
-    );
+    let output = run_chopper(&config_home, &cache_home, &["--print-bashcomp-mode", "pt"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.trim(), "passthrough");
@@ -21353,10 +21349,7 @@ fn bashcomp_toml_with_disabled_field_round_trips_through_cache() {
         &["--print-bashcomp-mode", "cached"],
     );
     assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "disabled"
-    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "disabled");
 
     // Second invocation: reads from cache
     let output = run_chopper(
@@ -21365,8 +21358,5 @@ fn bashcomp_toml_with_disabled_field_round_trips_through_cache() {
         &["--print-bashcomp-mode", "cached"],
     );
     assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "disabled"
-    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "disabled");
 }

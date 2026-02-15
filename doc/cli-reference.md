@@ -37,6 +37,7 @@ chopper --bashcomp
 chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
+chopper --complete <alias> <cword> [--] <words...>
 ```
 
 ### Bash completion
@@ -75,7 +76,16 @@ chopper --print-bashcomp-mode <alias>
 ```
 
 Prints the bash completion mode for the alias: `disabled`, `passthrough`,
-`custom`, or `normal`. Exits 0 always.
+`custom`, `rhai`, or `normal`. Exits 0 always.
+
+```bash
+chopper --complete <alias> <cword> [--] <words...>
+```
+
+Runs Rhai-based completion for the alias. `<cword>` is the 0-based index
+of the word being completed. `<words...>` is the full COMP_WORDS array.
+Prints one completion candidate per line. Exits 0 on success, 1 on error.
+Requires `bashcomp.rhai_script` to be configured for the alias.
 
 ---
 
@@ -121,6 +131,7 @@ chopper --print-config-dir
 chopper --print-cache-dir
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
+chopper --complete <alias> <cword> [--] <words...>
 chopper --list-aliases
 CHOPPER_DISABLE_CACHE=1 chopper <alias> [args...]
 CHOPPER_DISABLE_RECONCILE=1 chopper <alias> [args...]

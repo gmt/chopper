@@ -125,6 +125,26 @@ Controls bash tab completion behavior for the alias.
   - cannot be `.` / `..` or end in invalid path components
   - must define `_chopper_bashcomp_<alias>()` function
 
+### `rhai_script` (optional)
+
+- Type: string
+- Notes:
+  - path to a Rhai script providing completion logic
+  - same path resolution and validation rules as `script`
+  - the script must define a function (see `rhai_function`)
+  - enables `rhai` mode for `--print-bashcomp-mode`
+
+### `rhai_function` (optional)
+
+- Type: string
+- Default: `"complete"`
+- Notes:
+  - function name within the `rhai_script`
+  - requires `rhai_script` to be set
+  - trimmed; blank values treated as unset
+  - cannot contain NUL
+  - receives context map, must return array of candidate strings
+
 ---
 
 ## Minimal valid example
@@ -155,6 +175,9 @@ function = "reconcile"
 
 [bashcomp]
 passthrough = true
+# or, for Rhai-based completion:
+# rhai_script = "completions/kpods.rhai"
+# rhai_function = "complete"
 ```
 
 ---

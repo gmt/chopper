@@ -248,6 +248,27 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
         if let Some(script) = &bashcomp.script {
             validate_cached_command_path(script, "cached manifest bashcomp script path")?;
         }
+        if let Some(rhai_script) = &bashcomp.rhai_script {
+            validate_cached_command_path(rhai_script, "cached manifest bashcomp rhai_script path")?;
+        }
+        if let Some(rhai_function) = &bashcomp.rhai_function {
+            let function = rhai_function.trim();
+            if function.is_empty() {
+                return Err(anyhow!(
+                    "cached manifest bashcomp rhai_function cannot be empty or whitespace-only"
+                ));
+            }
+            if function != rhai_function.as_str() {
+                return Err(anyhow!(
+                    "cached manifest bashcomp rhai_function cannot include surrounding whitespace"
+                ));
+            }
+            if function.contains('\0') {
+                return Err(anyhow!(
+                    "cached manifest bashcomp rhai_function cannot contain NUL bytes"
+                ));
+            }
+        }
     }
 
     Ok(())

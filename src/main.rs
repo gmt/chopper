@@ -1,6 +1,7 @@
 mod alias_validation;
 mod arg_validation;
 mod cache;
+mod completion;
 mod env_util;
 mod env_validation;
 mod executor;
@@ -72,6 +73,7 @@ enum BuiltinAction {
     ListAliases,
     PrintExec(String),
     PrintBashcompMode(String),
+    Complete(Vec<String>),
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -107,6 +109,11 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
         }
     }
 
+    // Variable-length builtins (chopper --complete <alias> <cword> [--] <words...>)
+    if flag == "--complete" && args.len() >= 3 {
+        return Some(BuiltinAction::Complete(args[2..].to_vec()));
+    }
+
     None
 }
 
@@ -127,6 +134,8 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --list-aliases               List configured aliases");
             println!("  --print-exec <alias>         Print resolved exec path for alias");
             println!("  --print-bashcomp-mode <alias> Print bashcomp mode for alias");
+            println!("  --complete <alias> <cword> [--] <words...>");
+            println!("                               Run Rhai completion for alias");
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -154,6 +163,9 @@ fn run_builtin_action(action: BuiltinAction) {
         }
         BuiltinAction::PrintBashcompMode(alias) => {
             std::process::exit(run_print_bashcomp_mode(&alias));
+        }
+        BuiltinAction::Complete(raw_args) => {
+            std::process::exit(run_complete_builtin(&raw_args));
         }
     }
 }
@@ -253,10 +265,54 @@ fn run_print_bashcomp_mode(alias: &str) -> i32 {
     match &manifest.bashcomp {
         Some(bc) if bc.disabled => println!("disabled"),
         Some(bc) if bc.script.is_some() => println!("custom"),
+        Some(bc) if bc.rhai_script.is_some() => println!("rhai"),
         Some(bc) if bc.passthrough => println!("passthrough"),
         _ => println!("normal"),
     }
     0
+}
+
+fn run_complete_builtin(raw_args: &[String]) -> i32 {
+    // raw_args = [<alias>, <cword>, [--], <word0>, ...]
+    if raw_args.len() < 2 {
+        eprintln!("usage: chopper --complete <alias> <cword> [--] <words...>");
+        return 1;
+    }
+
+    let alias = &raw_args[0];
+    let cword: usize = match raw_args[1].parse() {
+        Ok(n) => n,
+        Err(_) => {
+            eprintln!("invalid cword: {}", raw_args[1]);
+            return 1;
+        }
+    };
+
+    let words_start = if raw_args.get(2).map(String::as_str) == Some("--") {
+        3
+    } else {
+        2
+    };
+    let words: Vec<String> = raw_args[words_start..].to_vec();
+
+    let config_path = find_config(alias);
+    let manifest = match config_path {
+        Some(path) => match load_manifest(alias, &path) {
+            Ok(m) => m,
+            Err(_) => return 1,
+        },
+        None => return 1,
+    };
+
+    match completion::run_complete(&manifest, &words, cword) {
+        Ok(candidates) => {
+            for candidate in candidates {
+                println!("{candidate}");
+            }
+            0
+        }
+        Err(_) => 1,
+    }
 }
 
 fn load_manifest(alias: &str, path: &std::path::Path) -> Result<manifest::Manifest> {
@@ -2131,11 +2187,7 @@ mod tests {
     #[test]
     fn detects_print_exec_action_for_direct_chopper_invocation() {
         assert_eq!(
-            detect_builtin_action(&[
-                "chopper".into(),
-                "--print-exec".into(),
-                "kpods".into()
-            ]),
+            detect_builtin_action(&["chopper".into(), "--print-exec".into(), "kpods".into()]),
             Some(BuiltinAction::PrintExec("kpods".into()))
         );
     }
@@ -2172,11 +2224,7 @@ mod tests {
     #[test]
     fn bashcomp_rejects_extra_arguments() {
         assert_eq!(
-            detect_builtin_action(&[
-                "chopper".into(),
-                "--bashcomp".into(),
-                "extra".into()
-            ]),
+            detect_builtin_action(&["chopper".into(), "--bashcomp".into(), "extra".into()]),
             None
         );
     }
@@ -2214,5 +2262,75 @@ mod tests {
         let cfg = config_dir();
         assert_eq!(cfg, temp.path().to_path_buf());
         env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    // ------------------------------------------------------------------
+    // --complete builtin detection tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn detects_complete_action_with_alias_and_cword() {
+        let result = detect_builtin_action(&[
+            "chopper".into(),
+            "--complete".into(),
+            "kpods".into(),
+            "1".into(),
+            "--".into(),
+            "kpods".into(),
+            "get".into(),
+        ]);
+        assert_eq!(
+            result,
+            Some(BuiltinAction::Complete(vec![
+                "kpods".into(),
+                "1".into(),
+                "--".into(),
+                "kpods".into(),
+                "get".into()
+            ]))
+        );
+    }
+
+    #[test]
+    fn detects_complete_action_without_separator() {
+        let result = detect_builtin_action(&[
+            "chopper".into(),
+            "--complete".into(),
+            "kpods".into(),
+            "0".into(),
+            "kpods".into(),
+        ]);
+        assert_eq!(
+            result,
+            Some(BuiltinAction::Complete(vec![
+                "kpods".into(),
+                "0".into(),
+                "kpods".into()
+            ]))
+        );
+    }
+
+    #[test]
+    fn detects_complete_action_with_alias_only() {
+        let result =
+            detect_builtin_action(&["chopper".into(), "--complete".into(), "kpods".into()]);
+        assert_eq!(result, Some(BuiltinAction::Complete(vec!["kpods".into()])));
+    }
+
+    #[test]
+    fn complete_requires_at_least_alias_argument() {
+        // Just `chopper --complete` with no alias should not detect
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--complete".into()]),
+            None
+        );
+    }
+
+    #[test]
+    fn complete_not_detected_for_symlink_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["myalias".into(), "--complete".into(), "x".into()]),
+            None
+        );
     }
 }

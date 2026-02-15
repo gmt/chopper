@@ -176,14 +176,10 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
                 None
             } else {
                 if script.contains('\0') {
-                    return Err(anyhow!(
-                        "field `bashcomp.script` cannot contain NUL bytes"
-                    ));
+                    return Err(anyhow!("field `bashcomp.script` cannot contain NUL bytes"));
                 }
                 if script == "." || script == ".." {
-                    return Err(anyhow!(
-                        "field `bashcomp.script` cannot be `.` or `..`"
-                    ));
+                    return Err(anyhow!("field `bashcomp.script` cannot be `.` or `..`"));
                 }
                 if script.ends_with('/') || script.ends_with('\\') {
                     return Err(anyhow!(
@@ -206,10 +202,73 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             None
         };
 
+        let rhai_script = if let Some(rhai_script_str) = bashcomp.rhai_script {
+            let rhai_script = rhai_script_str.trim();
+            if rhai_script.is_empty() {
+                None
+            } else {
+                if rhai_script.contains('\0') {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_script` cannot contain NUL bytes"
+                    ));
+                }
+                if rhai_script == "." || rhai_script == ".." {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_script` cannot be `.` or `..`"
+                    ));
+                }
+                if rhai_script.ends_with('/') || rhai_script.ends_with('\\') {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_script` cannot end with a path separator"
+                    ));
+                }
+                if ends_with_dot_component(rhai_script) {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_script` cannot end with `.` or `..` path components"
+                    ));
+                }
+                if !Path::new(rhai_script).is_absolute()
+                    && !has_meaningful_relative_segment(rhai_script)
+                {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_script` must include a file path when using relative path notation"
+                    ));
+                }
+                Some(resolve_script_path(&base_dir, rhai_script))
+            }
+        } else {
+            None
+        };
+
+        let rhai_function = match bashcomp.rhai_function {
+            Some(f) => {
+                let function = f.trim();
+                if function.is_empty() {
+                    None
+                } else if function.contains('\0') {
+                    return Err(anyhow!(
+                        "field `bashcomp.rhai_function` cannot contain NUL bytes"
+                    ));
+                } else {
+                    Some(function.to_string())
+                }
+            }
+            None => None,
+        };
+
+        // Cross-field validation: rhai_function without rhai_script is invalid.
+        if rhai_function.is_some() && rhai_script.is_none() {
+            return Err(anyhow!(
+                "field `bashcomp.rhai_function` requires `bashcomp.rhai_script` to be set"
+            ));
+        }
+
         manifest.bashcomp = Some(BashcompConfig {
             disabled: bashcomp.disabled,
             passthrough: bashcomp.passthrough,
             script,
+            rhai_script,
+            rhai_function,
         });
     }
 
@@ -409,6 +468,8 @@ struct BashcompConfigInput {
     #[serde(default)]
     passthrough: bool,
     script: Option<String>,
+    rhai_script: Option<String>,
+    rhai_function: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -2335,5 +2396,193 @@ script = "completions/.."
         assert!(err
             .to_string()
             .contains("field `bashcomp.script` cannot end with `.` or `..` path components"));
+    }
+
+    // ------------------------------------------------------------------
+    // bashcomp.rhai_script / rhai_function tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn parses_bashcomp_rhai_script_field() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_script = "completions/custom.rhai"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert_eq!(
+            bashcomp.rhai_script,
+            Some(temp.path().join("completions/custom.rhai"))
+        );
+        assert!(bashcomp.rhai_function.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bashcomp_rhai_script_and_function() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_script = "completions/custom.rhai"
+rhai_function = "my_completer"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert_eq!(
+            bashcomp.rhai_script,
+            Some(temp.path().join("completions/custom.rhai"))
+        );
+        assert_eq!(bashcomp.rhai_function, Some("my_completer".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn bashcomp_rhai_script_blank_value_is_treated_as_none() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_script = "   "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(bashcomp.rhai_script.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn bashcomp_rhai_function_blank_value_is_treated_as_none() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("bc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_function = "   "
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert!(bashcomp.rhai_function.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_bashcomp_rhai_script_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            "exec = \"echo\"\n\n[bashcomp]\nrhai_script = \"comp\\u0000lete.rhai\"\n",
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.rhai_script` cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_rhai_script_dot_value() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_script = "."
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.rhai_script` cannot be `.` or `..`"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_rhai_script_trailing_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_script = "completions/"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.rhai_script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_rhai_function_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            "exec = \"echo\"\n\n[bashcomp]\nrhai_script = \"comp.rhai\"\nrhai_function = \"bad\\u0000func\"\n",
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.rhai_function` cannot contain NUL bytes"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_rhai_function_without_rhai_script() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[bashcomp]
+rhai_function = "complete"
+"#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("requires `bashcomp.rhai_script` to be set"));
     }
 }
