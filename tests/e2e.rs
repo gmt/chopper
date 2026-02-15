@@ -15229,6 +15229,75 @@ args = ["CACHEUNICODESRC01"]
 }
 
 #[test]
+fn cache_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry(
+) {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let alias_path = aliases_dir.join("nocache-unknown-unicode-crlf.toml");
+
+    fs::write(
+        &alias_path,
+        r#"
+exec = "echo"
+args = ["CACHEUNICODECRLFSRC"]
+"#,
+    )
+    .expect("write alias config");
+
+    let seeded = run_chopper(
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "seed"],
+    );
+    assert!(
+        seeded.status.success(),
+        "seed command failed: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let seeded_stdout = String::from_utf8_lossy(&seeded.stdout);
+    assert!(
+        seeded_stdout.contains("CACHEUNICODECRLFSRC seed"),
+        "{seeded_stdout}"
+    );
+
+    let cache_file = cache_home
+        .path()
+        .join("chopper/manifests/nocache-unknown-unicode-crlf.bin");
+    let mut cached_bytes = fs::read(&cache_file).expect("read cache bytes");
+    let replaced = replace_bytes_once(
+        &mut cached_bytes,
+        b"CACHEUNICODECRLFSRC",
+        b"CACHEUNICODECRLFHIT",
+    );
+    assert!(replaced, "expected to mutate cached payload");
+    fs::write(&cache_file, &cached_bytes).expect("persist mutated cache bytes");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["nocache-unknown-unicode-crlf", "runtime"],
+        [("CHOPPER_DISABLE_CACHE", "\r\nＴＲＵＥ\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CACHEUNICODECRLFHIT runtime"),
+        "CRLF-wrapped unicode unknown disable-flag values should keep cache enabled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CACHEUNICODECRLFSRC runtime"),
+        "CRLF-wrapped unicode unknown disable-flag values must not bypass cache: {stdout}"
+    );
+}
+
+#[test]
 fn cache_disable_flag_crlf_wrapped_unknown_value_keeps_cache_enabled_and_uses_existing_cache_entry()
 {
     let config_home = TempDir::new().expect("create config home");
@@ -16325,6 +16394,56 @@ script = "toggle-unknown-unicode.reconcile.rhai"
     assert!(
         stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode"),
         "unicode unknown disable-flag values should not disable reconcile: {stdout}"
+    );
+}
+
+#[test]
+fn reconcile_disable_flag_crlf_wrapped_unicode_unknown_value_keeps_reconcile_enabled() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode-crlf.reconcile.rhai"),
+        r#"
+fn reconcile(_ctx) {
+  #{
+    append_args: ["from_reconcile_unknown_unicode_crlf"]
+  }
+}
+"#,
+    )
+    .expect("write reconcile script");
+
+    fs::write(
+        aliases_dir.join("toggle-unknown-unicode-crlf.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_", "base"]
+
+[reconcile]
+script = "toggle-unknown-unicode-crlf.reconcile.rhai"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["toggle-unknown-unicode-crlf", "runtime"],
+        [("CHOPPER_DISABLE_RECONCILE", "\r\nＴＲＵＥ\r\n".to_string())],
+    );
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ARGS=base runtime from_reconcile_unknown_unicode_crlf"),
+        "CRLF-wrapped unicode unknown disable-flag values should not disable reconcile: {stdout}"
     );
 }
 
