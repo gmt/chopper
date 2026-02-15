@@ -87,7 +87,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 
 ## Suggested reading path
 
-1. Start at the root `README.md` for setup and common usage.
+1. Start at the root [`README.md`](../README.md) for setup and common usage.
 2. Use `quick-reference.md` for fast command lookup.
 3. Use `examples.md` for common copy/paste workflows.
 4. Use `troubleshooting.md` if something is not behaving as expected.
