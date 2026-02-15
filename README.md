@@ -161,5 +161,6 @@ Fast routing:
 - command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
 - copy/paste workflows: [`doc/examples.md`](doc/examples.md)
 - migration from legacy aliases: [`doc/migration.md`](doc/migration.md)
+- terminology lookup: [`doc/glossary.md`](doc/glossary.md)
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)

@@ -36,6 +36,9 @@ Use this directory when you need behavior details beyond quickstart usage.
 - [`faq.md`](faq.md)
   - short answers to common "where do I look?" questions
   - quick links to the right doc for each task
+- [`glossary.md`](glossary.md)
+  - concise definitions for recurring terms
+  - quick semantic lookup while reading deeper docs
 - [`troubleshooting.md`](troubleshooting.md)
   - common failure modes
   - quick diagnosis checklist
