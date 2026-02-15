@@ -77,6 +77,7 @@ Lookup order for alias `<name>`:
 ## Where to read more
 
 - `README.md` → concise overview + quickstart
+- `doc/templates/` → starter alias/reconcile files
 - `doc/examples.md` → copy/paste workflows
 - `doc/troubleshooting.md` → diagnosis checklists
 - `doc/operational-spec.md` → complete semantics and edge cases
