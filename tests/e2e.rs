@@ -15057,6 +15057,34 @@ FOO = "base"
 }
 
 #[test]
+fn toml_env_duplicate_keys_after_mixed_whitespace_trim_fail_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("dup-mixed-env.toml"),
+        r#"
+exec = "echo"
+
+[env]
+FOO = "base"
+"\n\t FOO \t\n" = "collision"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["dup-mixed-env"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("contains duplicate keys after trimming"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn toml_env_blank_key_after_trim_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -15075,6 +15103,33 @@ exec = "echo"
     .expect("write alias config");
 
     let output = run_chopper(&config_home, &cache_home, &["blank-env-key"]);
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("field `env` cannot contain empty keys"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn toml_env_blank_key_with_mixed_whitespace_after_trim_fails_validation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("blank-mixed-env-key.toml"),
+        r#"
+exec = "echo"
+
+[env]
+"\n\t  \t\n" = "value"
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["blank-mixed-env-key"]);
     assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
