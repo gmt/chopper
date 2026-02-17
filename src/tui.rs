@@ -41,7 +41,10 @@ fn run_tui_inner() -> anyhow::Result<()> {
                 let args = prompt("args (shell words, optional)")?;
                 let env_assignments =
                     prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
+                let env_remove = prompt("env remove keys (comma-separated, optional)")?;
                 let journal_ns = prompt("journal namespace (optional)")?;
+                let journal_stderr = prompt("journal stderr true/false (optional)")?;
+                let journal_identifier = prompt("journal identifier (optional)")?;
 
                 let mut raw = vec!["add".to_string(), alias, "--exec".to_string(), exec];
                 for arg in parse_shell_words(&args)? {
@@ -52,9 +55,21 @@ fn run_tui_inner() -> anyhow::Result<()> {
                     raw.push("--env".to_string());
                     raw.push(assignment);
                 }
+                for key in split_csv(&env_remove) {
+                    raw.push("--env-remove".to_string());
+                    raw.push(key);
+                }
                 if !journal_ns.trim().is_empty() {
                     raw.push("--journal-namespace".to_string());
                     raw.push(journal_ns.trim().to_string());
+                }
+                if !journal_stderr.trim().is_empty() {
+                    raw.push("--journal-stderr".to_string());
+                    raw.push(journal_stderr.trim().to_string());
+                }
+                if !journal_identifier.trim().is_empty() {
+                    raw.push("--journal-identifier".to_string());
+                    raw.push(journal_identifier.trim().to_string());
                 }
                 run_alias_action(raw)?;
             }
@@ -65,7 +80,10 @@ fn run_tui_inner() -> anyhow::Result<()> {
                 let env_assignments =
                     prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
                 let env_remove = prompt("env remove keys (comma-separated, optional)")?;
+                let journal_clear = prompt("clear journal? (yes/no, optional)")?;
                 let journal_ns = prompt("journal namespace (optional)")?;
+                let journal_stderr = prompt("journal stderr true/false (optional)")?;
+                let journal_identifier = prompt("journal identifier (optional)")?;
 
                 let mut raw = vec!["set".to_string(), alias];
                 if !exec.trim().is_empty() {
@@ -84,9 +102,20 @@ fn run_tui_inner() -> anyhow::Result<()> {
                     raw.push("--env-remove".to_string());
                     raw.push(key);
                 }
+                if is_yes(&journal_clear) {
+                    raw.push("--journal-clear".to_string());
+                }
                 if !journal_ns.trim().is_empty() {
                     raw.push("--journal-namespace".to_string());
                     raw.push(journal_ns.trim().to_string());
+                }
+                if !journal_stderr.trim().is_empty() {
+                    raw.push("--journal-stderr".to_string());
+                    raw.push(journal_stderr.trim().to_string());
+                }
+                if !journal_identifier.trim().is_empty() {
+                    raw.push("--journal-identifier".to_string());
+                    raw.push(journal_identifier.trim().to_string());
                 }
                 run_alias_action(raw)?;
             }
@@ -155,4 +184,38 @@ fn split_csv(input: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+fn is_yes(input: &str) -> bool {
+    matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes" | "true" | "1" | "on"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_yes, parse_shell_words, split_csv};
+
+    #[test]
+    fn split_csv_ignores_blanks() {
+        assert_eq!(
+            split_csv("A, B ,,C"),
+            vec!["A".to_string(), "B".to_string(), "C".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_shell_words_preserves_quoted_values() {
+        let parsed = parse_shell_words(r#"--flag "two words""#).expect("parse shell words");
+        assert_eq!(parsed, vec!["--flag".to_string(), "two words".to_string()]);
+    }
+
+    #[test]
+    fn yes_parser_accepts_common_truthy_values() {
+        assert!(is_yes("yes"));
+        assert!(is_yes("TRUE"));
+        assert!(!is_yes("no"));
+        assert!(!is_yes(""));
+    }
 }

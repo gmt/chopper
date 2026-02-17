@@ -21396,6 +21396,43 @@ fn alias_add_command_creates_runnable_alias() {
 }
 
 #[test]
+fn alias_list_command_reports_managed_aliases() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add_a = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "managed-a", "--exec", "echo", "--arg", "a"],
+    );
+    assert!(
+        add_a.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add_a.stderr)
+    );
+    let add_b = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "managed-b", "--exec", "echo", "--arg", "b"],
+    );
+    assert!(
+        add_b.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add_b.stderr)
+    );
+
+    let list = run_chopper(&config_home, &cache_home, &["--alias", "list"]);
+    assert!(
+        list.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(stdout.contains("managed-a"), "{stdout}");
+    assert!(stdout.contains("managed-b"), "{stdout}");
+}
+
+#[test]
 fn alias_set_command_updates_args_and_journal_fields() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
