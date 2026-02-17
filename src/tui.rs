@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 const SPLIT_MIN_WIDTH: u16 = 100;
 const SPLIT_MIN_HEIGHT: u16 = 24;
+const SPLIT_MAX_LEFT_WIDTH: u16 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TuiOptions {
@@ -461,7 +462,8 @@ fn render_modal_content(
 
 fn split_left_width(width: u16) -> u16 {
     let base = (width / 3).max(24);
-    base.min(width.saturating_sub(30))
+    let bounded = base.min(width.saturating_sub(30));
+    bounded.min(SPLIT_MAX_LEFT_WIDTH)
 }
 
 fn ensure_selection_visible(state: &mut AppState, list_height: usize) {
@@ -572,8 +574,8 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, ensure_selection_visible, layout_for_size, split_right_line,
-        status_hint_lines, AppState, LayoutKind, PaneFocus,
+        alias_viewport_rows, ensure_selection_visible, layout_for_size, split_left_width,
+        split_right_line, status_hint_lines, AppState, LayoutKind, PaneFocus,
     };
     use crate::tui_nvim::TmuxMode;
 
@@ -598,6 +600,13 @@ mod tests {
     fn status_bar_uses_two_lines_when_space_is_tight() {
         let lines = status_hint_lines(50, LayoutKind::Split);
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn split_left_width_is_bounded_for_pathological_terminal_sizes() {
+        assert_eq!(split_left_width(120), 40);
+        assert_eq!(split_left_width(600), 60);
+        assert_eq!(split_left_width(u16::MAX), 60);
     }
 
     #[test]
