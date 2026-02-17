@@ -188,4 +188,13 @@ mod tests {
         assert_eq!(text, "hello");
         assert!(fs_exists(file.to_str().expect("utf8 path")).expect("exists"));
     }
+
+    #[test]
+    fn write_text_rejects_nul_bytes() {
+        let temp = TempDir::new().expect("tempdir");
+        let file = temp.path().join("demo.txt");
+        let err = fs_write_text(file.to_str().expect("utf8 path"), "bad\0text")
+            .expect_err("NUL text should be rejected");
+        assert!(err.to_string().contains("text cannot contain NUL bytes"));
+    }
 }

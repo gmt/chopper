@@ -30,6 +30,17 @@ mod tests {
             proc_call.is_err(),
             "process APIs must be absent in completion profile"
         );
+        let web_call = engine.eval::<Map>("web_fetch(\"http://example.invalid\")");
+        assert!(
+            web_call.is_err(),
+            "web APIs must be absent in completion profile"
+        );
+        let soap_call = engine
+            .eval::<Map>("soap_call(\"http://example.invalid\", \"urn:test\", \"<Ping/>\", 1000)");
+        assert!(
+            soap_call.is_err(),
+            "soap APIs must be absent in completion profile"
+        );
     }
 
     #[test]

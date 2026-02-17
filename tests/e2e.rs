@@ -21403,7 +21403,15 @@ fn alias_list_command_reports_managed_aliases() {
     let add_a = run_chopper(
         &config_home,
         &cache_home,
-        &["--alias", "add", "managed-a", "--exec", "echo", "--arg", "a"],
+        &[
+            "--alias",
+            "add",
+            "managed-a",
+            "--exec",
+            "echo",
+            "--arg",
+            "a",
+        ],
     );
     assert!(
         add_a.status.success(),
@@ -21413,7 +21421,15 @@ fn alias_list_command_reports_managed_aliases() {
     let add_b = run_chopper(
         &config_home,
         &cache_home,
-        &["--alias", "add", "managed-b", "--exec", "echo", "--arg", "b"],
+        &[
+            "--alias",
+            "add",
+            "managed-b",
+            "--exec",
+            "echo",
+            "--arg",
+            "b",
+        ],
     );
     assert!(
         add_b.status.success(),

@@ -91,8 +91,8 @@ fn proc_run_internal(
 
 #[cfg(test)]
 mod tests {
-    use super::proc_run;
-    use rhai::{Array, Dynamic};
+    use super::{proc_run, proc_run_with};
+    use rhai::{Array, Dynamic, Map};
 
     #[test]
     fn process_run_captures_stdout() {
@@ -102,5 +102,20 @@ mod tests {
             .get("ok")
             .and_then(|v| v.clone().try_cast::<bool>())
             .unwrap_or(false));
+    }
+
+    #[test]
+    fn process_run_rejects_negative_timeout() {
+        let args: Array = vec![Dynamic::from("-c"), Dynamic::from("echo hello")];
+        let err = proc_run("sh", args, -1).expect_err("negative timeout should be rejected");
+        assert!(err.to_string().contains("timeout_ms cannot be negative"));
+    }
+
+    #[test]
+    fn process_run_with_rejects_nul_cwd() {
+        let args: Array = vec![Dynamic::from("-c"), Dynamic::from("echo hello")];
+        let err = proc_run_with("sh", args, Map::new(), "bad\0cwd".to_string(), 1_000)
+            .expect_err("cwd containing NUL should be rejected");
+        assert!(err.to_string().contains("cwd cannot contain NUL bytes"));
     }
 }

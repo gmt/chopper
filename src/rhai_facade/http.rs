@@ -1,5 +1,5 @@
 use crate::rhai_facade_validation::{
-    ensure_not_blank, map_to_strings, normalize_timeout_ms, RhaiResult,
+    ensure_no_nul, ensure_not_blank, map_to_strings, normalize_timeout_ms, RhaiResult,
 };
 use rhai::{Dynamic, Engine, Map};
 use std::time::Duration;
@@ -22,6 +22,7 @@ fn web_fetch_with(
 ) -> RhaiResult<Map> {
     let method = ensure_not_blank("method", method)?;
     let url = ensure_not_blank("url", url)?;
+    ensure_no_nul("body", &body)?;
     let headers = map_to_strings("headers", &headers)?;
     let timeout_ms = normalize_timeout_ms(timeout_ms)?.unwrap_or(10_000);
 
@@ -82,7 +83,8 @@ fn web_fetch_with(
 
 #[cfg(test)]
 mod tests {
-    use super::web_fetch;
+    use super::{web_fetch, web_fetch_with};
+    use rhai::Map;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -121,5 +123,18 @@ mod tests {
         assert!(ok, "expected successful response map: {out:?}");
         assert_eq!(status, 200);
         assert_eq!(body, "hello");
+    }
+
+    #[test]
+    fn web_fetch_with_rejects_body_with_nul_bytes() {
+        let err = web_fetch_with(
+            "POST",
+            "http://example.invalid",
+            Map::new(),
+            "bad\0body".to_string(),
+            1_000,
+        )
+        .expect_err("body containing NUL should be rejected");
+        assert!(err.to_string().contains("body cannot contain NUL bytes"));
     }
 }
