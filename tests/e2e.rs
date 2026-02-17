@@ -21360,3 +21360,214 @@ fn bashcomp_toml_with_disabled_field_round_trips_through_cache() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "disabled");
 }
+
+#[test]
+fn alias_add_command_creates_runnable_alias() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "managed",
+            "--exec",
+            "echo",
+            "--arg",
+            "hello-managed",
+            "--env",
+            "MANAGED_ENV=1",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "alias add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = run_chopper(&config_home, &cache_home, &["managed"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hello-managed"), "{stdout}");
+}
+
+#[test]
+fn alias_set_command_updates_args_and_journal_fields() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "managedset",
+            "--exec",
+            "echo",
+            "--arg",
+            "before",
+        ],
+    );
+    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+
+    let set = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "set",
+            "managedset",
+            "--arg",
+            "after",
+            "--journal-namespace",
+            "ops",
+            "--journal-stderr",
+            "false",
+            "--journal-identifier",
+            "managed-set",
+        ],
+    );
+    assert!(set.status.success(), "{}", String::from_utf8_lossy(&set.stderr));
+
+    let output = run_chopper(&config_home, &cache_home, &["managedset"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("after"), "{stdout}");
+
+    let get = run_chopper(&config_home, &cache_home, &["--alias", "get", "managedset"]);
+    assert!(get.status.success(), "{}", String::from_utf8_lossy(&get.stderr));
+    let get_stdout = String::from_utf8_lossy(&get.stdout);
+    assert!(get_stdout.contains("\"namespace\": \"ops\""), "{get_stdout}");
+}
+
+#[test]
+fn alias_remove_clean_deletes_config_and_disables_lookup() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "managedclean",
+            "--exec",
+            "echo",
+            "--arg",
+            "bye",
+        ],
+    );
+    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+
+    let config_path = config_home
+        .path()
+        .join("chopper/aliases/managedclean.toml");
+    assert!(config_path.exists());
+
+    let remove = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "remove", "managedclean", "--mode", "clean"],
+    );
+    assert!(
+        remove.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    assert!(!config_path.exists(), "config should be removed on clean remove");
+
+    let print_exec = run_chopper(&config_home, &cache_home, &["--print-exec", "managedclean"]);
+    assert!(
+        !print_exec.status.success(),
+        "clean removed alias should no longer resolve"
+    );
+}
+
+#[test]
+fn alias_remove_dirty_only_removes_symlink_and_can_reactivate() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let bin_dir = TempDir::new().expect("create bin dir");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "dirtyalias",
+            "--exec",
+            "echo",
+            "--arg",
+            "dirty-mode",
+        ],
+    );
+    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+
+    let symlink_path = bin_dir.path().join("dirtyalias");
+    symlink(chopper_bin(), &symlink_path).expect("create dirtyalias symlink");
+
+    let run_before = run_chopper_with(
+        symlink_path.clone(),
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(run_before.status.success());
+    assert!(
+        String::from_utf8_lossy(&run_before.stdout).contains("dirty-mode"),
+        "{}",
+        String::from_utf8_lossy(&run_before.stdout)
+    );
+
+    let remove = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "remove",
+            "dirtyalias",
+            "--mode",
+            "dirty",
+            "--symlink-path",
+            symlink_path
+                .to_str()
+                .expect("symlink path should be valid utf-8"),
+        ],
+    );
+    assert!(
+        remove.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    assert!(
+        !symlink_path.exists(),
+        "dirty remove should delete symlink only"
+    );
+
+    let config_path = config_home.path().join("chopper/aliases/dirtyalias.toml");
+    assert!(
+        config_path.exists(),
+        "dirty remove should preserve alias config"
+    );
+
+    symlink(chopper_bin(), &symlink_path).expect("recreate dirtyalias symlink");
+    let run_after = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &[],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(run_after.status.success());
+    assert!(
+        String::from_utf8_lossy(&run_after.stdout).contains("dirty-mode"),
+        "{}",
+        String::from_utf8_lossy(&run_after.stdout)
+    );
+}

@@ -1,3 +1,6 @@
+mod alias_admin;
+mod alias_admin_validation;
+mod alias_doc;
 mod alias_validation;
 mod arg_validation;
 mod cache;
@@ -20,7 +23,7 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
-fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     if let Some(override_path) = env_util::env_path_override("CHOPPER_CONFIG_DIR") {
         return override_path;
     }
@@ -30,7 +33,7 @@ fn config_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".chopper"))
 }
 
-fn find_config(name: &str) -> Option<PathBuf> {
+pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
     let cfg = config_dir();
     [
         cfg.join("aliases").join(format!("{name}.toml")),
@@ -78,6 +81,7 @@ enum BuiltinAction {
     PrintExec(String),
     PrintBashcompMode(String),
     Complete(Vec<String>),
+    Alias(Vec<String>),
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -117,6 +121,9 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     if flag == "--complete" && args.len() >= 3 {
         return Some(BuiltinAction::Complete(args[2..].to_vec()));
     }
+    if flag == "--alias" {
+        return Some(BuiltinAction::Alias(args[2..].to_vec()));
+    }
 
     None
 }
@@ -140,6 +147,7 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --print-bashcomp-mode <alias> Print bashcomp mode for alias");
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
+            println!("  --alias <subcommand> [...]   Alias lifecycle management");
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -170,6 +178,9 @@ fn run_builtin_action(action: BuiltinAction) {
         }
         BuiltinAction::Complete(raw_args) => {
             std::process::exit(run_complete_builtin(&raw_args));
+        }
+        BuiltinAction::Alias(raw_args) => {
+            std::process::exit(alias_admin::run_alias_action(&raw_args));
         }
     }
 }
