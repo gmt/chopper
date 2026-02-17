@@ -336,6 +336,7 @@ fn render_split_content(
 ) -> anyhow::Result<()> {
     let left_width = split_left_width(width) as usize;
     let right_width = width.saturating_sub(left_width as u16).saturating_sub(1) as usize;
+    let aliases_empty = state.aliases.is_empty();
     let selected_alias = state
         .aliases
         .get(state.selected)
@@ -344,7 +345,13 @@ fn render_split_content(
 
     for idx in 0..rows {
         let alias_row = state.scroll + idx;
-        let left_line = if let Some(alias) = state.aliases.get(alias_row) {
+        let left_line = if aliases_empty {
+            match idx {
+                0 => String::from("  aliases"),
+                1 => String::from("  (empty)"),
+                _ => String::new(),
+            }
+        } else if let Some(alias) = state.aliases.get(alias_row) {
             let selected = alias_row == state.selected;
             let pointer = if selected { ">" } else { " " };
             let focus = if selected && state.focus == PaneFocus::List {
@@ -357,26 +364,7 @@ fn render_split_content(
             String::new()
         };
 
-        let right_line = match idx {
-            0 => format!(
-                "{}{}",
-                if state.focus == PaneFocus::Inspector {
-                    "* "
-                } else {
-                    "  "
-                },
-                "Inspector"
-            ),
-            1 => format!("alias: {selected_alias}"),
-            2 => resolve_alias_path(selected_alias)
-                .map(|path| format!("path: {}", path.display()))
-                .unwrap_or_else(|| String::from("path: <unresolved>")),
-            4 if state.show_help => {
-                String::from("help: Enter edit-alias | e edit-reconcile | r refresh")
-            }
-            5 if state.show_help => String::from("help: arrows/jk move | h/l focus panes | q quit"),
-            _ => String::new(),
-        };
+        let right_line = split_right_line(idx, state, selected_alias, aliases_empty);
 
         let left_line = truncate_line(&left_line, left_width);
         let right_line = truncate_line(&right_line, right_width);
@@ -390,6 +378,40 @@ fn render_split_content(
     }
 
     Ok(())
+}
+
+fn split_right_line(
+    idx: usize,
+    state: &AppState,
+    selected_alias: &str,
+    aliases_empty: bool,
+) -> String {
+    match idx {
+        0 => format!(
+            "{}{}",
+            if state.focus == PaneFocus::Inspector {
+                "* "
+            } else {
+                "  "
+            },
+            "Inspector"
+        ),
+        1 => format!("alias: {selected_alias}"),
+        2 => resolve_alias_path(selected_alias)
+            .map(|path| format!("path: {}", path.display()))
+            .unwrap_or_else(|| String::from("path: <unresolved>")),
+        3 if aliases_empty => String::from("No aliases configured."),
+        // Keep both help lines visible when help is toggled, even in empty state.
+        4 if state.show_help => {
+            String::from("help: Enter edit-alias | e edit-reconcile | r refresh")
+        }
+        5 if state.show_help => String::from("help: arrows/jk move | h/l focus panes | q quit"),
+        4 if aliases_empty => String::from("Add one: chopper --alias add <name> --exec <cmd>"),
+        6 if aliases_empty && state.show_help => {
+            String::from("Add one: chopper --alias add <name> --exec <cmd>")
+        }
+        _ => String::new(),
+    }
 }
 
 fn render_modal_content(
@@ -550,8 +572,8 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, ensure_selection_visible, layout_for_size, status_hint_lines,
-        AppState, LayoutKind, PaneFocus,
+        alias_viewport_rows, ensure_selection_visible, layout_for_size, split_right_line,
+        status_hint_lines, AppState, LayoutKind, PaneFocus,
     };
     use crate::tui_nvim::TmuxMode;
 
@@ -603,5 +625,26 @@ mod tests {
         ensure_selection_visible(&mut state, alias_rows);
         assert_eq!(alias_rows, 4);
         assert_eq!(state.scroll, 6);
+    }
+
+    #[test]
+    fn split_right_line_keeps_both_help_lines_when_empty() {
+        let state = AppState {
+            aliases: Vec::new(),
+            selected: 0,
+            scroll: 0,
+            focus: PaneFocus::List,
+            layout: LayoutKind::Split,
+            show_help: true,
+            status_message: String::new(),
+            tmux_mode: TmuxMode::Off,
+        };
+
+        let help_1 = split_right_line(4, &state, "<none>", true);
+        let help_2 = split_right_line(5, &state, "<none>", true);
+        let add_one = split_right_line(6, &state, "<none>", true);
+        assert!(help_1.starts_with("help: Enter edit-alias"));
+        assert!(help_2.starts_with("help: arrows/jk move"));
+        assert!(add_one.starts_with("Add one: chopper --alias add"));
     }
 }
