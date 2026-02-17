@@ -16,6 +16,8 @@ Starter files for common setups:
   - example custom bash completion script for a chopper alias
 - `bashcomp-rhai.rhai`
   - example Rhai completion script for a chopper alias
+- `rhai-facade-demo.rhai`
+  - example reconcile script using platform/fs/process facade APIs
 
 Copy these into your config root (typically
 `${XDG_CONFIG_HOME:-~/.config}/chopper/aliases`) and adapt as needed.

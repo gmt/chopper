@@ -25,4 +25,3 @@ pub fn parse_bool_flag(value: &str, field: &str) -> Result<bool> {
         )),
     }
 }
-

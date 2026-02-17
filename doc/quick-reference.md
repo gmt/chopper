@@ -32,6 +32,16 @@ chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
+chopper --alias <list|get|add|set|remove> ...
+chopper --tui
+```
+
+Alias admin quick examples:
+
+```bash
+chopper --alias add demo --exec echo --arg hello
+chopper --alias set demo --arg "hello-updated" --env APP_ENV=dev
+chopper --alias remove demo --mode clean
 ```
 
 ---

@@ -21413,7 +21413,11 @@ fn alias_set_command_updates_args_and_journal_fields() {
             "before",
         ],
     );
-    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
 
     let set = run_chopper(
         &config_home,
@@ -21432,7 +21436,11 @@ fn alias_set_command_updates_args_and_journal_fields() {
             "managed-set",
         ],
     );
-    assert!(set.status.success(), "{}", String::from_utf8_lossy(&set.stderr));
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
 
     let output = run_chopper(&config_home, &cache_home, &["managedset"]);
     assert!(output.status.success());
@@ -21440,9 +21448,16 @@ fn alias_set_command_updates_args_and_journal_fields() {
     assert!(stdout.contains("after"), "{stdout}");
 
     let get = run_chopper(&config_home, &cache_home, &["--alias", "get", "managedset"]);
-    assert!(get.status.success(), "{}", String::from_utf8_lossy(&get.stderr));
+    assert!(
+        get.status.success(),
+        "{}",
+        String::from_utf8_lossy(&get.stderr)
+    );
     let get_stdout = String::from_utf8_lossy(&get.stdout);
-    assert!(get_stdout.contains("\"namespace\": \"ops\""), "{get_stdout}");
+    assert!(
+        get_stdout.contains("\"namespace\": \"ops\""),
+        "{get_stdout}"
+    );
 }
 
 #[test]
@@ -21463,11 +21478,13 @@ fn alias_remove_clean_deletes_config_and_disables_lookup() {
             "bye",
         ],
     );
-    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
 
-    let config_path = config_home
-        .path()
-        .join("chopper/aliases/managedclean.toml");
+    let config_path = config_home.path().join("chopper/aliases/managedclean.toml");
     assert!(config_path.exists());
 
     let remove = run_chopper(
@@ -21480,7 +21497,10 @@ fn alias_remove_clean_deletes_config_and_disables_lookup() {
         "{}",
         String::from_utf8_lossy(&remove.stderr)
     );
-    assert!(!config_path.exists(), "config should be removed on clean remove");
+    assert!(
+        !config_path.exists(),
+        "config should be removed on clean remove"
+    );
 
     let print_exec = run_chopper(&config_home, &cache_home, &["--print-exec", "managedclean"]);
     assert!(
@@ -21508,7 +21528,11 @@ fn alias_remove_dirty_only_removes_symlink_and_can_reactivate() {
             "dirty-mode",
         ],
     );
-    assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
 
     let symlink_path = bin_dir.path().join("dirtyalias");
     symlink(chopper_bin(), &symlink_path).expect("create dirtyalias symlink");
@@ -21580,7 +21604,10 @@ fn tui_requires_interactive_terminal() {
     let cache_home = TempDir::new().expect("create cache home");
 
     let output = run_chopper(&config_home, &cache_home, &["--tui"]);
-    assert!(!output.status.success(), "tui should fail without an interactive tty");
+    assert!(
+        !output.status.success(),
+        "tui should fail without an interactive tty"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("interactive terminal"), "{stderr}");
 }

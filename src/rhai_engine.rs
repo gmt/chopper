@@ -26,7 +26,10 @@ mod tests {
         assert!(stat.contains_key("exists"));
 
         let proc_call = engine.eval::<Map>("proc_run(\"sh\", [\"-c\", \"echo hi\"], 1000)");
-        assert!(proc_call.is_err(), "process APIs must be absent in completion profile");
+        assert!(
+            proc_call.is_err(),
+            "process APIs must be absent in completion profile"
+        );
     }
 
     #[test]
@@ -43,4 +46,3 @@ mod tests {
         assert!(proc_call.contains_key("ok"));
     }
 }
-

@@ -101,7 +101,9 @@ fn run_get(alias: &str) -> Result<()> {
 fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
     if raw_args.is_empty() {
         if is_add {
-            return Err(anyhow!("usage: chopper --alias add <alias> --exec <command> ..."));
+            return Err(anyhow!(
+                "usage: chopper --alias add <alias> --exec <command> ..."
+            ));
         }
         return Err(anyhow!("usage: chopper --alias set <alias> [options]"));
     }
@@ -124,7 +126,9 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
 
     if is_add {
         if crate::find_config(alias).is_some() {
-            return Err(anyhow!("alias `{alias}` already exists; use `set` to modify"));
+            return Err(anyhow!(
+                "alias `{alias}` already exists; use `set` to modify"
+            ));
         }
         let exec = mutation
             .exec
@@ -229,7 +233,9 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
                     "clean" => RemoveMode::Clean,
                     "dirty" => RemoveMode::Dirty,
                     other => {
-                        return Err(anyhow!("unknown remove mode `{other}`; expected clean or dirty"))
+                        return Err(anyhow!(
+                            "unknown remove mode `{other}`; expected clean or dirty"
+                        ))
                     }
                 };
                 idx += 2;
@@ -374,7 +380,10 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
     })
 }
 
-fn build_journal_from_mutation(mutation: &MutationInput, allow_none: bool) -> Result<Option<AliasJournalDoc>> {
+fn build_journal_from_mutation(
+    mutation: &MutationInput,
+    allow_none: bool,
+) -> Result<Option<AliasJournalDoc>> {
     if mutation.journal_clear {
         return Ok(None);
     }
@@ -385,7 +394,9 @@ fn build_journal_from_mutation(mutation: &MutationInput, allow_none: bool) -> Re
         if allow_none {
             return Ok(None);
         }
-        return Err(anyhow!("journal mutation requires a namespace or --journal-clear"));
+        return Err(anyhow!(
+            "journal mutation requires a namespace or --journal-clear"
+        ));
     }
     let namespace = mutation
         .journal_namespace
@@ -478,4 +489,3 @@ mod tests {
         assert_eq!(mutation.journal_identifier.as_deref(), Some("svc"));
     }
 }
-

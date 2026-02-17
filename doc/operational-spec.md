@@ -18,6 +18,9 @@ For a concise overview and quickstart, see the root `README.md`.
   - [Environment merge order](#environment-merge-order)
 - [Journald namespace behavior](#journald-namespace-behavior)
 - [Optional runtime reconciliation (Rhai)](#optional-runtime-reconciliation-rhai)
+- [Alias administration CLI](#alias-administration-cli)
+- [Rhai facade APIs](#rhai-facade-apis)
+- [Terminal UI](#terminal-ui)
 - [Bash completion](#bash-completion)
 - [Caching](#caching)
 
@@ -55,6 +58,8 @@ chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
+chopper --alias <list|get|add|set|remove> ...
+chopper --tui
 ```
 
 A binary named `chopper.exe`, `chopper.com`, `chopper.cmd`, or `chopper.bat`
@@ -317,6 +322,58 @@ Examples that **leave reconcile enabled**:
 - `CHOPPER_DISABLE_RECONCILE="\r\nＴrue\r\n"` (wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\u3000Ｔrue\u3000"` (ideographic-space wrapped mixed-script lookalike)
 - `CHOPPER_DISABLE_RECONCILE="\r\n\u00A0Ｔrue\u00A0\r\n"` (CRLF + NBSP-wrapped mixed-script lookalike)
+
+---
+
+## Alias administration CLI
+
+`chopper` includes an alias lifecycle command family:
+
+```bash
+chopper --alias list
+chopper --alias get <alias>
+chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...]
+chopper --alias set <alias> [--exec <command>] [--arg <arg> ...] [--env KEY=VALUE ...]
+chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]
+```
+
+Key semantics:
+
+- `add` writes TOML alias configs under `aliases/<alias>.toml`.
+- `set` updates existing TOML alias configs.
+- `remove --mode clean` removes config + cache and attempts symlink cleanup.
+- `remove --mode dirty` removes symlink only, preserving config for reactivation.
+
+---
+
+## Rhai facade APIs
+
+Rhai scripts can call facade functions for higher-level automation intent:
+
+- platform introspection and executable intent checks
+- cap-std based fs inspection/manipulation
+- duct based process execution with timeout support
+- curl-ish web fetch helpers
+- soap envelope + call helpers
+
+See [`rhai-facade-reference.md`](rhai-facade-reference.md) for full catalog.
+
+Facade exposure is profile-aware:
+
+- reconcile profile: full facade set
+- completion profile: safe subset only (platform + read-only fs helpers)
+
+---
+
+## Terminal UI
+
+`chopper --tui` opens an interactive terminal workflow for alias management and
+Rhai editing.
+
+The TUI requires an interactive terminal. Rhai editing uses `nvim` or `vim`
+and generates a completion dictionary from the exposed facade API names.
+
+See [`tui-reference.md`](tui-reference.md) for full workflow details.
 
 ---
 

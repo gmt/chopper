@@ -22,4 +22,3 @@ pub fn register(engine: &mut Engine, profile: RhaiEngineProfile) {
         }
     }
 }
-

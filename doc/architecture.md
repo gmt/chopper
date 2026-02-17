@@ -43,6 +43,12 @@ High-level map of the runtime flow and main modules.
   - optional Rhai script execution
   - reconcile patch extraction/validation
   - runtime arg/env patch application
+- `src/rhai_engine.rs` / `src/rhai_facade/*`
+  - shared Rhai engine construction by profile (`Reconcile` vs `Completion`)
+  - high-level facade registration (platform/fs/process/web/soap)
+  - completion profile exposes safe subset only
+- `src/rhai_api_catalog.rs`
+  - authoritative API name catalog used for editor completion bootstrap
 
 - `src/journal.rs` / journal execution path
   - `systemd-cat --namespace=...` integration
@@ -62,6 +68,12 @@ High-level map of the runtime flow and main modules.
   - Rhai-based completion engine for `--complete` introspection
   - builds context map, calls Rhai function, returns candidate strings
   - opt-in per-alias (requires `bashcomp.rhai_script` config)
+- `src/alias_admin.rs` / `src/alias_doc.rs`
+  - alias lifecycle operations (`--alias list|get|add|set|remove`)
+  - mutation parsing/validation and TOML persistence for managed aliases
+- `src/tui.rs` / `src/tui_nvim.rs`
+  - interactive terminal UI (`--tui`) for alias management
+  - `(n)vim` launch/bootstrap and Rhai API completion dictionary generation
 
 - validation helpers
   - `alias_validation.rs`

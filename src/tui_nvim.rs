@@ -124,4 +124,3 @@ mod tests {
         assert!(bootstrap.contains("nvim-treesitter"));
     }
 }
-

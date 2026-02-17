@@ -122,4 +122,3 @@ pub fn save_alias_doc(path: &Path, doc: &AliasDoc) -> Result<()> {
         .with_context(|| format!("failed to write alias config {}", path.display()))?;
     Ok(())
 }
-

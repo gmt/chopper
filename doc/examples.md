@@ -124,3 +124,59 @@ Notes:
 CHOPPER_CONFIG_DIR=/tmp/chopper-cfg chopper myalias
 CHOPPER_CACHE_DIR=/tmp/chopper-cache chopper myalias
 ```
+
+---
+
+## 9) Alias admin CLI
+
+```bash
+chopper --alias add demo --exec echo --arg hello
+chopper --alias set demo --arg hello-updated --env APP_ENV=dev
+chopper --alias get demo
+chopper --alias remove demo --mode clean
+```
+
+Dirty remove (symlink-only):
+
+```bash
+chopper --alias remove demo --mode dirty --symlink-path /usr/local/bin/demo
+```
+
+---
+
+## 10) TUI workflow
+
+```bash
+chopper --tui
+```
+
+Then use:
+
+- `a` add alias
+- `s` set alias
+- `r` remove alias
+- `e` edit Rhai script in `(n)vim`
+
+---
+
+## 11) Rhai facade usage in reconcile script
+
+```rhai
+fn reconcile(ctx) {
+  let out = #{};
+
+  let p = platform_info();
+  out["set_env"] = #{ "FAC_OS": p["os"] };
+
+  if fs_exists("runtime-args.txt") {
+    out["append_args"] = [fs_read_text("runtime-args.txt").trim()];
+  }
+
+  let probe = proc_run("sh", ["-c", "echo probe"], 1000);
+  if probe["ok"] {
+    out["set_env"]["FAC_PROBE"] = "ok";
+  }
+
+  out
+}
+```

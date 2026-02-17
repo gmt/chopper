@@ -31,7 +31,9 @@ fn web_fetch_with(
         .build();
     let agent: ureq::Agent = config.into();
 
-    let mut request = http::Request::builder().method(method.as_str()).uri(url.as_str());
+    let mut request = http::Request::builder()
+        .method(method.as_str())
+        .uri(url.as_str());
     for (key, value) in headers {
         request = request.header(key, value);
     }
@@ -121,4 +123,3 @@ mod tests {
         assert_eq!(body, "hello");
     }
 }
-

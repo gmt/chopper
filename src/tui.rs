@@ -39,15 +39,11 @@ fn run_tui_inner() -> anyhow::Result<()> {
                 let alias = prompt("alias name")?;
                 let exec = prompt("exec command")?;
                 let args = prompt("args (shell words, optional)")?;
-                let env_assignments = prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
+                let env_assignments =
+                    prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
                 let journal_ns = prompt("journal namespace (optional)")?;
 
-                let mut raw = vec![
-                    "add".to_string(),
-                    alias,
-                    "--exec".to_string(),
-                    exec,
-                ];
+                let mut raw = vec!["add".to_string(), alias, "--exec".to_string(), exec];
                 for arg in parse_shell_words(&args)? {
                     raw.push("--arg".to_string());
                     raw.push(arg);
@@ -66,7 +62,8 @@ fn run_tui_inner() -> anyhow::Result<()> {
                 let alias = prompt("alias name")?;
                 let exec = prompt("new exec (optional)")?;
                 let args = prompt("new args (shell words, optional)")?;
-                let env_assignments = prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
+                let env_assignments =
+                    prompt("env assignments KEY=VALUE (comma-separated, optional)")?;
                 let env_remove = prompt("env remove keys (comma-separated, optional)")?;
                 let journal_ns = prompt("journal namespace (optional)")?;
 
@@ -112,7 +109,10 @@ fn run_tui_inner() -> anyhow::Result<()> {
             "e" => {
                 let input = prompt("Rhai script path")?;
                 let path = PathBuf::from(input.trim());
-                crate::tui_nvim::open_rhai_editor(&path, &crate::rhai_api_catalog::exported_api_names())?;
+                crate::tui_nvim::open_rhai_editor(
+                    &path,
+                    &crate::rhai_api_catalog::exported_api_names(),
+                )?;
             }
             "q" => break,
             _ => println!("{}", "unknown command".red()),
@@ -156,4 +156,3 @@ fn split_csv(input: &str) -> Vec<String> {
         .map(ToString::to_string)
         .collect()
 }
-

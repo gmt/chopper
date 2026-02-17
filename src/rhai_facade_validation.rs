@@ -116,4 +116,3 @@ mod tests {
         assert!(map_to_strings("headers", &map).is_err());
     }
 }
-

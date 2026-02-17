@@ -11,15 +11,15 @@ mod executor;
 mod journal_validation;
 mod manifest;
 mod parser;
+mod reconcile;
 mod rhai_api_catalog;
 mod rhai_engine;
 mod rhai_facade;
 mod rhai_facade_validation;
-mod reconcile;
-mod tui;
-mod tui_nvim;
 #[cfg(test)]
 mod test_support;
+mod tui;
+mod tui_nvim;
 
 use anyhow::{anyhow, Result};
 use std::env;

@@ -8,6 +8,7 @@ It is designed for:
 - explicit alias-local args/env config
 - optional stderr routing into a journald namespace
 - optional runtime reconciliation via Rhai
+- high-level Rhai facade APIs for platform/files/process/web automation
 - automatic manifest caching (no manual cache management needed)
 
 ---
@@ -134,6 +135,22 @@ chopper --help
 chopper --version
 chopper --print-config-dir
 chopper --print-cache-dir
+chopper --bashcomp
+chopper --list-aliases
+chopper --print-exec <alias>
+chopper --print-bashcomp-mode <alias>
+chopper --complete <alias> <cword> [--] <words...>
+chopper --alias <list|get|add|set|remove> ...
+chopper --tui
+```
+
+Alias management examples:
+
+```bash
+chopper --alias add demo --exec echo --arg "hello"
+chopper --alias set demo --arg "hello-updated" --env APP_ENV=dev
+chopper --alias get demo
+chopper --alias remove demo --mode clean
 ```
 
 ---
@@ -185,6 +202,8 @@ Fast routing:
 
 - command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
 - cli command details: [`doc/cli-reference.md`](doc/cli-reference.md)
+- Rhai facade API catalog: [`doc/rhai-facade-reference.md`](doc/rhai-facade-reference.md)
+- TUI usage: [`doc/tui-reference.md`](doc/tui-reference.md)
 - config field reference: [`doc/config-reference.md`](doc/config-reference.md)
 - copy/paste workflows: [`doc/examples.md`](doc/examples.md)
 - migration from legacy aliases: [`doc/migration.md`](doc/migration.md)

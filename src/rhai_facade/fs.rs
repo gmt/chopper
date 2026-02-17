@@ -1,4 +1,4 @@
-use crate::rhai_facade_validation::{ensure_path, ensure_no_nul, RhaiResult};
+use crate::rhai_facade_validation::{ensure_no_nul, ensure_path, RhaiResult};
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 use rhai::{Array, Dynamic, Engine, ImmutableString, Map};
@@ -189,4 +189,3 @@ mod tests {
         assert!(fs_exists(file.to_str().expect("utf8 path")).expect("exists"));
     }
 }
-

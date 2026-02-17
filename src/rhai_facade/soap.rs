@@ -1,4 +1,6 @@
-use crate::rhai_facade_validation::{ensure_no_nul, ensure_not_blank, normalize_timeout_ms, RhaiResult};
+use crate::rhai_facade_validation::{
+    ensure_no_nul, ensure_not_blank, normalize_timeout_ms, RhaiResult,
+};
 use quick_xml::events::Event;
 use rhai::{Dynamic, Engine, Map};
 use std::time::Duration;
@@ -170,4 +172,3 @@ mod tests {
         assert_eq!(fault_text, "denied");
     }
 }
-

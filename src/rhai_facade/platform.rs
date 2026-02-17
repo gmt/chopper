@@ -10,7 +10,10 @@ pub fn register(engine: &mut Engine) {
         "can_execute_without_confirmation",
         can_execute_without_confirmation,
     );
-    engine.register_fn("can_execute_with_confirmation", can_execute_with_confirmation);
+    engine.register_fn(
+        "can_execute_with_confirmation",
+        can_execute_with_confirmation,
+    );
 }
 
 fn platform_info() -> Map {
@@ -74,7 +77,10 @@ fn executable_intent(path: &str) -> RhaiResult<Map> {
         "can_execute_without_confirmation".into(),
         Dynamic::from(can_without),
     );
-    out.insert("can_execute_with_confirmation".into(), Dynamic::from(can_with));
+    out.insert(
+        "can_execute_with_confirmation".into(),
+        Dynamic::from(can_with),
+    );
     out.insert(
         "requires_user_confirmation".into(),
         Dynamic::from(can_with && !can_without),
@@ -89,7 +95,10 @@ fn can_execute_without_confirmation(path: &str) -> RhaiResult<bool> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(format!("failed to inspect {}: {err}", path.display()).into()),
     };
-    Ok(can_execute_without_confirmation_impl(&path, metadata.as_ref()))
+    Ok(can_execute_without_confirmation_impl(
+        &path,
+        metadata.as_ref(),
+    ))
 }
 
 fn can_execute_with_confirmation(path: &str) -> RhaiResult<bool> {
@@ -122,7 +131,7 @@ fn can_execute_without_confirmation_impl(
         if !metadata.is_file() {
             return false;
         }
-        return metadata.permissions().mode() & 0o111 != 0;
+        metadata.permissions().mode() & 0o111 != 0
     }
 
     #[cfg(windows)]
@@ -145,4 +154,3 @@ fn can_execute_without_confirmation_impl(
         metadata.is_some_and(|m| m.is_file())
     }
 }
-
