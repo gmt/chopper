@@ -276,9 +276,34 @@ where
     terminal::disable_raw_mode().context("failed to disable raw mode")?;
     execute!(io::stdout(), cursor::Show).context("failed to show cursor")?;
     let run_result = run();
-    execute!(io::stdout(), cursor::Hide).context("failed to hide cursor")?;
-    terminal::enable_raw_mode().context("failed to re-enable raw mode")?;
-    run_result
+    let hide_cursor_result = execute!(io::stdout(), cursor::Hide).context("failed to hide cursor");
+    let enable_raw_mode_result =
+        terminal::enable_raw_mode().context("failed to re-enable raw mode");
+    finalize_subprocess_pause_result(run_result, hide_cursor_result, enable_raw_mode_result)
+}
+
+fn finalize_subprocess_pause_result(
+    run_result: anyhow::Result<()>,
+    hide_cursor_result: anyhow::Result<()>,
+    enable_raw_mode_result: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let mut cleanup_errors = Vec::new();
+    if let Err(err) = hide_cursor_result {
+        cleanup_errors.push(format!("failed to hide cursor: {err:#}"));
+    }
+    if let Err(err) = enable_raw_mode_result {
+        cleanup_errors.push(format!("failed to re-enable raw mode: {err:#}"));
+    }
+
+    match run_result {
+        Ok(()) if cleanup_errors.is_empty() => Ok(()),
+        Ok(()) => anyhow::bail!("terminal cleanup failed: {}", cleanup_errors.join("; ")),
+        Err(err) if cleanup_errors.is_empty() => Err(err),
+        Err(err) => anyhow::bail!(
+            "{err}; terminal cleanup also failed: {}",
+            cleanup_errors.join("; ")
+        ),
+    }
 }
 
 fn render(
@@ -574,8 +599,9 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, ensure_selection_visible, layout_for_size, split_left_width,
-        split_right_line, status_hint_lines, AppState, LayoutKind, PaneFocus,
+        alias_viewport_rows, ensure_selection_visible, finalize_subprocess_pause_result,
+        layout_for_size, split_left_width, split_right_line, status_hint_lines, AppState,
+        LayoutKind, PaneFocus,
     };
     use crate::tui_nvim::TmuxMode;
 
@@ -655,5 +681,35 @@ mod tests {
         assert!(help_1.starts_with("help: Enter edit-alias"));
         assert!(help_2.starts_with("help: arrows/jk move"));
         assert!(add_one.starts_with("Add one: chopper --alias add"));
+    }
+
+    #[test]
+    fn pause_result_preserves_subprocess_error_when_cleanup_fails() {
+        let err = finalize_subprocess_pause_result(
+            Err(anyhow::anyhow!("editor launch failed")),
+            Err(anyhow::anyhow!("hide cursor cleanup failed")),
+            Err(anyhow::anyhow!("enable raw mode cleanup failed")),
+        )
+        .expect_err("expected subprocess failure to be returned");
+
+        let message = err.to_string();
+        assert!(message.starts_with("editor launch failed"));
+        assert!(message.contains("terminal cleanup also failed"));
+        assert!(message.contains("hide cursor cleanup failed"));
+        assert!(message.contains("enable raw mode cleanup failed"));
+    }
+
+    #[test]
+    fn pause_result_returns_cleanup_error_when_subprocess_succeeds() {
+        let err = finalize_subprocess_pause_result(
+            Ok(()),
+            Err(anyhow::anyhow!("hide cursor cleanup failed")),
+            Ok(()),
+        )
+        .expect_err("expected cleanup failure");
+
+        let message = err.to_string();
+        assert!(message.starts_with("terminal cleanup failed"));
+        assert!(message.contains("hide cursor cleanup failed"));
     }
 }
