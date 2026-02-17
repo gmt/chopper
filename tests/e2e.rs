@@ -21326,6 +21326,8 @@ fn help_output_includes_new_builtins() {
     assert!(stdout.contains("--list-aliases"), "{stdout}");
     assert!(stdout.contains("--print-exec"), "{stdout}");
     assert!(stdout.contains("--print-bashcomp-mode"), "{stdout}");
+    assert!(stdout.contains("--alias"), "{stdout}");
+    assert!(stdout.contains("--tui"), "{stdout}");
 }
 
 #[test]
@@ -21570,4 +21572,15 @@ fn alias_remove_dirty_only_removes_symlink_and_can_reactivate() {
         "{}",
         String::from_utf8_lossy(&run_after.stdout)
     );
+}
+
+#[test]
+fn tui_requires_interactive_terminal() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--tui"]);
+    assert!(!output.status.success(), "tui should fail without an interactive tty");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("interactive terminal"), "{stderr}");
 }

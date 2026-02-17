@@ -16,6 +16,8 @@ mod rhai_engine;
 mod rhai_facade;
 mod rhai_facade_validation;
 mod reconcile;
+mod tui;
+mod tui_nvim;
 #[cfg(test)]
 mod test_support;
 
@@ -82,6 +84,7 @@ enum BuiltinAction {
     PrintBashcompMode(String),
     Complete(Vec<String>),
     Alias(Vec<String>),
+    Tui,
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -103,6 +106,7 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
             "--print-cache-dir" => return Some(BuiltinAction::PrintCacheDir),
             "--bashcomp" => return Some(BuiltinAction::Bashcomp),
             "--list-aliases" => return Some(BuiltinAction::ListAliases),
+            "--tui" => return Some(BuiltinAction::Tui),
             _ => {}
         }
     }
@@ -148,6 +152,7 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
             println!("  --alias <subcommand> [...]   Alias lifecycle management");
+            println!("  --tui                         Open interactive terminal UI");
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -181,6 +186,9 @@ fn run_builtin_action(action: BuiltinAction) {
         }
         BuiltinAction::Alias(raw_args) => {
             std::process::exit(alias_admin::run_alias_action(&raw_args));
+        }
+        BuiltinAction::Tui => {
+            std::process::exit(tui::run_tui());
         }
     }
 }
@@ -2196,6 +2204,18 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--list-aliases".into()]),
             Some(BuiltinAction::ListAliases)
+        );
+    }
+
+    #[test]
+    fn detects_tui_action_for_direct_chopper_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--tui".into()]),
+            Some(BuiltinAction::Tui)
+        );
+        assert_eq!(
+            detect_builtin_action(&["myalias".into(), "--tui".into()]),
+            None
         );
     }
 
