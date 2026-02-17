@@ -1,3 +1,6 @@
+mod alias_admin;
+mod alias_admin_validation;
+mod alias_doc;
 mod alias_validation;
 mod arg_validation;
 mod cache;
@@ -9,14 +12,20 @@ mod journal_validation;
 mod manifest;
 mod parser;
 mod reconcile;
+mod rhai_api_catalog;
+mod rhai_engine;
+mod rhai_facade;
+mod rhai_facade_validation;
 #[cfg(test)]
 mod test_support;
+mod tui;
+mod tui_nvim;
 
 use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
-fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     if let Some(override_path) = env_util::env_path_override("CHOPPER_CONFIG_DIR") {
         return override_path;
     }
@@ -26,7 +35,7 @@ fn config_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".chopper"))
 }
 
-fn find_config(name: &str) -> Option<PathBuf> {
+pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
     let cfg = config_dir();
     [
         cfg.join("aliases").join(format!("{name}.toml")),
@@ -74,6 +83,8 @@ enum BuiltinAction {
     PrintExec(String),
     PrintBashcompMode(String),
     Complete(Vec<String>),
+    Alias(Vec<String>),
+    Tui,
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -95,6 +106,7 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
             "--print-cache-dir" => return Some(BuiltinAction::PrintCacheDir),
             "--bashcomp" => return Some(BuiltinAction::Bashcomp),
             "--list-aliases" => return Some(BuiltinAction::ListAliases),
+            "--tui" => return Some(BuiltinAction::Tui),
             _ => {}
         }
     }
@@ -112,6 +124,9 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     // Variable-length builtins (chopper --complete <alias> <cword> [--] <words...>)
     if flag == "--complete" && args.len() >= 3 {
         return Some(BuiltinAction::Complete(args[2..].to_vec()));
+    }
+    if flag == "--alias" {
+        return Some(BuiltinAction::Alias(args[2..].to_vec()));
     }
 
     None
@@ -136,6 +151,8 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --print-bashcomp-mode <alias> Print bashcomp mode for alias");
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
+            println!("  --alias <subcommand> [...]   Alias lifecycle management");
+            println!("  --tui                         Open interactive terminal UI");
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -166,6 +183,12 @@ fn run_builtin_action(action: BuiltinAction) {
         }
         BuiltinAction::Complete(raw_args) => {
             std::process::exit(run_complete_builtin(&raw_args));
+        }
+        BuiltinAction::Alias(raw_args) => {
+            std::process::exit(alias_admin::run_alias_action(&raw_args));
+        }
+        BuiltinAction::Tui => {
+            std::process::exit(tui::run_tui());
         }
     }
 }
@@ -2181,6 +2204,18 @@ mod tests {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--list-aliases".into()]),
             Some(BuiltinAction::ListAliases)
+        );
+    }
+
+    #[test]
+    fn detects_tui_action_for_direct_chopper_invocation() {
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--tui".into()]),
+            Some(BuiltinAction::Tui)
+        );
+        assert_eq!(
+            detect_builtin_action(&["myalias".into(), "--tui".into()]),
+            None
         );
     }
 

@@ -23,6 +23,8 @@ Use this directory when you need behavior details beyond quickstart usage.
 - **one command quickly** → [`quick-reference.md`](quick-reference.md)
 - **a working example to copy** → [`examples.md`](examples.md)
 - **starter files to drop in** → [`templates/`](templates)
+- **Rhai facade function catalog** → [`rhai-facade-reference.md`](rhai-facade-reference.md)
+- **interactive TUI usage** → [`tui-reference.md`](tui-reference.md)
 - **migration steps from legacy aliases** → [`migration.md`](migration.md)
 - **help diagnosing a failure** → [`troubleshooting.md`](troubleshooting.md)
 - **current completion snapshot** → [`project-status.md`](project-status.md)
@@ -64,6 +66,12 @@ Use this directory when you need behavior details beyond quickstart usage.
 - [`templates/`](templates)
   - starter files for common alias/reconcile setups
   - quick copy source for first working configs
+- [`rhai-facade-reference.md`](rhai-facade-reference.md)
+  - facade function catalog for reconcile/completion scripts
+  - portability-oriented API intent and examples
+- [`tui-reference.md`](tui-reference.md)
+  - interactive UI commands and workflows
+  - `(n)vim` integration behavior and fallbacks
 - [`quick-reference.md`](quick-reference.md)
   - compact command lookup
   - env override/toggle cheat sheet

@@ -76,6 +76,16 @@ pub fn load(alias: &str, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     None
 }
 
+pub fn prune_alias(alias: &str) {
+    let primary_path = cache_path(alias);
+    delete_cache_file_best_effort(&primary_path);
+
+    let legacy_path = legacy_cache_path(alias);
+    if legacy_path != primary_path {
+        delete_cache_file_best_effort(&legacy_path);
+    }
+}
+
 fn load_from_path(path: &Path, fingerprint: &SourceFingerprint) -> Option<Manifest> {
     let bytes = fs::read(path).ok()?;
     let entry: CacheEntry = match bincode::deserialize(&bytes) {

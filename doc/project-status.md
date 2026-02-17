@@ -15,6 +15,9 @@ Current implementation status against the DSL implementation goals.
 - ✅ Automatic manifest caching + invalidation
 - ✅ Cache corruption/staleness self-healing behavior
 - ✅ Direct + symlink invocation support
+- ✅ Rhai facade APIs (platform, cap-std fs, duct process, web fetch, SOAP helper)
+- ✅ Alias admin CLI (`--alias list|get|add|set|remove`)
+- ✅ Interactive TUI (`--tui`) with `(n)vim` Rhai editor integration
 
 ---
 
@@ -27,6 +30,7 @@ Current implementation status against the DSL implementation goals.
 - ✅ Disable-flag truthy/falsey/unknown token matrix covered end-to-end
 - ✅ ASCII-only truthy token matching behavior covered (unicode lookalikes stay unknown)
 - ✅ Broad wrapper/invocation-shape e2e coverage for built-ins and routing
+- ✅ Alias lifecycle e2e coverage (add/set/remove clean/remove dirty)
 
 ---
 

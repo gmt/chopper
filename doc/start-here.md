@@ -28,6 +28,21 @@ If you're not sure where to begin, use this page.
 
 ---
 
+## I want to write Rhai scripts with facade APIs
+
+1. Read [`rhai-facade-reference.md`](rhai-facade-reference.md).
+2. Start from [`templates/rhai-facade-demo.rhai`](templates/rhai-facade-demo.rhai).
+3. Use [`examples.md`](examples.md) for reconcile integration snippets.
+
+---
+
+## I want an interactive UI
+
+1. Launch `chopper --tui`.
+2. Read [`tui-reference.md`](tui-reference.md) for key workflows and editor behavior.
+
+---
+
 ## I’m developing the codebase
 
 1. Read [`architecture.md`](architecture.md) for module/runtime flow.

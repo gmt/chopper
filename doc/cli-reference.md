@@ -38,6 +38,8 @@ chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
+chopper --alias <list|get|add|set|remove> ...
+chopper --tui
 ```
 
 ### Bash completion
@@ -86,6 +88,32 @@ Runs Rhai-based completion for the alias. `<cword>` is the 0-based index
 of the word being completed. `<words...>` is the full COMP_WORDS array.
 Prints one completion candidate per line. Exits 0 on success, 1 on error.
 Requires `bashcomp.rhai_script` to be configured for the alias.
+
+### Alias administration
+
+```bash
+chopper --alias list
+chopper --alias get <alias>
+chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...]
+chopper --alias set <alias> [--exec <command>] [--arg <arg> ...] [--env KEY=VALUE ...]
+chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]
+```
+
+Notes:
+
+- `add` creates `aliases/<alias>.toml`.
+- `set` updates TOML alias documents.
+- `remove --mode clean` removes config + cache and best-effort symlink.
+- `remove --mode dirty` removes symlink only (config remains; relinking reactivates).
+
+### Interactive TUI
+
+```bash
+chopper --tui
+```
+
+Opens an interactive terminal UI for alias lifecycle operations and Rhai editing.
+Requires an interactive TTY.
 
 ---
 
