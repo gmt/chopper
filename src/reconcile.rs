@@ -2,8 +2,9 @@ use crate::arg_validation::{self, ArgViolation};
 use crate::env_util;
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::manifest::{Manifest, RuntimePatch};
+use crate::rhai_engine::{build_engine, RhaiEngineProfile};
 use anyhow::{anyhow, Context, Result};
-use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope};
+use rhai::{Array, Dynamic, ImmutableString, Map, Scope};
 use std::collections::{HashMap, HashSet};
 use std::env;
 
@@ -19,7 +20,7 @@ pub fn maybe_reconcile(
         return Ok(None);
     };
 
-    let engine = Engine::new();
+    let engine = build_engine(RhaiEngineProfile::Reconcile);
     let mut scope = Scope::new();
     let ast = engine
         .compile_file(reconcile.script.clone())

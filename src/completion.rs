@@ -1,6 +1,7 @@
 use crate::manifest::Manifest;
+use crate::rhai_engine::{build_engine, RhaiEngineProfile};
 use anyhow::{anyhow, Context, Result};
-use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope};
+use rhai::{Array, Dynamic, ImmutableString, Map, Scope};
 use std::collections::HashMap;
 
 /// Run the Rhai completion function for an alias and return candidate strings.
@@ -27,7 +28,7 @@ pub fn run_complete(manifest: &Manifest, words: &[String], cword: usize) -> Resu
 
     let function_name = bashcomp.rhai_function.as_deref().unwrap_or("complete");
 
-    let engine = Engine::new();
+    let engine = build_engine(RhaiEngineProfile::Completion);
     let mut scope = Scope::new();
     let ast = engine.compile_file(rhai_script.clone()).with_context(|| {
         format!(

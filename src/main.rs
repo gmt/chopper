@@ -8,6 +8,9 @@ mod executor;
 mod journal_validation;
 mod manifest;
 mod parser;
+mod rhai_api_catalog;
+mod rhai_engine;
+mod rhai_facade;
 mod reconcile;
 #[cfg(test)]
 mod test_support;
