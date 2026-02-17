@@ -11,6 +11,7 @@ mod parser;
 mod rhai_api_catalog;
 mod rhai_engine;
 mod rhai_facade;
+mod rhai_facade_validation;
 mod reconcile;
 #[cfg(test)]
 mod test_support;

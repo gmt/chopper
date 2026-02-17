@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub fn exported_api_names() -> Vec<&'static str> {
     vec![
         "runtime_args",
@@ -8,6 +9,25 @@ pub fn exported_api_names() -> Vec<&'static str> {
         "cword",
         "current",
         "exec",
+        "platform_info",
+        "platform_is_windows",
+        "platform_is_unix",
+        "executable_intent",
+        "can_execute_without_confirmation",
+        "can_execute_with_confirmation",
+        "fs_exists",
+        "fs_stat",
+        "fs_list",
+        "fs_read_text",
+        "fs_write_text",
+        "fs_mkdir",
+        "fs_remove",
+        "proc_run",
+        "proc_run_with",
+        "web_fetch",
+        "web_fetch_with",
+        "soap_envelope",
+        "soap_call",
     ]
 }
 
