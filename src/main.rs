@@ -84,7 +84,7 @@ enum BuiltinAction {
     PrintBashcompMode(String),
     Complete(Vec<String>),
     Alias(Vec<String>),
-    Tui,
+    Tui(Vec<String>),
 }
 
 fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
@@ -106,7 +106,6 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
             "--print-cache-dir" => return Some(BuiltinAction::PrintCacheDir),
             "--bashcomp" => return Some(BuiltinAction::Bashcomp),
             "--list-aliases" => return Some(BuiltinAction::ListAliases),
-            "--tui" => return Some(BuiltinAction::Tui),
             _ => {}
         }
     }
@@ -127,6 +126,9 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
     }
     if flag == "--alias" {
         return Some(BuiltinAction::Alias(args[2..].to_vec()));
+    }
+    if flag == "--tui" {
+        return Some(BuiltinAction::Tui(args[2..].to_vec()));
     }
 
     None
@@ -152,7 +154,10 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
             println!("  --alias <subcommand> [...]   Alias lifecycle management");
-            println!("  --tui                         Open interactive terminal UI");
+            println!("  --tui [--tmux=<auto|on|off>] Open interactive terminal UI");
+            println!(
+                "                               --tmux on forces tmux, --no-tmux disables tmux"
+            );
             println!();
             println!("Environment overrides:");
             println!("  CHOPPER_CONFIG_DIR=/path/to/config-root");
@@ -187,10 +192,53 @@ fn run_builtin_action(action: BuiltinAction) {
         BuiltinAction::Alias(raw_args) => {
             std::process::exit(alias_admin::run_alias_action(&raw_args));
         }
-        BuiltinAction::Tui => {
-            std::process::exit(tui::run_tui());
+        BuiltinAction::Tui(raw_args) => {
+            let options = match parse_tui_options(&raw_args) {
+                Ok(options) => options,
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(2);
+                }
+            };
+            std::process::exit(tui::run_tui(options));
         }
     }
+}
+
+fn parse_tui_options(raw_args: &[String]) -> Result<tui::TuiOptions> {
+    let mut tmux_mode = crate::tui_nvim::TmuxMode::Auto;
+    let mut idx = 0usize;
+
+    while idx < raw_args.len() {
+        let arg = raw_args[idx].as_str();
+        if arg == "--no-tmux" {
+            tmux_mode = crate::tui_nvim::TmuxMode::Off;
+            idx += 1;
+            continue;
+        }
+        if arg == "--tmux" {
+            let Some(value) = raw_args.get(idx + 1) else {
+                return Err(anyhow!(
+                    "--tmux requires a value: auto|on|off (or use --no-tmux)"
+                ));
+            };
+            tmux_mode = crate::tui_nvim::TmuxMode::parse_cli(value)
+                .ok_or_else(|| anyhow!("invalid tmux mode `{value}`; expected auto|on|off"))?;
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--tmux=") {
+            tmux_mode = crate::tui_nvim::TmuxMode::parse_cli(value)
+                .ok_or_else(|| anyhow!("invalid tmux mode `{value}`; expected auto|on|off"))?;
+            idx += 1;
+            continue;
+        }
+        return Err(anyhow!(
+            "unknown --tui option `{arg}`; supported: --tmux=<auto|on|off>, --tmux <mode>, --no-tmux"
+        ));
+    }
+
+    Ok(tui::TuiOptions { tmux_mode })
 }
 
 fn run_list_aliases() {
@@ -535,9 +583,10 @@ mod tests {
     use super::{
         cache_enabled, config_dir, detect_builtin_action, find_config,
         is_direct_invocation_executable, mixed_separator_basename, parse_invocation,
-        validate_alias_name, windows_relative_basename, BuiltinAction,
+        parse_tui_options, validate_alias_name, windows_relative_basename, BuiltinAction,
     };
     use crate::test_support::ENV_LOCK;
+    use crate::tui_nvim::TmuxMode;
     use std::env;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -2211,12 +2260,37 @@ mod tests {
     fn detects_tui_action_for_direct_chopper_invocation() {
         assert_eq!(
             detect_builtin_action(&["chopper".into(), "--tui".into()]),
-            Some(BuiltinAction::Tui)
+            Some(BuiltinAction::Tui(Vec::new()))
+        );
+        assert_eq!(
+            detect_builtin_action(&["chopper".into(), "--tui".into(), "--tmux=off".into()]),
+            Some(BuiltinAction::Tui(vec!["--tmux=off".into()]))
         );
         assert_eq!(
             detect_builtin_action(&["myalias".into(), "--tui".into()]),
             None
         );
+    }
+
+    #[test]
+    fn parse_tui_options_supports_tmux_overrides() {
+        let auto = parse_tui_options(&[]).expect("auto parse");
+        assert_eq!(auto.tmux_mode, TmuxMode::Auto);
+
+        let off = parse_tui_options(&["--no-tmux".into()]).expect("no tmux parse");
+        assert_eq!(off.tmux_mode, TmuxMode::Off);
+
+        let on = parse_tui_options(&["--tmux=on".into()]).expect("tmux on parse");
+        assert_eq!(on.tmux_mode, TmuxMode::On);
+
+        let off_alt = parse_tui_options(&["--tmux".into(), "off".into()]).expect("tmux off parse");
+        assert_eq!(off_alt.tmux_mode, TmuxMode::Off);
+    }
+
+    #[test]
+    fn parse_tui_options_rejects_unknown_flags() {
+        let err = parse_tui_options(&["--mystery".into()]).expect_err("unknown flag rejected");
+        assert!(err.to_string().contains("unknown --tui option"));
     }
 
     #[test]

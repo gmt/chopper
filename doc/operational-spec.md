@@ -59,7 +59,7 @@ chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
 chopper --alias <list|get|add|set|remove> ...
-chopper --tui
+chopper --tui [--tmux=<auto|on|off>] [--no-tmux]
 ```
 
 A binary named `chopper.exe`, `chopper.com`, `chopper.cmd`, or `chopper.bat`
@@ -88,8 +88,9 @@ detection. Mixed absolute forms that combine Unix and Windows separators (for
 example `/tmp\CHOPPER.CMD`, `/tmp\CHOPPER`, or `/tmp\CHOPPER/`) are also
 recognized.
 
-Built-ins are single-action commands; additional positional tokens are treated
-as regular alias parsing input and therefore should not be provided.
+Built-ins are single-action commands. Additional positional tokens are normally
+treated as regular alias parsing input and therefore should not be provided.
+`--tui` is the exception and accepts TUI option flags only.
 
 1. **Symlinked alias**:
 
@@ -367,11 +368,34 @@ Facade exposure is profile-aware:
 
 ## Terminal UI
 
-`chopper --tui` opens an interactive terminal workflow for alias management and
-Rhai editing.
+`chopper --tui` opens an interactive terminal workflow that is alias-first:
+aliases are listed directly and navigated by arrow/vim directional keys.
 
-The TUI requires an interactive terminal. Rhai editing uses `nvim` or `vim`
-and generates a completion dictionary from the exposed facade API names.
+The TUI requires an interactive terminal.
+
+Layout behavior:
+
+- Large terminals use a split view (alias list + inspector/details pane).
+- Smaller terminals fall back to a modal/single-pane list view.
+- Command hints are rendered in a compact status bar (single-line preferred,
+  two-line fallback when necessary).
+
+Editing behavior:
+
+- `Enter` on a selected alias resolves the alias config path and opens it in
+  `nvim` or `vim`.
+- `e` on a selected alias parses the alias manifest and opens the configured
+  `reconcile.script` in `nvim` or `vim` (if present).
+- `--tmux=auto` (default) uses tmux only when appropriate:
+  - inside tmux: opens the editor in a split pane
+  - outside tmux with no running server: launches a dedicated tmux session
+  - outside tmux with an already-running server: avoids creating a second
+    session and falls back to direct (tmuxless) editor launch
+- `--tmux=on` forces tmux use and errors when tmux is unavailable.
+- `--tmux=off` and `--no-tmux` force tmuxless editor launch.
+
+Rhai script editing remains available through the same `(n)vim` integration,
+including completion dictionary generation from exposed facade API names.
 
 See [`tui-reference.md`](tui-reference.md) for full workflow details.
 

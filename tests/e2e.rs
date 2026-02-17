@@ -21664,3 +21664,28 @@ fn tui_requires_interactive_terminal() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("interactive terminal"), "{stderr}");
 }
+
+#[test]
+fn tui_tmux_override_still_requires_interactive_terminal() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--tui", "--tmux=off"]);
+    assert!(
+        !output.status.success(),
+        "tui should fail without an interactive tty"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("interactive terminal"), "{stderr}");
+}
+
+#[test]
+fn tui_rejects_invalid_tmux_mode() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--tui", "--tmux=maybe"]);
+    assert!(!output.status.success(), "invalid tmux mode should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid tmux mode"), "{stderr}");
+}

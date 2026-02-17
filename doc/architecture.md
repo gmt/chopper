@@ -72,8 +72,10 @@ High-level map of the runtime flow and main modules.
   - alias lifecycle operations (`--alias list|get|add|set|remove`)
   - mutation parsing/validation and TOML persistence for managed aliases
 - `src/tui.rs` / `src/tui_nvim.rs`
-  - interactive terminal UI (`--tui`) for alias management
-  - `(n)vim` launch/bootstrap and Rhai API completion dictionary generation
+  - alias-first interactive terminal UI (`--tui`) with event-driven key handling
+  - adaptive split/modal rendering with compact status-bar command hints
+  - editor launch orchestration with tmux policy (`auto|on|off`) and tmuxless fallback
+  - `(n)vim` launch/bootstrap and Rhai API completion dictionary generation for Rhai editing
 
 - validation helpers
   - `alias_validation.rs`

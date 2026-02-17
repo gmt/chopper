@@ -414,7 +414,7 @@ fn build_journal_from_mutation(
     }))
 }
 
-fn discover_aliases() -> Result<Vec<String>> {
+pub(crate) fn discover_aliases() -> Result<Vec<String>> {
     let cfg = crate::config_dir();
     let mut aliases = BTreeSet::new();
     discover_aliases_in_dir(&cfg.join("aliases"), &mut aliases)?;
