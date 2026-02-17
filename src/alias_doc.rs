@@ -122,3 +122,64 @@ pub fn save_alias_doc(path: &Path, doc: &AliasDoc) -> Result<()> {
         .with_context(|| format!("failed to write alias config {}", path.display()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn valid_doc() -> AliasDoc {
+        AliasDoc {
+            exec: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            env: HashMap::from([("A".to_string(), "1".to_string())]),
+            env_remove: vec!["OLD".to_string()],
+            journal: Some(AliasJournalDoc {
+                namespace: "ops".to_string(),
+                stderr: true,
+                identifier: Some("svc".to_string()),
+            }),
+        }
+    }
+
+    #[test]
+    fn alias_doc_round_trips_through_toml_persistence() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("alias.toml");
+        let doc = valid_doc();
+        save_alias_doc(&path, &doc).expect("save alias doc");
+        let loaded = load_alias_doc(&path).expect("load alias doc");
+        assert_eq!(loaded, doc);
+    }
+
+    #[test]
+    fn alias_doc_validation_rejects_blank_exec() {
+        let mut doc = valid_doc();
+        doc.exec = "   ".to_string();
+        let err = doc.validate().expect_err("blank exec should fail");
+        assert!(err.to_string().contains("`exec` cannot be blank"));
+    }
+
+    #[test]
+    fn alias_doc_validation_rejects_env_key_with_equals() {
+        let mut doc = valid_doc();
+        doc.env.insert("BAD=KEY".to_string(), "value".to_string());
+        let err = doc.validate().expect_err("equals in env key should fail");
+        assert!(err.to_string().contains("cannot contain `=`"));
+    }
+
+    #[test]
+    fn alias_doc_validation_rejects_blank_journal_identifier() {
+        let mut doc = valid_doc();
+        doc.journal = Some(AliasJournalDoc {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: Some("   ".to_string()),
+        });
+        let err = doc
+            .validate()
+            .expect_err("blank journal identifier should fail");
+        assert!(err.to_string().contains("cannot be blank"));
+    }
+}
