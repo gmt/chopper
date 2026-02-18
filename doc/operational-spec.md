@@ -373,25 +373,31 @@ aliases are listed directly and navigated by arrow/vim directional keys.
 
 The TUI requires an interactive terminal.
 
+The TUI runs in an alternate terminal screen and restores terminal state before
+launching external editor subprocesses, then re-enters the interactive view.
+
 Layout behavior:
 
 - Large terminals use a split view (alias list + inspector/details pane).
 - Smaller terminals fall back to a modal/single-pane list view.
-- Command hints are rendered in a compact status bar (single-line preferred,
-  two-line fallback when necessary).
+- The inspector uses tabbed control surfaces (`summary`, `toml`, `legacy`,
+  `reconcile`) with unavailable surfaces rendered as disabled.
+- The top banner provides contextual action guidance for the currently selected
+  alias; persistent status text is suppressed.
+- A bottom alert bar appears only for temporary blocking/error conditions.
 
 Editing behavior:
 
-- `Enter` on a selected alias resolves the alias config path and opens it in
-  `nvim` or `vim`.
-- `e` on a selected alias parses the alias manifest and opens the configured
-  `reconcile.script` in `nvim` or `vim` (if present).
+- `Enter` on a selected alias executes the active tab action.
+- `e` is a reconcile quick action that opens the configured `reconcile.script`
+  in `nvim` or `vim` only when the script file is present.
 - `--tmux=auto` (default) uses tmux only when appropriate:
-  - inside tmux: opens the editor in a split pane
+  - inside tmux: launches editor directly in the current pane (no split pane)
   - outside tmux with no running server: launches a dedicated tmux session
   - outside tmux with an already-running server: avoids creating a second
     session and falls back to direct (tmuxless) editor launch
-- `--tmux=on` forces tmux use and errors when tmux is unavailable.
+- `--tmux=on` forces tmux use and errors when tmux is unavailable; inside tmux
+  it uses direct launch in the active pane.
 - `--tmux=off` and `--no-tmux` force tmuxless editor launch.
 
 Rhai script editing remains available through the same `(n)vim` integration,

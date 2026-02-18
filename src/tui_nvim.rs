@@ -20,20 +20,11 @@ impl TmuxMode {
             _ => None,
         }
     }
-
-    pub(crate) fn as_label(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::On => "on",
-            Self::Off => "off",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchStrategy {
     Direct,
-    TmuxSplit,
     TmuxSession,
 }
 
@@ -174,12 +165,6 @@ fn launch_editor(invocation: EditorInvocation, tmux_mode: TmuxMode) -> Result<()
 
     match strategy {
         LaunchStrategy::Direct => run_direct_editor(&invocation),
-        LaunchStrategy::TmuxSplit => run_editor_in_tmux_split(
-            tmux_path
-                .as_deref()
-                .ok_or_else(|| anyhow!("tmux was required but not found in PATH"))?,
-            &invocation,
-        ),
         LaunchStrategy::TmuxSession => run_editor_in_tmux_session(
             tmux_path
                 .as_deref()
@@ -199,53 +184,6 @@ fn run_direct_editor(invocation: &EditorInvocation) -> Result<()> {
             "{} exited with status {status}",
             invocation.program.display()
         ));
-    }
-    Ok(())
-}
-
-fn run_editor_in_tmux_split(tmux: &Path, invocation: &EditorInvocation) -> Result<()> {
-    let token = wait_token();
-    let command = format!(
-        "{}; tmux wait-for -S {}",
-        shell_command(invocation),
-        shell_words::quote(&token)
-    );
-
-    let pane_output = Command::new(tmux)
-        .args([
-            "split-window",
-            "-h",
-            "-p",
-            "50",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            &command,
-        ])
-        .output()
-        .with_context(|| format!("failed to launch tmux split via {}", tmux.display()))?;
-    if !pane_output.status.success() {
-        return Err(anyhow!(
-            "tmux split-window failed with status {}",
-            pane_output.status
-        ));
-    }
-    let pane_id = String::from_utf8_lossy(&pane_output.stdout)
-        .trim()
-        .to_string();
-
-    let wait_status = Command::new(tmux)
-        .args(["wait-for", &token])
-        .status()
-        .with_context(|| format!("failed waiting for editor pane via {}", tmux.display()))?;
-    if !wait_status.success() {
-        return Err(anyhow!("tmux wait-for failed with status {wait_status}"));
-    }
-
-    if !pane_id.is_empty() {
-        let _ = Command::new(tmux)
-            .args(["kill-pane", "-t", &pane_id])
-            .status();
     }
     Ok(())
 }
@@ -282,7 +220,7 @@ fn pick_launch_strategy(
                 return Err(anyhow!("--tmux=on requires `tmux` in PATH"));
             }
             if inside_tmux {
-                Ok(LaunchStrategy::TmuxSplit)
+                Ok(LaunchStrategy::Direct)
             } else {
                 Ok(LaunchStrategy::TmuxSession)
             }
@@ -292,7 +230,7 @@ fn pick_launch_strategy(
                 return Ok(LaunchStrategy::Direct);
             }
             if inside_tmux {
-                return Ok(LaunchStrategy::TmuxSplit);
+                return Ok(LaunchStrategy::Direct);
             }
             if tmux_server_running {
                 // Respect user preference: avoid creating a second detached session.
@@ -368,10 +306,10 @@ mod tests {
     }
 
     #[test]
-    fn launch_strategy_auto_prefers_split_inside_tmux() {
+    fn launch_strategy_auto_prefers_direct_inside_tmux() {
         let strategy =
             pick_launch_strategy(TmuxMode::Auto, true, true, false).expect("pick strategy");
-        assert_eq!(strategy, LaunchStrategy::TmuxSplit);
+        assert_eq!(strategy, LaunchStrategy::Direct);
     }
 
     #[test]
@@ -386,5 +324,12 @@ mod tests {
         let err = pick_launch_strategy(TmuxMode::On, false, false, false)
             .expect_err("missing tmux should error in forced mode");
         assert!(err.to_string().contains("requires `tmux`"));
+    }
+
+    #[test]
+    fn launch_strategy_on_uses_direct_inside_tmux() {
+        let strategy =
+            pick_launch_strategy(TmuxMode::On, true, true, false).expect("pick strategy");
+        assert_eq!(strategy, LaunchStrategy::Direct);
     }
 }

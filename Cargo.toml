@@ -1,6 +1,6 @@
 [package]
 name = "chopper"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Meta-wrapper with Rhai-powered configuration"
 
@@ -23,6 +23,7 @@ ureq = "3.2.0"
 quick-xml = "0.39.1"
 http = "1.4.0"
 crossterm = "0.29.0"
+ratatui = { version = "0.30.0", default-features = false, features = ["crossterm"] }
 
 [profile.release]
 opt-level = "z"
