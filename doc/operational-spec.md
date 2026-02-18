@@ -387,8 +387,8 @@ Layout behavior:
 Editing behavior:
 
 - `Enter` from list focus moves into inspector focus for the active tab.
-- TOML schema-bound fields are edited directly in the TUI inspector (no
-  external editor handoff for normal property edits).
+- In `toml` tab, `Enter` opens external editor for alias TOML content (creating
+  the default alias TOML path when absent).
 - `e` is a reconcile quick action; when reconcile script is missing, the TUI can
   open a draft creation flow.
 - Reconcile script draft files include instructional comments and only persist
