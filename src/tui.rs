@@ -13,6 +13,8 @@ use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
 const SPLIT_MAX_LEFT_WIDTH: u16 = 60;
+const SPLIT_MIN_RIGHT_WIDTH: u16 = 25;
+const SPLIT_MIN_HEIGHT: u16 = 3;
 
 type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -848,6 +850,12 @@ fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState, tab_mod
         return;
     }
 
+    // Hide tab strip when height-constrained to preserve vertical space for alias list
+    if area.height < 3 {
+        render_alias_list(frame, area, state);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -894,21 +902,38 @@ fn content_height(height: u16, alert_visible: bool) -> usize {
 fn alias_viewport_rows(layout: LayoutKind, content_rows: usize) -> usize {
     match layout {
         LayoutKind::Split => content_rows,
-        // Modal reserves one row for the tab strip.
-        LayoutKind::Modal => content_rows.saturating_sub(1),
+        // Modal reserves one row for the tab strip, unless height-constrained.
+        LayoutKind::Modal => {
+            if content_rows < 3 {
+                content_rows
+            } else {
+                content_rows.saturating_sub(1)
+            }
+        }
     }
 }
 
-fn compute_layout(width: u16, _height: u16, state: &AppState) -> LayoutPlan {
+fn compute_layout(width: u16, height: u16, state: &AppState) -> LayoutPlan {
     let left_width = required_left_width(state);
     let separator_width = 1u16;
     let full_tabs_width = full_tab_strip_width();
     let compact_tabs_width = compact_tab_strip_width(state);
 
+    let right_width_if_full = width
+        .saturating_sub(left_width)
+        .saturating_sub(separator_width);
+    let right_width_if_compact = width
+        .saturating_sub(left_width)
+        .saturating_sub(separator_width);
+
+    let has_enough_height = height >= SPLIT_MIN_HEIGHT;
+
     if left_width
         .saturating_add(separator_width)
         .saturating_add(full_tabs_width)
         <= width
+        && right_width_if_full >= SPLIT_MIN_RIGHT_WIDTH
+        && has_enough_height
     {
         LayoutPlan {
             kind: LayoutKind::Split,
@@ -919,6 +944,8 @@ fn compute_layout(width: u16, _height: u16, state: &AppState) -> LayoutPlan {
         .saturating_add(separator_width)
         .saturating_add(compact_tabs_width)
         <= width
+        && right_width_if_compact >= SPLIT_MIN_RIGHT_WIDTH
+        && has_enough_height
     {
         LayoutPlan {
             kind: LayoutKind::Split,
@@ -1045,9 +1072,25 @@ mod tests {
     #[test]
     fn content_driven_layout_compacts_tabs_before_modal_fallback() {
         let state = sample_state(LayoutKind::Modal);
-        let plan = compute_layout(30, 10, &state);
+        let plan = compute_layout(45, 10, &state);
         assert_eq!(plan.kind, LayoutKind::Split);
         assert_eq!(plan.tab_mode, TabStripMode::Compact);
+    }
+
+    #[test]
+    fn content_driven_layout_uses_modal_when_right_panel_too_narrow() {
+        let state = sample_state(LayoutKind::Modal);
+        // Width 30 would fit columns but right panel < SPLIT_MIN_RIGHT_WIDTH
+        let plan = compute_layout(30, 10, &state);
+        assert_eq!(plan.kind, LayoutKind::Modal);
+    }
+
+    #[test]
+    fn content_driven_layout_uses_modal_when_terminal_too_short() {
+        let state = sample_state(LayoutKind::Modal);
+        // Width is fine but height < SPLIT_MIN_HEIGHT
+        let plan = compute_layout(60, 2, &state);
+        assert_eq!(plan.kind, LayoutKind::Modal);
     }
 
     #[test]
@@ -1085,8 +1128,12 @@ mod tests {
 
     #[test]
     fn modal_alias_rows_reserve_header_and_tabs_rows() {
+        // Normal case: tab strip shown, 1 row reserved
         assert_eq!(alias_viewport_rows(LayoutKind::Modal, 10), 9);
-        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 1), 0);
+        // Height-constrained: tab strip hidden, no rows reserved
+        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 2), 2);
+        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 1), 1);
+        // Split always uses all rows
         assert_eq!(alias_viewport_rows(LayoutKind::Split, 10), 10);
     }
 
