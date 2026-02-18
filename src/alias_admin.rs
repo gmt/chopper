@@ -1,5 +1,7 @@
 use crate::alias_admin_validation::{parse_bool_flag, parse_env_assignment};
-use crate::alias_doc::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc};
+use crate::alias_doc::{
+    load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc, AliasReconcileDoc,
+};
 use crate::alias_validation;
 use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeSet, HashMap};
@@ -145,6 +147,8 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
             env,
             env_remove: mutation.env_remove,
             journal,
+            reconcile: None,
+            bashcomp: None,
         };
         save_alias_doc(&target_path, &doc)?;
         println!("added alias `{alias}` at {}", target_path.display());
@@ -422,6 +426,180 @@ pub(crate) fn discover_aliases() -> Result<Vec<String>> {
     Ok(aliases.into_iter().collect())
 }
 
+pub(crate) fn default_toml_path(alias: &str) -> PathBuf {
+    crate::config_dir()
+        .join("aliases")
+        .join(format!("{alias}.toml"))
+}
+
+pub(crate) fn minimal_alias_doc() -> AliasDoc {
+    AliasDoc {
+        exec: "echo".to_string(),
+        args: Vec::new(),
+        env: HashMap::new(),
+        env_remove: Vec::new(),
+        journal: None,
+        reconcile: None,
+        bashcomp: None,
+    }
+}
+
+pub(crate) fn load_or_seed_alias_doc(alias: &str) -> Result<(AliasDoc, PathBuf)> {
+    validate_alias(alias)?;
+    let Some(config_path) = crate::find_config(alias) else {
+        return Ok((minimal_alias_doc(), default_toml_path(alias)));
+    };
+    if is_toml_path(&config_path) {
+        let doc = load_alias_doc(&config_path).with_context(|| {
+            format!(
+                "alias `{alias}` must be a TOML config to edit schema fields (found {})",
+                config_path.display()
+            )
+        })?;
+        return Ok((doc, config_path));
+    }
+
+    let manifest = crate::parser::parse(&config_path)
+        .with_context(|| format!("failed to parse alias `{alias}` for TOML conversion"))?;
+    let mut doc = minimal_alias_doc();
+    doc.exec = manifest.exec.display().to_string();
+    doc.args = manifest.args;
+    doc.env = manifest.env;
+    doc.env_remove = manifest.env_remove;
+    doc.journal = manifest.journal.map(|journal| AliasJournalDoc {
+        namespace: journal.namespace,
+        stderr: journal.stderr,
+        identifier: journal.identifier,
+    });
+    doc.reconcile = manifest.reconcile.map(|reconcile| AliasReconcileDoc {
+        script: reconcile.script.display().to_string(),
+        function: Some(reconcile.function),
+    });
+    if let Some(bashcomp) = manifest.bashcomp {
+        doc.bashcomp = Some(crate::alias_doc::AliasBashcompDoc {
+            disabled: bashcomp.disabled,
+            passthrough: bashcomp.passthrough,
+            script: bashcomp.script.map(|path| path.display().to_string()),
+            rhai_script: bashcomp.rhai_script.map(|path| path.display().to_string()),
+            rhai_function: bashcomp.rhai_function,
+        });
+    }
+    Ok((doc, default_toml_path(alias)))
+}
+
+pub(crate) fn save_alias_doc_at(path: &Path, doc: &AliasDoc) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs_err::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    save_alias_doc(path, doc)
+}
+
+pub(crate) fn create_alias(alias: &str) -> Result<PathBuf> {
+    validate_alias(alias)?;
+    if crate::find_config(alias).is_some() {
+        return Err(anyhow!(
+            "alias `{alias}` already exists; choose a different name"
+        ));
+    }
+    let path = default_toml_path(alias);
+    save_alias_doc_at(&path, &minimal_alias_doc())?;
+    Ok(path)
+}
+
+pub(crate) fn remove_alias_config(alias: &str) -> Result<()> {
+    validate_alias(alias)?;
+    let path = crate::find_config(alias)
+        .ok_or_else(|| anyhow!("alias `{alias}` does not exist in configuration"))?;
+    fs_err::remove_file(&path)
+        .with_context(|| format!("failed to remove alias config {}", path.display()))?;
+    crate::cache::prune_alias(alias);
+    Ok(())
+}
+
+pub(crate) fn duplicate_alias(source_alias: &str, target_alias: &str) -> Result<PathBuf> {
+    validate_alias(source_alias)?;
+    validate_alias(target_alias)?;
+    if crate::find_config(target_alias).is_some() {
+        return Err(anyhow!(
+            "alias `{target_alias}` already exists; choose a different name"
+        ));
+    }
+    let source_path = crate::find_config(source_alias)
+        .ok_or_else(|| anyhow!("source alias `{source_alias}` does not exist"))?;
+    let target_path = sibling_alias_path_for_target(&source_path, target_alias);
+    if let Some(parent) = target_path.parent() {
+        fs_err::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs_err::copy(&source_path, &target_path).with_context(|| {
+        format!(
+            "failed to duplicate alias config {} -> {}",
+            source_path.display(),
+            target_path.display()
+        )
+    })?;
+    Ok(target_path)
+}
+
+pub(crate) fn rename_alias(source_alias: &str, target_alias: &str) -> Result<PathBuf> {
+    validate_alias(source_alias)?;
+    validate_alias(target_alias)?;
+    if source_alias == target_alias {
+        return Err(anyhow!("rename source and target aliases must differ"));
+    }
+    if crate::find_config(target_alias).is_some() {
+        return Err(anyhow!(
+            "alias `{target_alias}` already exists; choose a different name"
+        ));
+    }
+    let source_path = crate::find_config(source_alias)
+        .ok_or_else(|| anyhow!("source alias `{source_alias}` does not exist"))?;
+    let target_path = sibling_alias_path_for_target(&source_path, target_alias);
+    if let Some(parent) = target_path.parent() {
+        fs_err::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs_err::rename(&source_path, &target_path).with_context(|| {
+        format!(
+            "failed to rename alias config {} -> {}",
+            source_path.display(),
+            target_path.display()
+        )
+    })?;
+    crate::cache::prune_alias(source_alias);
+    crate::cache::prune_alias(target_alias);
+    Ok(target_path)
+}
+
+fn sibling_alias_path_for_target(source_path: &Path, target_alias: &str) -> PathBuf {
+    let parent = source_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(crate::config_dir);
+    let file_name = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let target_name = if file_name.ends_with(".toml") {
+        format!("{target_alias}.toml")
+    } else if file_name.ends_with(".conf") {
+        format!("{target_alias}.conf")
+    } else if file_name.ends_with(".rhai") {
+        format!("{target_alias}.rhai")
+    } else {
+        target_alias.to_string()
+    };
+    parent.join(target_name)
+}
+
+fn is_toml_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false)
+}
+
 fn discover_aliases_in_dir(dir: &Path, aliases: &mut BTreeSet<String>) -> Result<()> {
     let entries = match fs_err::read_dir(dir) {
         Ok(entries) => entries,
@@ -459,7 +637,13 @@ fn validate_alias(alias: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_mutation_args;
+    use super::{
+        create_alias, duplicate_alias, load_or_seed_alias_doc, parse_mutation_args, rename_alias,
+    };
+    use crate::test_support::ENV_LOCK;
+    use std::env;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn parses_add_mutation_flags() {
@@ -487,5 +671,49 @@ mod tests {
         assert_eq!(mutation.journal_namespace.as_deref(), Some("ops"));
         assert_eq!(mutation.journal_stderr, Some(false));
         assert_eq!(mutation.journal_identifier.as_deref(), Some("svc"));
+    }
+
+    #[test]
+    fn create_alias_writes_default_toml_file() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+        let path = create_alias("newalias").expect("create alias");
+        assert!(path.is_file(), "expected created file {}", path.display());
+        let content = fs::read_to_string(&path).expect("read created alias file");
+        assert!(content.contains("exec"), "{content}");
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn duplicate_and_rename_alias_preserve_file_kind() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        let cfg = temp.path();
+        fs::create_dir_all(cfg).expect("create cfg");
+        fs::write(cfg.join("source.conf"), "echo hello\n").expect("write source");
+        env::set_var("CHOPPER_CONFIG_DIR", cfg);
+
+        let duplicate_path = duplicate_alias("source", "copy").expect("duplicate alias");
+        assert_eq!(duplicate_path.file_name().and_then(|v| v.to_str()), Some("copy.conf"));
+        assert!(duplicate_path.is_file());
+
+        let renamed_path = rename_alias("copy", "renamed").expect("rename alias");
+        assert_eq!(renamed_path.file_name().and_then(|v| v.to_str()), Some("renamed.conf"));
+        assert!(renamed_path.is_file());
+        assert!(!duplicate_path.exists());
+
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn load_or_seed_alias_doc_builds_default_for_missing_alias() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+        let (doc, path) = load_or_seed_alias_doc("missing").expect("seed alias doc");
+        assert_eq!(doc.exec, "echo");
+        assert!(path.ends_with("missing.toml"));
+        env::remove_var("CHOPPER_CONFIG_DIR");
     }
 }

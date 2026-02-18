@@ -15,7 +15,12 @@ pub struct AliasDoc {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub env_remove: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub journal: Option<AliasJournalDoc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reconcile: Option<AliasReconcileDoc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bashcomp: Option<AliasBashcompDoc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,6 +30,27 @@ pub struct AliasJournalDoc {
     pub stderr: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AliasReconcileDoc {
+    pub script: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AliasBashcompDoc {
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub passthrough: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rhai_script: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rhai_function: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -101,8 +127,90 @@ impl AliasDoc {
                 }
             }
         }
+        if let Some(reconcile) = &self.reconcile {
+            validate_required_script_field(&reconcile.script, "`reconcile.script`")?;
+            if let Some(function) = &reconcile.function {
+                if function.contains('\0') {
+                    return Err(anyhow!("`reconcile.function` cannot contain NUL bytes"));
+                }
+            }
+        }
+        if let Some(bashcomp) = &self.bashcomp {
+            validate_optional_script_field(bashcomp.script.as_deref(), "`bashcomp.script`")?;
+            validate_optional_script_field(
+                bashcomp.rhai_script.as_deref(),
+                "`bashcomp.rhai_script`",
+            )?;
+            if let Some(function) = &bashcomp.rhai_function {
+                if function.contains('\0') {
+                    return Err(anyhow!("`bashcomp.rhai_function` cannot contain NUL bytes"));
+                }
+                if !function.trim().is_empty()
+                    && !bashcomp
+                        .rhai_script
+                        .as_deref()
+                        .map(|value| !value.trim().is_empty())
+                        .unwrap_or(false)
+                {
+                    return Err(anyhow!(
+                        "`bashcomp.rhai_function` requires `bashcomp.rhai_script`"
+                    ));
+                }
+            }
+        }
         Ok(())
     }
+}
+
+fn validate_required_script_field(value: &str, field: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("{field} cannot be blank"));
+    }
+    validate_script_shape(trimmed, field)
+}
+
+fn validate_optional_script_field(value: Option<&str>, field: &str) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    validate_script_shape(trimmed, field)
+}
+
+fn validate_script_shape(trimmed: &str, field: &str) -> Result<()> {
+    if trimmed.contains('\0') {
+        return Err(anyhow!("{field} cannot contain NUL bytes"));
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err(anyhow!("{field} cannot be `.` or `..`"));
+    }
+    if trimmed.ends_with('/') || trimmed.ends_with('\\') {
+        return Err(anyhow!("{field} cannot end with a path separator"));
+    }
+    if ends_with_dot_component(trimmed) {
+        return Err(anyhow!("{field} cannot end with `.` or `..` path components"));
+    }
+    if !Path::new(trimmed).is_absolute() && !has_meaningful_relative_segment(trimmed) {
+        return Err(anyhow!(
+            "{field} must include a file path when using relative path notation"
+        ));
+    }
+    Ok(())
+}
+
+fn has_meaningful_relative_segment(value: &str) -> bool {
+    value
+        .split(['/', '\\'])
+        .any(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+}
+
+fn ends_with_dot_component(value: &str) -> bool {
+    let trimmed = value.trim_end_matches(['/', '\\']);
+    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
 }
 
 pub fn load_alias_doc(path: &Path) -> Result<AliasDoc> {
@@ -125,7 +233,10 @@ pub fn save_alias_doc(path: &Path, doc: &AliasDoc) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc};
+    use super::{
+        load_alias_doc, save_alias_doc, AliasBashcompDoc, AliasDoc, AliasJournalDoc,
+        AliasReconcileDoc,
+    };
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -139,6 +250,17 @@ mod tests {
                 namespace: "ops".to_string(),
                 stderr: true,
                 identifier: Some("svc".to_string()),
+            }),
+            reconcile: Some(AliasReconcileDoc {
+                script: "hooks/reconcile.rhai".to_string(),
+                function: Some("reconcile".to_string()),
+            }),
+            bashcomp: Some(AliasBashcompDoc {
+                disabled: false,
+                passthrough: true,
+                script: Some("comp/custom.bash".to_string()),
+                rhai_script: Some("comp/custom.rhai".to_string()),
+                rhai_function: Some("complete".to_string()),
             }),
         }
     }
@@ -181,5 +303,34 @@ mod tests {
             .validate()
             .expect_err("blank journal identifier should fail");
         assert!(err.to_string().contains("cannot be blank"));
+    }
+
+    #[test]
+    fn alias_doc_validation_rejects_blank_reconcile_script() {
+        let mut doc = valid_doc();
+        doc.reconcile = Some(AliasReconcileDoc {
+            script: "   ".to_string(),
+            function: Some("reconcile".to_string()),
+        });
+        let err = doc
+            .validate()
+            .expect_err("blank reconcile script should fail");
+        assert!(err.to_string().contains("`reconcile.script` cannot be blank"));
+    }
+
+    #[test]
+    fn alias_doc_validation_requires_rhai_script_when_function_set() {
+        let mut doc = valid_doc();
+        doc.bashcomp = Some(AliasBashcompDoc {
+            disabled: false,
+            passthrough: false,
+            script: None,
+            rhai_script: None,
+            rhai_function: Some("complete".to_string()),
+        });
+        let err = doc
+            .validate()
+            .expect_err("rhai function without script should fail");
+        assert!(err.to_string().contains("requires `bashcomp.rhai_script`"));
     }
 }

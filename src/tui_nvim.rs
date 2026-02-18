@@ -4,6 +4,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const DRAFT_MARKER: &str = "CHOPPER_DRAFT";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TmuxMode {
     Auto,
@@ -99,6 +101,30 @@ pub fn open_alias_editor(path: &Path, tmux_mode: TmuxMode) -> Result<()> {
     launch_editor(invocation, tmux_mode)
 }
 
+pub fn open_alias_draft_editor_with_mode(
+    target_path: &Path,
+    template: &str,
+    tmux_mode: TmuxMode,
+) -> Result<bool> {
+    open_draft_editor_with_mode(target_path, template, None, tmux_mode)
+}
+
+pub fn open_rhai_draft_editor_with_mode(
+    target_path: &Path,
+    template: &str,
+    api_names: &[&str],
+    tmux_mode: TmuxMode,
+) -> Result<bool> {
+    let cache_dir = crate::cache::cache_dir();
+    fs_err::create_dir_all(&cache_dir)
+        .with_context(|| format!("failed to create {}", cache_dir.display()))?;
+    let dict_path = cache_dir.join("rhai-api-completion.dict");
+    let dictionary = build_completion_dictionary(api_names);
+    fs_err::write(&dict_path, dictionary)
+        .with_context(|| format!("failed to write {}", dict_path.display()))?;
+    open_draft_editor_with_mode(target_path, template, Some(&dict_path), tmux_mode)
+}
+
 #[derive(Debug)]
 struct EditorInvocation {
     program: std::path::PathBuf,
@@ -151,6 +177,62 @@ fn build_editor_invocation(
     Err(anyhow!(
         "neither `nvim` nor `vim` was found in PATH for editing"
     ))
+}
+
+fn open_draft_editor_with_mode(
+    target_path: &Path,
+    template: &str,
+    completion_dict: Option<&Path>,
+    tmux_mode: TmuxMode,
+) -> Result<bool> {
+    let cache_dir = crate::cache::cache_dir();
+    fs_err::create_dir_all(&cache_dir)
+        .with_context(|| format!("failed to create {}", cache_dir.display()))?;
+    let draft_ext = target_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| format!(".{ext}"))
+        .unwrap_or_default();
+    let draft_path = cache_dir.join(format!("{}.draft{}", wait_token(), draft_ext));
+    fs_err::write(&draft_path, template)
+        .with_context(|| format!("failed to write {}", draft_path.display()))?;
+
+    let invocation = build_editor_invocation(&draft_path, completion_dict)?;
+    let launch_result = launch_editor(invocation, tmux_mode);
+    let draft_content = fs_err::read_to_string(&draft_path)
+        .with_context(|| format!("failed to read {}", draft_path.display()));
+    let _ = fs_err::remove_file(&draft_path);
+    launch_result?;
+
+    let draft_content = draft_content?;
+    if !draft_content_changed(template, &draft_content) {
+        return Ok(false);
+    }
+
+    let sanitized = strip_draft_marker_lines(&draft_content);
+    if let Some(parent) = target_path.parent() {
+        fs_err::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs_err::write(target_path, sanitized)
+        .with_context(|| format!("failed to write {}", target_path.display()))?;
+    Ok(true)
+}
+
+fn strip_draft_marker_lines(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        if line.contains(DRAFT_MARKER) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn draft_content_changed(initial: &str, edited: &str) -> bool {
+    edited != initial
 }
 
 fn launch_editor(invocation: EditorInvocation, tmux_mode: TmuxMode) -> Result<()> {
@@ -272,8 +354,8 @@ fn wait_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_completion_dictionary, build_nvim_bootstrap, pick_launch_strategy, LaunchStrategy,
-        TmuxMode,
+        build_completion_dictionary, build_nvim_bootstrap, draft_content_changed,
+        pick_launch_strategy, strip_draft_marker_lines, LaunchStrategy, TmuxMode,
     };
     use std::path::Path;
 
@@ -331,5 +413,19 @@ mod tests {
         let strategy =
             pick_launch_strategy(TmuxMode::On, true, true, false).expect("pick strategy");
         assert_eq!(strategy, LaunchStrategy::Direct);
+    }
+
+    #[test]
+    fn strip_draft_markers_removes_instruction_lines() {
+        let input = "// CHOPPER_DRAFT: intro\nfn reconcile(ctx) {\n    #{}\n}\n";
+        let output = strip_draft_marker_lines(input);
+        assert!(!output.contains("CHOPPER_DRAFT"));
+        assert!(output.contains("fn reconcile"));
+    }
+
+    #[test]
+    fn draft_content_changed_detects_save_or_abort_state() {
+        assert!(!draft_content_changed("same", "same"));
+        assert!(draft_content_changed("same", "changed"));
     }
 }

@@ -23,16 +23,24 @@ It requires an interactive terminal (TTY).
 
 The TUI opens directly into an alias list, not a command menu.
 
-- `j`/`k` or `Up`/`Down`: move selection
+- `j`/`k` or `Up`/`Down`: move selection (or field cursor in TOML inspector menu)
 - `g` / `Home`: jump to top
 - `G` / `End`: jump to bottom
 - `Tab` / `Shift+Tab`: cycle inspector tabs
 - `1`..`4`: jump directly to `summary`, `toml`, `legacy`, `reconcile` tabs
-- `Enter`: run the active tab action for the selected alias
-- `e`: quick action for reconcile editing (when an extant reconcile script exists)
+- `Enter`: activate the active surface
+  - `toml`: open/edit selected schema field inside TUI (no `(n)vim` handoff)
+  - `legacy` / `reconcile`: open external editor for file content flows
+- `e`: quick action for reconcile editing/creation
 - `r`: refresh alias list
 - `q` or `Esc`: quit
-- `h`/`l` or `Left`/`Right`: list/inspector focus (split layout); also tab cycling when already in inspector
+- `h`/`l` or `Left`/`Right`: list/inspector focus
+  - split layout: move focus between panes
+  - modal layout: switch between alias list view and inspector wizard view
+- `+`: create alias (prompt)
+- `%`: rename selected alias (prompt)
+- `!`: duplicate selected alias (prompt)
+- `-`: delete selected alias (confirmation prompt)
 
 ---
 
@@ -42,15 +50,16 @@ The TUI chooses layout from what can be shown without unreasonable truncation:
 
 - **Split layout (preferred)**:
   - alias list on the left
-  - inspector on the right with tabs (`summary`, `toml`, `legacy`, `reconcile`)
+  - inspector/editor on the right with tabs (`summary`, `toml`, `legacy`, `reconcile`)
   - if horizontal space tightens, tab chrome compacts to the active tab label
 - **Modal layout (fallback)**:
   - single-pane alias list with a tab strip row above it
+  - inspector/editor opens as a wizard-like full-screen modal panel when focused
   - used only when split cannot remain functional after compaction
 
 The top banner keeps `chopper` as the bold brand token and shows concise action
-guidance (`Enter`, `Tab`, `e`, `r`, `q`). A bottom alert bar appears only for
-temporary blocking/error messages.
+guidance (`Enter`, `Tab`, `+/%/!/-`, `e`, `r`, `q`). A bottom status bar is
+used for prompts and temporary blocking/error messages.
 
 When aliases exceed visible rows, a vertical scrollbar indicates overflow.
 
@@ -60,10 +69,17 @@ When aliases exceed visible rows, a vertical scrollbar indicates overflow.
 
 Editing actions:
 
-- `Enter`: edits the file/action represented by the active tab
-- `e`: fast path for reconcile script editing when the script exists
+- `toml` tab:
+  - schema-bound properties are edited inside the TUI inspector menu
+  - optional sections (`journal`, `reconcile`, `bashcomp`) can be added/removed
+    by toggling their enabled fields
+  - no external `(n)vim` launch for normal TOML property updates
+- `legacy` / `reconcile` tabs:
+  - `Enter` opens external editor for unstructured file content
+  - if missing, a draft is opened with instructional comment lines
+  - saving persists the artifact; aborting with `:q!` discards the draft
 
-Both use `nvim` (preferred) or `vim` (fallback).
+External edit actions use `nvim` (preferred) or `vim` (fallback).
 
 `--tmux` policy:
 
@@ -86,6 +102,7 @@ If neither `nvim` nor `vim` exists in `PATH`, TUI editing returns an error.
   chopper.
 - TUI editing resolves alias files using the same lookup order as runtime
   invocation (`aliases/<name>.toml`, `<name>.toml`, legacy files).
+- Tabs are always selectable; visual emphasis indicates data presence.
 - Rendering is handled by ratatui on top of crossterm, using an alternate
   screen for interactive drawing.
 - Editing actions temporarily leave the alternate screen/raw-mode session and

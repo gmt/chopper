@@ -383,18 +383,27 @@ Layout behavior:
 - If width becomes constrained, tab chrome compacts to the active-tab label.
 - If split still cannot remain functional, the UI falls back to a
   modal/single-pane list view with a tab strip row.
-- The inspector uses tabs (`summary`, `toml`, `legacy`, `reconcile`) with
-  unavailable tabs rendered as disabled.
+- The inspector uses tabs (`summary`, `toml`, `legacy`, `reconcile`) that are
+  always selectable; tabs with backing data are emphasized, while empty tabs
+  remain selectable for creation flows.
 - The top banner provides concise action guidance (`Enter`, `Tab`, `e`, `r`,
-  `q`); persistent status text is suppressed.
+  `q` plus alias ops). A bottom status row is used for prompts/errors.
 - Alias overflow is represented by a vertical scrollbar.
-- A bottom alert bar appears only for temporary blocking/error conditions.
+- In modal fallback, inspector/editor interaction opens as a wizard-like
+  full-screen pane while list mode remains available.
 
 Editing behavior:
 
-- `Enter` on a selected alias executes the active tab action.
-- `e` is a reconcile quick action that opens the configured `reconcile.script`
-  in `nvim` or `vim` only when the script file is present.
+- `Enter` on a selected alias activates the active surface.
+- TOML schema-bound fields are edited directly in the TUI inspector (no
+  external editor handoff for normal property edits).
+- `e` is a reconcile quick action; when reconcile script is missing, the TUI can
+  open a draft creation flow.
+- For unstructured file creation/editing (`legacy`, `reconcile`), draft files
+  include instructional comments and only persist if the user saves before exit.
+  Aborting with `:q!` discards draft changes.
+- Alias lifecycle actions are available in TUI (`new`, `rename`, `duplicate`,
+  `delete`) via prompt-driven controls.
 - `--tmux=auto` (default) uses tmux only when appropriate:
   - inside tmux: launches editor directly in the current pane (no split pane)
   - outside tmux with no running server: launches a dedicated tmux session

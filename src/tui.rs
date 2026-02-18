@@ -88,6 +88,106 @@ enum LoopAction {
     Quit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InspectorMode {
+    Browse,
+    TomlMenu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TomlField {
+    Exec,
+    Args,
+    Env,
+    EnvRemove,
+    JournalEnabled,
+    JournalNamespace,
+    JournalStderr,
+    JournalIdentifier,
+    ReconcileEnabled,
+    ReconcileScript,
+    ReconcileFunction,
+    BashcompEnabled,
+    BashcompDisabled,
+    BashcompPassthrough,
+    BashcompScript,
+    BashcompRhaiScript,
+    BashcompRhaiFunction,
+}
+
+impl TomlField {
+    fn all() -> [Self; 17] {
+        [
+            Self::Exec,
+            Self::Args,
+            Self::Env,
+            Self::EnvRemove,
+            Self::JournalEnabled,
+            Self::JournalNamespace,
+            Self::JournalStderr,
+            Self::JournalIdentifier,
+            Self::ReconcileEnabled,
+            Self::ReconcileScript,
+            Self::ReconcileFunction,
+            Self::BashcompEnabled,
+            Self::BashcompDisabled,
+            Self::BashcompPassthrough,
+            Self::BashcompScript,
+            Self::BashcompRhaiScript,
+            Self::BashcompRhaiFunction,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Args => "args",
+            Self::Env => "env",
+            Self::EnvRemove => "env_remove",
+            Self::JournalEnabled => "journal.enabled",
+            Self::JournalNamespace => "journal.namespace",
+            Self::JournalStderr => "journal.stderr",
+            Self::JournalIdentifier => "journal.identifier",
+            Self::ReconcileEnabled => "reconcile.enabled",
+            Self::ReconcileScript => "reconcile.script",
+            Self::ReconcileFunction => "reconcile.function",
+            Self::BashcompEnabled => "bashcomp.enabled",
+            Self::BashcompDisabled => "bashcomp.disabled",
+            Self::BashcompPassthrough => "bashcomp.passthrough",
+            Self::BashcompScript => "bashcomp.script",
+            Self::BashcompRhaiScript => "bashcomp.rhai_script",
+            Self::BashcompRhaiFunction => "bashcomp.rhai_function",
+        }
+    }
+
+    fn is_toggle(self) -> bool {
+        matches!(
+            self,
+            Self::JournalEnabled
+                | Self::JournalStderr
+                | Self::ReconcileEnabled
+                | Self::BashcompEnabled
+                | Self::BashcompDisabled
+                | Self::BashcompPassthrough
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptKind {
+    NewAlias,
+    RenameAlias,
+    DuplicateAlias,
+    DeleteAlias,
+    EditTomlField(TomlField),
+}
+
+#[derive(Debug, Clone)]
+struct PromptState {
+    kind: PromptKind,
+    input: String,
+}
+
 #[derive(Debug, Default, Clone)]
 struct AliasArtifacts {
     selected_alias: Option<String>,
@@ -106,6 +206,9 @@ struct AppState {
     layout: LayoutKind,
     active_surface: ControlSurface,
     artifacts: AliasArtifacts,
+    inspector_mode: InspectorMode,
+    toml_cursor: usize,
+    prompt: Option<PromptState>,
     alert_message: Option<String>,
     tmux_mode: crate::tui_nvim::TmuxMode,
 }
@@ -134,6 +237,9 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         layout: LayoutKind::Modal,
         active_surface: ControlSurface::Summary,
         artifacts: AliasArtifacts::default(),
+        inspector_mode: InspectorMode::Browse,
+        toml_cursor: 0,
+        prompt: None,
         alert_message: None,
         tmux_mode: options.tmux_mode,
     };
@@ -148,7 +254,10 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         sync_artifacts_for_selection(&mut state);
         let layout_plan = compute_layout(width, height, &state);
         state.layout = layout_plan.kind;
-        let content_rows = content_height(height, state.alert_message.is_some());
+        let content_rows = content_height(
+            height,
+            state.alert_message.is_some() || state.prompt.is_some(),
+        );
         let alias_rows = alias_viewport_rows(layout_plan.kind, content_rows);
         ensure_selection_visible(&mut state, alias_rows);
         sync_artifacts_for_selection(&mut state);
@@ -187,22 +296,40 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return LoopAction::Continue;
     }
+    if state.prompt.is_some() {
+        return handle_prompt_key_event(state, key, list_height);
+    }
     state.alert_message = None;
 
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => LoopAction::Quit,
         KeyCode::Up | KeyCode::Char('k') => {
-            if state.selected > 0 {
+            if state.focus == PaneFocus::Inspector
+                && state.active_surface == ControlSurface::Toml
+                && state.inspector_mode == InspectorMode::TomlMenu
+            {
+                if state.toml_cursor > 0 {
+                    state.toml_cursor -= 1;
+                }
+            } else if state.selected > 0 {
                 state.selected -= 1;
+                ensure_selection_visible(state, list_height);
             }
-            ensure_selection_visible(state, list_height);
             LoopAction::Continue
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if state.selected + 1 < state.aliases.len() {
+            if state.focus == PaneFocus::Inspector
+                && state.active_surface == ControlSurface::Toml
+                && state.inspector_mode == InspectorMode::TomlMenu
+            {
+                let max_idx = TomlField::all().len().saturating_sub(1);
+                if state.toml_cursor < max_idx {
+                    state.toml_cursor += 1;
+                }
+            } else if state.selected + 1 < state.aliases.len() {
                 state.selected += 1;
+                ensure_selection_visible(state, list_height);
             }
-            ensure_selection_visible(state, list_height);
             LoopAction::Continue
         }
         KeyCode::Home | KeyCode::Char('g') => {
@@ -217,11 +344,15 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
         }
         KeyCode::Char('h') | KeyCode::Left => {
             state.focus = PaneFocus::List;
+            state.inspector_mode = InspectorMode::Browse;
             LoopAction::Continue
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            if state.layout == LayoutKind::Split && state.focus == PaneFocus::List {
+            if state.focus == PaneFocus::List {
                 state.focus = PaneFocus::Inspector;
+                if state.active_surface == ControlSurface::Toml {
+                    state.inspector_mode = InspectorMode::TomlMenu;
+                }
             } else {
                 cycle_surface(state, true);
             }
@@ -251,11 +382,543 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             set_active_surface(state, ControlSurface::Reconcile);
             LoopAction::Continue
         }
+        KeyCode::Char('+') => {
+            state.prompt = Some(PromptState {
+                kind: PromptKind::NewAlias,
+                input: String::new(),
+            });
+            LoopAction::Continue
+        }
+        KeyCode::Char('%') => {
+            let seed = state
+                .aliases
+                .get(state.selected)
+                .cloned()
+                .unwrap_or_default();
+            state.prompt = Some(PromptState {
+                kind: PromptKind::RenameAlias,
+                input: seed,
+            });
+            LoopAction::Continue
+        }
+        KeyCode::Char('!') => {
+            state.prompt = Some(PromptState {
+                kind: PromptKind::DuplicateAlias,
+                input: String::new(),
+            });
+            LoopAction::Continue
+        }
+        KeyCode::Char('-') => {
+            state.prompt = Some(PromptState {
+                kind: PromptKind::DeleteAlias,
+                input: String::new(),
+            });
+            LoopAction::Continue
+        }
         KeyCode::Char('r') => LoopAction::Refresh,
         KeyCode::Char('e') => LoopAction::ActivateReconcileQuick,
-        KeyCode::Enter => LoopAction::ActivateCurrentSurface,
+        KeyCode::Enter => {
+            if state.active_surface == ControlSurface::Toml {
+                return handle_toml_enter(state);
+            }
+            if state.focus == PaneFocus::List && state.layout == LayoutKind::Modal {
+                state.focus = PaneFocus::Inspector;
+                state.inspector_mode = InspectorMode::Browse;
+                return LoopAction::Continue;
+            }
+            LoopAction::ActivateCurrentSurface
+        }
         _ => LoopAction::Continue,
     }
+}
+
+fn handle_toml_enter(state: &mut AppState) -> LoopAction {
+    if state.focus == PaneFocus::List {
+        state.focus = PaneFocus::Inspector;
+        state.inspector_mode = InspectorMode::TomlMenu;
+        return LoopAction::Continue;
+    }
+    state.inspector_mode = InspectorMode::TomlMenu;
+    let fields = TomlField::all();
+    let field = fields
+        .get(state.toml_cursor)
+        .copied()
+        .unwrap_or(TomlField::Exec);
+    if field.is_toggle() {
+        if let Err(err) = toggle_selected_alias_toml_field(state, field) {
+            state.alert_message = Some(err.to_string());
+        }
+        return LoopAction::Continue;
+    }
+    match selected_alias_toml_field_value(state, field) {
+        Ok(value) => {
+            state.prompt = Some(PromptState {
+                kind: PromptKind::EditTomlField(field),
+                input: value,
+            });
+        }
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+        }
+    }
+    LoopAction::Continue
+}
+
+fn handle_prompt_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> LoopAction {
+    let Some(prompt) = state.prompt.as_mut() else {
+        return LoopAction::Continue;
+    };
+    match key.code {
+        KeyCode::Esc => {
+            state.prompt = None;
+            LoopAction::Continue
+        }
+        KeyCode::Enter => {
+            submit_prompt(state, list_height);
+            LoopAction::Continue
+        }
+        KeyCode::Backspace => {
+            prompt.input.pop();
+            LoopAction::Continue
+        }
+        KeyCode::Char(ch) => {
+            prompt.input.push(ch);
+            LoopAction::Continue
+        }
+        _ => LoopAction::Continue,
+    }
+}
+
+fn submit_prompt(state: &mut AppState, list_height: usize) {
+    let Some(prompt) = state.prompt.take() else {
+        return;
+    };
+    let input = prompt.input.trim().to_string();
+    let result = match prompt.kind {
+        PromptKind::NewAlias => {
+            if input.is_empty() {
+                Err(anyhow::anyhow!("new alias name cannot be blank"))
+            } else {
+                crate::alias_admin::create_alias(&input).map(|_| {
+                    refresh_aliases_and_select(state, &input, list_height);
+                    state.active_surface = ControlSurface::Toml;
+                    state.focus = PaneFocus::Inspector;
+                    state.inspector_mode = InspectorMode::TomlMenu;
+                })
+            }
+        }
+        PromptKind::RenameAlias => {
+            let Some(source_alias) = state.aliases.get(state.selected).cloned() else {
+                return;
+            };
+            if input.is_empty() {
+                Err(anyhow::anyhow!("rename target alias cannot be blank"))
+            } else {
+                crate::alias_admin::rename_alias(&source_alias, &input).map(|_| {
+                    refresh_aliases_and_select(state, &input, list_height);
+                })
+            }
+        }
+        PromptKind::DuplicateAlias => {
+            let Some(source_alias) = state.aliases.get(state.selected).cloned() else {
+                return;
+            };
+            if input.is_empty() {
+                Err(anyhow::anyhow!("duplicate target alias cannot be blank"))
+            } else {
+                crate::alias_admin::duplicate_alias(&source_alias, &input).map(|_| {
+                    refresh_aliases_and_select(state, &input, list_height);
+                })
+            }
+        }
+        PromptKind::DeleteAlias => {
+            let Some(alias) = state.aliases.get(state.selected).cloned() else {
+                return;
+            };
+            if matches!(input.as_str(), "y" | "Y" | "yes" | "YES" | "Yes") {
+                crate::alias_admin::remove_alias_config(&alias)
+                    .map(|_| refresh_aliases_after_delete(state, list_height))
+            } else {
+                state.alert_message = Some(String::from("delete aborted"));
+                Ok(())
+            }
+        }
+        PromptKind::EditTomlField(field) => {
+            apply_selected_alias_toml_field_input(state, field, &input)
+        }
+    };
+
+    if let Err(err) = result {
+        state.alert_message = Some(err.to_string());
+    }
+}
+
+fn refresh_aliases_and_select(state: &mut AppState, alias: &str, list_height: usize) {
+    if let Err(err) = refresh_aliases(state) {
+        state.alert_message = Some(err.to_string());
+        return;
+    }
+    if let Some(idx) = state.aliases.iter().position(|value| value == alias) {
+        state.selected = idx;
+    }
+    ensure_selection_visible(state, list_height);
+    invalidate_artifacts(state);
+}
+
+fn refresh_aliases_after_delete(state: &mut AppState, list_height: usize) {
+    if let Err(err) = refresh_aliases(state) {
+        state.alert_message = Some(err.to_string());
+        return;
+    }
+    ensure_selection_visible(state, list_height);
+    invalidate_artifacts(state);
+}
+
+fn invalidate_artifacts(state: &mut AppState) {
+    state.artifacts.selected_alias = None;
+    sync_artifacts_for_selection(state);
+}
+
+fn selected_alias_toml_field_value(state: &AppState, field: TomlField) -> anyhow::Result<String> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (doc, _) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
+    Ok(toml_field_value(&doc, field))
+}
+
+fn toggle_selected_alias_toml_field(state: &mut AppState, field: TomlField) -> anyhow::Result<()> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    toggle_toml_field(&mut doc, field, &alias)?;
+    crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    invalidate_artifacts(state);
+    Ok(())
+}
+
+fn apply_selected_alias_toml_field_input(
+    state: &mut AppState,
+    field: TomlField,
+    input: &str,
+) -> anyhow::Result<()> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    apply_toml_field_input(&mut doc, field, input, &alias)?;
+    crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    invalidate_artifacts(state);
+    Ok(())
+}
+
+fn default_journal_doc() -> crate::alias_doc::AliasJournalDoc {
+    crate::alias_doc::AliasJournalDoc {
+        namespace: String::from("default"),
+        stderr: true,
+        identifier: None,
+    }
+}
+
+fn default_reconcile_doc(alias: &str) -> crate::alias_doc::AliasReconcileDoc {
+    crate::alias_doc::AliasReconcileDoc {
+        script: format!("{alias}.reconcile.rhai"),
+        function: Some(String::from("reconcile")),
+    }
+}
+
+fn default_bashcomp_doc() -> crate::alias_doc::AliasBashcompDoc {
+    crate::alias_doc::AliasBashcompDoc {
+        disabled: false,
+        passthrough: false,
+        script: None,
+        rhai_script: None,
+        rhai_function: None,
+    }
+}
+
+fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> String {
+    match field {
+        TomlField::Exec => doc.exec.clone(),
+        TomlField::Args => doc.args.join(", "),
+        TomlField::Env => {
+            let mut entries: Vec<_> = doc
+                .env
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect();
+            entries.sort();
+            entries.join(", ")
+        }
+        TomlField::EnvRemove => doc.env_remove.join(", "),
+        TomlField::JournalEnabled => doc.journal.is_some().to_string(),
+        TomlField::JournalNamespace => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.namespace.clone())
+            .unwrap_or_default(),
+        TomlField::JournalStderr => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.stderr.to_string())
+            .unwrap_or_else(|| String::from("true")),
+        TomlField::JournalIdentifier => doc
+            .journal
+            .as_ref()
+            .and_then(|journal| journal.identifier.clone())
+            .unwrap_or_default(),
+        TomlField::ReconcileEnabled => doc.reconcile.is_some().to_string(),
+        TomlField::ReconcileScript => doc
+            .reconcile
+            .as_ref()
+            .map(|reconcile| reconcile.script.clone())
+            .unwrap_or_default(),
+        TomlField::ReconcileFunction => doc
+            .reconcile
+            .as_ref()
+            .and_then(|reconcile| reconcile.function.clone())
+            .unwrap_or_default(),
+        TomlField::BashcompEnabled => doc.bashcomp.is_some().to_string(),
+        TomlField::BashcompDisabled => doc
+            .bashcomp
+            .as_ref()
+            .map(|bashcomp| bashcomp.disabled.to_string())
+            .unwrap_or_else(|| String::from("false")),
+        TomlField::BashcompPassthrough => doc
+            .bashcomp
+            .as_ref()
+            .map(|bashcomp| bashcomp.passthrough.to_string())
+            .unwrap_or_else(|| String::from("false")),
+        TomlField::BashcompScript => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.script.clone())
+            .unwrap_or_default(),
+        TomlField::BashcompRhaiScript => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.rhai_script.clone())
+            .unwrap_or_default(),
+        TomlField::BashcompRhaiFunction => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.rhai_function.clone())
+            .unwrap_or_default(),
+    }
+}
+
+fn toggle_toml_field(
+    doc: &mut crate::alias_doc::AliasDoc,
+    field: TomlField,
+    alias: &str,
+) -> anyhow::Result<()> {
+    match field {
+        TomlField::JournalEnabled => {
+            doc.journal = if doc.journal.is_some() {
+                None
+            } else {
+                Some(default_journal_doc())
+            };
+        }
+        TomlField::JournalStderr => {
+            let journal = doc.journal.get_or_insert_with(default_journal_doc);
+            journal.stderr = !journal.stderr;
+        }
+        TomlField::ReconcileEnabled => {
+            doc.reconcile = if doc.reconcile.is_some() {
+                None
+            } else {
+                Some(default_reconcile_doc(alias))
+            };
+        }
+        TomlField::BashcompEnabled => {
+            doc.bashcomp = if doc.bashcomp.is_some() {
+                None
+            } else {
+                Some(default_bashcomp_doc())
+            };
+        }
+        TomlField::BashcompDisabled => {
+            let bashcomp = doc.bashcomp.get_or_insert_with(default_bashcomp_doc);
+            bashcomp.disabled = !bashcomp.disabled;
+        }
+        TomlField::BashcompPassthrough => {
+            let bashcomp = doc.bashcomp.get_or_insert_with(default_bashcomp_doc);
+            bashcomp.passthrough = !bashcomp.passthrough;
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "field `{}` is not a toggle field",
+                field.label()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn apply_toml_field_input(
+    doc: &mut crate::alias_doc::AliasDoc,
+    field: TomlField,
+    input: &str,
+    alias: &str,
+) -> anyhow::Result<()> {
+    match field {
+        TomlField::Exec => {
+            doc.exec = input.to_string();
+        }
+        TomlField::Args => {
+            doc.args = split_csv(input);
+        }
+        TomlField::Env => {
+            doc.env.clear();
+            for entry in split_csv(input) {
+                let (key, value) = crate::alias_admin_validation::parse_env_assignment(&entry)?;
+                doc.env.insert(key, value);
+            }
+        }
+        TomlField::EnvRemove => {
+            doc.env_remove = split_csv(input);
+        }
+        TomlField::JournalEnabled
+        | TomlField::JournalStderr
+        | TomlField::ReconcileEnabled
+        | TomlField::BashcompEnabled
+        | TomlField::BashcompDisabled
+        | TomlField::BashcompPassthrough => {
+            let bool_value = crate::alias_admin_validation::parse_bool_flag(input, field.label())?;
+            match field {
+                TomlField::JournalEnabled => {
+                    doc.journal = if bool_value {
+                        Some(doc.journal.clone().unwrap_or_else(default_journal_doc))
+                    } else {
+                        None
+                    };
+                }
+                TomlField::JournalStderr => {
+                    doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+                    if let Some(journal) = doc.journal.as_mut() {
+                        journal.stderr = bool_value;
+                    }
+                }
+                TomlField::ReconcileEnabled => {
+                    doc.reconcile = if bool_value {
+                        Some(doc.reconcile.clone().unwrap_or_else(|| default_reconcile_doc(alias)))
+                    } else {
+                        None
+                    };
+                }
+                TomlField::BashcompEnabled => {
+                    doc.bashcomp = if bool_value {
+                        Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc))
+                    } else {
+                        None
+                    };
+                }
+                TomlField::BashcompDisabled => {
+                    doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+                    if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                        bashcomp.disabled = bool_value;
+                    }
+                }
+                TomlField::BashcompPassthrough => {
+                    doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+                    if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                        bashcomp.passthrough = bool_value;
+                    }
+                }
+                _ => {}
+            }
+        }
+        TomlField::JournalNamespace => {
+            doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+            if let Some(journal) = doc.journal.as_mut() {
+                journal.namespace = input.to_string();
+            }
+        }
+        TomlField::JournalIdentifier => {
+            doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+            if let Some(journal) = doc.journal.as_mut() {
+                journal.identifier = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::ReconcileScript => {
+            doc.reconcile = Some(
+                doc.reconcile
+                    .clone()
+                    .unwrap_or_else(|| default_reconcile_doc(alias)),
+            );
+            if let Some(reconcile) = doc.reconcile.as_mut() {
+                reconcile.script = input.to_string();
+            }
+        }
+        TomlField::ReconcileFunction => {
+            doc.reconcile = Some(
+                doc.reconcile
+                    .clone()
+                    .unwrap_or_else(|| default_reconcile_doc(alias)),
+            );
+            if let Some(reconcile) = doc.reconcile.as_mut() {
+                reconcile.function = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompScript => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.script = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompRhaiScript => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.rhai_script = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompRhaiFunction => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.rhai_function = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
+fn split_csv(input: &str) -> Vec<String> {
+    if input.trim().is_empty() {
+        return Vec::new();
+    }
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn refresh_aliases(state: &mut AppState) -> anyhow::Result<()> {
@@ -335,7 +998,26 @@ fn execute_surface_action(
                     })
                 })
             } else {
-                state.alert_message = Some(format!("Alias `{alias}` has no legacy config file"));
+                let target_path = crate::config_dir().join(alias);
+                let template = legacy_draft_template(alias);
+                let persisted = pause_terminal_for_subprocess(terminal, || {
+                    crate::tui_nvim::open_alias_draft_editor_with_mode(
+                        &target_path,
+                        &template,
+                        state.tmux_mode,
+                    )
+                    .with_context(|| format!("failed to open legacy draft for alias `{alias}`"))
+                })?;
+                if persisted {
+                    refresh_aliases(state)?;
+                    state.alert_message = Some(format!(
+                        "created legacy config for `{alias}` at {}",
+                        target_path.display()
+                    ));
+                } else {
+                    state.alert_message =
+                        Some(format!("legacy creation aborted for alias `{alias}`"));
+                }
                 return Ok(());
             }
         }
@@ -350,9 +1032,7 @@ fn execute_surface_action(
                     .with_context(|| format!("failed to open reconcile script for alias `{alias}`"))
                 })
             } else {
-                state.alert_message = Some(format!(
-                    "Alias `{alias}` has no extant reconcile script file"
-                ));
+                create_missing_reconcile_artifact(state, terminal, alias)?;
                 return Ok(());
             }
         }
@@ -364,6 +1044,67 @@ fn execute_surface_action(
     }
 
     refresh_aliases(state)?;
+    Ok(())
+}
+
+fn legacy_draft_template(alias: &str) -> String {
+    format!(
+        "# CHOPPER_DRAFT: legacy alias draft for `{alias}`\n# CHOPPER_DRAFT: write and quit to save, or :q! to abort\n# Example: exec --flag value\n"
+    )
+}
+
+fn reconcile_draft_template(alias: &str) -> String {
+    format!(
+        "// CHOPPER_DRAFT: reconcile script draft for `{alias}`\n// CHOPPER_DRAFT: write and quit to save, or :q! to abort\nfn reconcile(ctx) {{\n    #{{}}\n}}\n\nfn complete(ctx) {{\n    []\n}}\n"
+    )
+}
+
+fn resolve_script_path_from_doc_path(script: &str, doc_path: &std::path::Path) -> PathBuf {
+    let script_path = PathBuf::from(script);
+    if script_path.is_absolute() {
+        script_path
+    } else {
+        doc_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(script_path)
+    }
+}
+
+fn create_missing_reconcile_artifact(
+    state: &mut AppState,
+    terminal: &mut AppTerminal,
+    alias: &str,
+) -> anyhow::Result<()> {
+    let (mut doc, doc_path) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
+    let had_reconcile = doc.reconcile.is_some();
+    let reconcile = doc
+        .reconcile
+        .get_or_insert_with(|| default_reconcile_doc(alias));
+    let script_path = resolve_script_path_from_doc_path(&reconcile.script, &doc_path);
+    let template = reconcile_draft_template(alias);
+    let persisted = pause_terminal_for_subprocess(terminal, || {
+        crate::tui_nvim::open_rhai_draft_editor_with_mode(
+            &script_path,
+            &template,
+            &crate::rhai_api_catalog::exported_api_names(),
+            state.tmux_mode,
+        )
+        .with_context(|| format!("failed to open reconcile draft for alias `{alias}`"))
+    })?;
+
+    if persisted {
+        if !had_reconcile {
+            crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+        }
+        refresh_aliases(state)?;
+        state.alert_message = Some(format!(
+            "created reconcile script for `{alias}` at {}",
+            script_path.display()
+        ));
+    } else {
+        state.alert_message = Some(format!("reconcile creation aborted for alias `{alias}`"));
+    }
     Ok(())
 }
 
@@ -431,13 +1172,9 @@ fn sync_artifacts_for_selection(state: &mut AppState) {
         .as_deref()
         .map(collect_alias_artifacts)
         .unwrap_or_default();
-
-    if !surface_available(&state.artifacts, state.active_surface) {
-        state.active_surface = ControlSurface::Summary;
-    }
 }
 
-fn surface_available(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
+fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
     match surface {
         ControlSurface::Summary => true,
         ControlSurface::Toml => artifacts.toml_path.is_some(),
@@ -447,10 +1184,14 @@ fn surface_available(artifacts: &AliasArtifacts, surface: ControlSurface) -> boo
 }
 
 fn set_active_surface(state: &mut AppState, surface: ControlSurface) {
-    if surface_available(&state.artifacts, surface) {
-        state.active_surface = surface;
+    state.active_surface = surface;
+    state.inspector_mode = if surface == ControlSurface::Toml {
+        InspectorMode::TomlMenu
     } else {
-        state.alert_message = Some(format!("`{}` tab is unavailable", surface.label()));
+        InspectorMode::Browse
+    };
+    if state.layout == LayoutKind::Modal {
+        state.focus = PaneFocus::Inspector;
     }
 }
 
@@ -466,17 +1207,19 @@ fn cycle_surface(state: &mut AppState, forward: bool) {
         } else {
             (idx + all.len() - 1) % all.len()
         };
-        let candidate = all[idx];
-        if surface_available(&state.artifacts, candidate) {
-            state.active_surface = candidate;
-            return;
-        }
+        state.active_surface = all[idx];
+        state.inspector_mode = if state.active_surface == ControlSurface::Toml {
+            InspectorMode::TomlMenu
+        } else {
+            InspectorMode::Browse
+        };
+        return;
     }
 }
 
-fn pause_terminal_for_subprocess<F>(terminal: &mut AppTerminal, run: F) -> anyhow::Result<()>
+fn pause_terminal_for_subprocess<T, F>(terminal: &mut AppTerminal, run: F) -> anyhow::Result<T>
 where
-    F: FnOnce() -> anyhow::Result<()>,
+    F: FnOnce() -> anyhow::Result<T>,
 {
     terminal::disable_raw_mode().context("failed to disable raw mode")?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)
@@ -501,8 +1244,8 @@ where
     }
 
     match (run_result, cleanup_errors.is_empty()) {
-        (Ok(()), true) => Ok(()),
-        (Ok(()), false) => {
+        (Ok(value), true) => Ok(value),
+        (Ok(_), false) => {
             anyhow::bail!("terminal cleanup failed: {}", cleanup_errors.join("; "))
         }
         (Err(err), true) => Err(err),
@@ -532,7 +1275,8 @@ fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
         return;
     }
 
-    let constraints = if state.alert_message.is_some() {
+    let has_status_row = state.alert_message.is_some() || state.prompt.is_some();
+    let constraints = if has_status_row {
         vec![
             Constraint::Length(1),
             Constraint::Min(0),
@@ -552,16 +1296,64 @@ fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
     render_banner(frame, chunks[0], state);
     render_content(frame, chunks[1], state, layout_plan);
 
-    if let (Some(message), Some(alert_area)) = (&state.alert_message, chunks.get(2)) {
-        frame.render_widget(
-            Paragraph::new(truncate_line(message, alert_area.width as usize)).style(
-                Style::default()
-                    .fg(Color::Red)
-                    .bg(Color::Black)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            *alert_area,
-        );
+    if let Some(status_area) = chunks.get(2) {
+        if let Some(prompt) = &state.prompt {
+            let prompt_text = prompt_hint(prompt, state);
+            frame.render_widget(
+                Paragraph::new(truncate_line(&prompt_text, status_area.width as usize)).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                *status_area,
+            );
+        } else if let Some(message) = &state.alert_message {
+            frame.render_widget(
+                Paragraph::new(truncate_line(message, status_area.width as usize)).style(
+                    Style::default()
+                        .fg(Color::Red)
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                *status_area,
+            );
+        }
+    }
+}
+
+fn prompt_hint(prompt: &PromptState, state: &AppState) -> String {
+    match prompt.kind {
+        PromptKind::NewAlias => format!(
+            "New alias name: {} (Enter to create, Esc to cancel)",
+            prompt.input
+        ),
+        PromptKind::RenameAlias => {
+            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            format!(
+                "Rename `{source}` to: {} (Enter to apply, Esc to cancel)",
+                prompt.input
+            )
+        }
+        PromptKind::DuplicateAlias => {
+            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            format!(
+                "Duplicate `{source}` as: {} (Enter to apply, Esc to cancel)",
+                prompt.input
+            )
+        }
+        PromptKind::DeleteAlias => {
+            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            format!(
+                "Delete `{source}`? type `y` and Enter to confirm (Esc to cancel): {}",
+                prompt.input
+            )
+        }
+        PromptKind::EditTomlField(field) => format!(
+            "Edit {} = {} (Enter to save, Esc to cancel)",
+            field.label(),
+            prompt.input
+        ),
     }
 }
 
@@ -582,7 +1374,7 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn banner_guidance(state: &AppState) -> String {
     format!(
-        "Enter: open {} tab | Tab: cycle tabs | e: reconcile | r: refresh | q: quit",
+        "Enter: activate {} | Tab: tabs | +/%/!/-: alias ops | e: reconcile | r: refresh | q: quit",
         state.active_surface.label()
     )
 }
@@ -760,19 +1552,19 @@ fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> 
 
     let mut spans = Vec::new();
     for surface in ControlSurface::all() {
-        let enabled = surface_available(&state.artifacts, surface);
+        let has_data = surface_has_data(&state.artifacts, surface);
         let active = state.active_surface == surface;
         let label = if active {
             format!("[{}]", surface.label())
         } else {
             format!(" {} ", surface.label())
         };
-        let style = if !enabled {
-            Style::default().fg(Color::DarkGray)
-        } else if active {
+        let style = if active {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
+        } else if has_data {
+            Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -797,15 +1589,35 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
             } else {
                 lines.push(String::from("preferred config: <missing>"));
             }
-            lines.push(String::from("Enter: edit the selected tab target"));
+            lines.push(String::from("Actions: + new | % rename | ! duplicate | - delete"));
+            lines.push(String::from("Modal wizard: Enter/right opens inspector in modal layout"));
         }
         ControlSurface::Toml => {
+            lines.push(String::from("toml schema designer"));
             if let Some(path) = &state.artifacts.toml_path {
-                lines.push(String::from("toml tab"));
                 lines.push(format!("file: {}", path.display()));
-                lines.push(String::from("Enter: edit toml config"));
             } else {
-                lines.push(String::from("toml tab unavailable (no extant TOML file)."));
+                lines.push(String::from("file: <new TOML will be created on first save>"));
+            }
+            lines.push(String::from("Enter: edit selected field | Tab: switch tabs"));
+            lines.push(String::from("j/k: move field | Esc: close prompt"));
+
+            if state.focus == PaneFocus::Inspector && state.inspector_mode == InspectorMode::TomlMenu
+            {
+                if let Some(alias_name) = state.artifacts.selected_alias.as_deref() {
+                    match crate::alias_admin::load_or_seed_alias_doc(alias_name) {
+                        Ok((doc, _)) => {
+                            for (idx, field) in TomlField::all().iter().enumerate() {
+                                let prefix = if idx == state.toml_cursor { ">" } else { " " };
+                                let value = toml_field_value(&doc, *field);
+                                lines.push(format!("{prefix} {:<22} {value}", field.label()));
+                            }
+                        }
+                        Err(err) => {
+                            lines.push(format!("error loading TOML: {err}"));
+                        }
+                    }
+                }
             }
         }
         ControlSurface::Legacy => {
@@ -814,9 +1626,8 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
                 lines.push(format!("file: {}", path.display()));
                 lines.push(String::from("Enter: edit legacy config"));
             } else {
-                lines.push(String::from(
-                    "legacy tab unavailable (no extant legacy file).",
-                ));
+                lines.push(String::from("legacy tab (no file yet)"));
+                lines.push(String::from("Enter: open draft and save to create legacy file"));
             }
         }
         ControlSurface::Reconcile => {
@@ -825,11 +1636,9 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
                 lines.push(format!("script: {}", path.display()));
                 lines.push(String::from("Enter/e: edit reconcile script"));
             } else {
+                lines.push(String::from("reconcile tab (script missing)"));
                 lines.push(String::from(
-                    "reconcile tab unavailable (no extant reconcile script file).",
-                ));
-                lines.push(String::from(
-                    "Configure `reconcile.script` in TOML, ensure file exists, then refresh.",
+                    "Enter/e: open draft script; save persists script and TOML linkage",
                 ));
             }
         }
@@ -842,6 +1651,11 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
 }
 
 fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: TabStripMode) {
+    if state.focus == PaneFocus::Inspector {
+        render_inspector(frame, area, state, tab_mode);
+        return;
+    }
+
     if state.aliases.is_empty() {
         frame.render_widget(
             Paragraph::new("No aliases configured.").style(Style::default().fg(Color::DarkGray)),
@@ -1037,9 +1851,9 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, compute_layout, content_height, cycle_surface,
-        ensure_selection_visible, handle_key_event, set_active_surface, surface_available,
-        AppState, ControlSurface, LayoutKind, LoopAction, PaneFocus, TabStripMode,
+        alias_viewport_rows, compute_layout, content_height, cycle_surface, ensure_selection_visible,
+        handle_key_event, set_active_surface, surface_has_data, AppState, ControlSurface,
+        InspectorMode, LayoutKind, LoopAction, PaneFocus, TabStripMode,
     };
     use crate::tui_nvim::TmuxMode;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -1053,6 +1867,9 @@ mod tests {
             layout,
             active_surface: ControlSurface::Summary,
             artifacts: Default::default(),
+            inspector_mode: InspectorMode::Browse,
+            toml_cursor: 0,
+            prompt: None,
             alert_message: None,
             tmux_mode: TmuxMode::Off,
         }
@@ -1149,12 +1966,12 @@ mod tests {
     }
 
     #[test]
-    fn control_surfaces_respect_available_artifacts() {
+    fn control_surfaces_report_data_presence() {
         let artifacts = super::AliasArtifacts::default();
-        assert!(surface_available(&artifacts, ControlSurface::Summary));
-        assert!(!surface_available(&artifacts, ControlSurface::Toml));
-        assert!(!surface_available(&artifacts, ControlSurface::Legacy));
-        assert!(!surface_available(&artifacts, ControlSurface::Reconcile));
+        assert!(surface_has_data(&artifacts, ControlSurface::Summary));
+        assert!(!surface_has_data(&artifacts, ControlSurface::Toml));
+        assert!(!surface_has_data(&artifacts, ControlSurface::Legacy));
+        assert!(!surface_has_data(&artifacts, ControlSurface::Reconcile));
     }
 
     #[test]
@@ -1171,7 +1988,7 @@ mod tests {
     }
 
     #[test]
-    fn right_focus_only_changes_in_split_layout() {
+    fn right_focus_moves_into_inspector_in_any_layout() {
         let mut split = sample_state(LayoutKind::Split);
         let mut modal = sample_state(LayoutKind::Modal);
         let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
@@ -1182,25 +1999,32 @@ mod tests {
 
         let modal_action = handle_key_event(&mut modal, key, 10);
         assert_eq!(modal_action, LoopAction::Continue);
-        assert_eq!(modal.active_surface, ControlSurface::Summary);
+        assert_eq!(modal.focus, PaneFocus::Inspector);
     }
 
     #[test]
-    fn selecting_unavailable_surface_sets_temporary_alert() {
+    fn selecting_missing_surface_is_allowed() {
         let mut state = sample_state(LayoutKind::Split);
         set_active_surface(&mut state, ControlSurface::Reconcile);
-        assert_eq!(state.active_surface, ControlSurface::Summary);
-        assert!(state
-            .alert_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("tab"));
+        assert_eq!(state.active_surface, ControlSurface::Reconcile);
     }
 
     #[test]
-    fn surface_cycle_keeps_summary_when_no_other_surfaces_exist() {
+    fn surface_cycle_visits_all_surfaces_even_without_data() {
         let mut state = sample_state(LayoutKind::Split);
         cycle_surface(&mut state, true);
-        assert_eq!(state.active_surface, ControlSurface::Summary);
+        assert_eq!(state.active_surface, ControlSurface::Toml);
+        cycle_surface(&mut state, true);
+        assert_eq!(state.active_surface, ControlSurface::Legacy);
+    }
+
+    #[test]
+    fn enter_on_toml_tab_switches_to_toml_menu_mode() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.active_surface = ControlSurface::Toml;
+        let action = handle_key_event(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 10);
+        assert_eq!(action, LoopAction::Continue);
+        assert_eq!(state.focus, PaneFocus::Inspector);
+        assert_eq!(state.inspector_mode, InspectorMode::TomlMenu);
     }
 }
