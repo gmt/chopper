@@ -96,11 +96,6 @@ pub fn open_rhai_editor_with_mode(
     launch_editor(invocation, tmux_mode)
 }
 
-pub fn open_alias_editor(path: &Path, tmux_mode: TmuxMode) -> Result<()> {
-    let invocation = build_editor_invocation(path, None)?;
-    launch_editor(invocation, tmux_mode)
-}
-
 pub fn open_rhai_draft_editor_with_mode(
     target_path: &Path,
     template: &str,

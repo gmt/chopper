@@ -81,7 +81,6 @@ impl ControlSurface {
 enum LoopAction {
     Continue,
     Refresh,
-    ActivateCurrentSurface,
     ActivateReconcileQuick,
     Quit,
 }
@@ -89,6 +88,86 @@ enum LoopAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InspectorMode {
     Browse,
+    TomlMenu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TomlField {
+    Exec,
+    Args,
+    Env,
+    EnvRemove,
+    JournalEnabled,
+    JournalNamespace,
+    JournalStderr,
+    JournalIdentifier,
+    ReconcileEnabled,
+    ReconcileScript,
+    ReconcileFunction,
+    BashcompEnabled,
+    BashcompDisabled,
+    BashcompPassthrough,
+    BashcompScript,
+    BashcompRhaiScript,
+    BashcompRhaiFunction,
+}
+
+impl TomlField {
+    fn all() -> [Self; 17] {
+        [
+            Self::Exec,
+            Self::Args,
+            Self::Env,
+            Self::EnvRemove,
+            Self::JournalEnabled,
+            Self::JournalNamespace,
+            Self::JournalStderr,
+            Self::JournalIdentifier,
+            Self::ReconcileEnabled,
+            Self::ReconcileScript,
+            Self::ReconcileFunction,
+            Self::BashcompEnabled,
+            Self::BashcompDisabled,
+            Self::BashcompPassthrough,
+            Self::BashcompScript,
+            Self::BashcompRhaiScript,
+            Self::BashcompRhaiFunction,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Args => "args",
+            Self::Env => "env",
+            Self::EnvRemove => "env_remove",
+            Self::JournalEnabled => "journal.enabled",
+            Self::JournalNamespace => "journal.namespace",
+            Self::JournalStderr => "journal.stderr",
+            Self::JournalIdentifier => "journal.identifier",
+            Self::ReconcileEnabled => "reconcile.enabled",
+            Self::ReconcileScript => "reconcile.script",
+            Self::ReconcileFunction => "reconcile.function",
+            Self::BashcompEnabled => "bashcomp.enabled",
+            Self::BashcompDisabled => "bashcomp.disabled",
+            Self::BashcompPassthrough => "bashcomp.passthrough",
+            Self::BashcompScript => "bashcomp.script",
+            Self::BashcompRhaiScript => "bashcomp.rhai_script",
+            Self::BashcompRhaiFunction => "bashcomp.rhai_function",
+        }
+    }
+
+    fn is_toggle(self) -> bool {
+        matches!(
+            self,
+            Self::JournalEnabled
+                | Self::JournalStderr
+                | Self::ReconcileEnabled
+                | Self::BashcompEnabled
+                | Self::BashcompDisabled
+                | Self::BashcompPassthrough
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +176,7 @@ enum PromptKind {
     RenameAlias,
     DuplicateAlias,
     DeleteAlias,
+    EditTomlField(TomlField),
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +203,7 @@ struct AppState {
     active_surface: ControlSurface,
     artifacts: AliasArtifacts,
     inspector_mode: InspectorMode,
+    toml_cursor: usize,
     prompt: Option<PromptState>,
     alert_message: Option<String>,
     diagnostics: Vec<String>,
@@ -160,6 +241,7 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         active_surface: ControlSurface::Toml,
         artifacts: AliasArtifacts::default(),
         inspector_mode: InspectorMode::Browse,
+        toml_cursor: 0,
         prompt: None,
         alert_message: None,
         diagnostics: Vec::new(),
@@ -199,9 +281,6 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
             LoopAction::Refresh => {
                 refresh_aliases(&mut state)?;
                 diagnostics_rx = Some(spawn_config_scan_worker());
-            }
-            LoopAction::ActivateCurrentSurface => {
-                activate_current_surface(&mut state, &mut terminal)?;
             }
             LoopAction::ActivateReconcileQuick => {
                 activate_reconcile_quick(&mut state, &mut terminal)?;
@@ -258,14 +337,31 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => LoopAction::Quit,
         KeyCode::Up | KeyCode::Char('k') => {
-            if state.selected > 0 {
+            if state.focus == PaneFocus::Inspector
+                && state.active_surface == ControlSurface::Toml
+                && state.inspector_mode == InspectorMode::TomlMenu
+            {
+                if state.toml_cursor > 0 {
+                    state.toml_cursor -= 1;
+                }
+            } else if state.selected > 0 {
                 state.selected -= 1;
                 ensure_selection_visible(state, list_height);
             }
             LoopAction::Continue
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if state.selected + 1 < state.aliases.len() {
+            if state.focus == PaneFocus::Inspector
+                && state.active_surface == ControlSurface::Toml
+                && state.inspector_mode == InspectorMode::TomlMenu
+            {
+                let field_count = toml_menu_fields_for_selected_alias(state)
+                    .map(|fields| fields.len())
+                    .unwrap_or_else(|_| TomlField::all().len());
+                if state.toml_cursor.saturating_add(1) < field_count {
+                    state.toml_cursor += 1;
+                }
+            } else if state.selected + 1 < state.aliases.len() {
                 state.selected += 1;
                 ensure_selection_visible(state, list_height);
             }
@@ -289,7 +385,11 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
         KeyCode::Char('l') | KeyCode::Right => {
             if state.focus == PaneFocus::List {
                 state.focus = PaneFocus::Inspector;
-                state.inspector_mode = InspectorMode::Browse;
+                if state.active_surface == ControlSurface::Toml {
+                    state.inspector_mode = InspectorMode::TomlMenu;
+                } else {
+                    state.inspector_mode = InspectorMode::Browse;
+                }
             } else {
                 cycle_surface(state, true);
             }
@@ -349,17 +449,65 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             LoopAction::Continue
         }
         KeyCode::Char('r') => LoopAction::Refresh,
-        KeyCode::Char('e') => LoopAction::ActivateReconcileQuick,
+        KeyCode::Char('e') => {
+            set_active_surface(state, ControlSurface::Reconcile);
+            LoopAction::ActivateReconcileQuick
+        }
         KeyCode::Enter => {
+            if state.active_surface == ControlSurface::Toml {
+                return handle_toml_enter(state);
+            }
             if state.focus == PaneFocus::List {
                 state.focus = PaneFocus::Inspector;
                 state.inspector_mode = InspectorMode::Browse;
-                return LoopAction::Continue;
             }
-            LoopAction::ActivateCurrentSurface
+            LoopAction::Continue
         }
         _ => LoopAction::Continue,
     }
+}
+
+fn handle_toml_enter(state: &mut AppState) -> LoopAction {
+    if state.focus == PaneFocus::List {
+        state.focus = PaneFocus::Inspector;
+        state.inspector_mode = InspectorMode::TomlMenu;
+        return LoopAction::Continue;
+    }
+
+    state.inspector_mode = InspectorMode::TomlMenu;
+    let fields = match toml_menu_fields_for_selected_alias(state) {
+        Ok(fields) => fields,
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+            return LoopAction::Continue;
+        }
+    };
+    if fields.is_empty() {
+        return LoopAction::Continue;
+    }
+    let field = fields
+        .get(state.toml_cursor)
+        .copied()
+        .unwrap_or(TomlField::Exec);
+    if field.is_toggle() {
+        if let Err(err) = toggle_selected_alias_toml_field(state, field) {
+            state.alert_message = Some(err.to_string());
+        }
+        return LoopAction::Continue;
+    }
+    match selected_alias_toml_field_value(state, field) {
+        Ok(value) => {
+            state.prompt = Some(PromptState {
+                kind: PromptKind::EditTomlField(field),
+                input: value,
+                keep_configs: false,
+            });
+        }
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+        }
+    }
+    LoopAction::Continue
 }
 
 fn handle_prompt_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> LoopAction {
@@ -413,7 +561,7 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
                     refresh_aliases_and_select(state, &input, list_height);
                     state.active_surface = ControlSurface::Toml;
                     state.focus = PaneFocus::Inspector;
-                    state.inspector_mode = InspectorMode::Browse;
+                    state.inspector_mode = InspectorMode::TomlMenu;
                 })
             }
         }
@@ -453,6 +601,9 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
                 Ok(())
             }
         }
+        PromptKind::EditTomlField(field) => {
+            apply_selected_alias_toml_field_input(state, field, &input)
+        }
     };
 
     if let Err(err) = result {
@@ -486,11 +637,52 @@ fn invalidate_artifacts(state: &mut AppState) {
     sync_artifacts_for_selection(state);
 }
 
-fn default_reconcile_doc(alias: &str) -> crate::alias_doc::AliasReconcileDoc {
-    crate::alias_doc::AliasReconcileDoc {
-        script: format!("{alias}.reconcile.rhai"),
-        function: Some(String::from("reconcile")),
-    }
+fn toml_menu_fields_for_selected_alias(state: &AppState) -> anyhow::Result<Vec<TomlField>> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (doc, _) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
+    Ok(toml_fields_in_display_order(&doc))
+}
+
+fn selected_alias_toml_field_value(state: &AppState, field: TomlField) -> anyhow::Result<String> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (doc, _) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
+    Ok(toml_field_value(&doc, field))
+}
+
+fn toggle_selected_alias_toml_field(state: &mut AppState, field: TomlField) -> anyhow::Result<()> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    toggle_toml_field(&mut doc, field, &alias)?;
+    crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    invalidate_artifacts(state);
+    Ok(())
+}
+
+fn apply_selected_alias_toml_field_input(
+    state: &mut AppState,
+    field: TomlField,
+    input: &str,
+) -> anyhow::Result<()> {
+    let alias = state
+        .aliases
+        .get(state.selected)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No alias selected"))?;
+    let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    apply_toml_field_input(&mut doc, field, input, &alias)?;
+    crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    invalidate_artifacts(state);
+    Ok(())
 }
 
 fn refresh_aliases(state: &mut AppState) -> anyhow::Result<()> {
@@ -505,18 +697,311 @@ fn refresh_aliases(state: &mut AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn activate_current_surface(
-    state: &mut AppState,
-    terminal: &mut AppTerminal,
+fn default_reconcile_doc(alias: &str) -> crate::alias_doc::AliasReconcileDoc {
+    crate::alias_doc::AliasReconcileDoc {
+        script: format!("{alias}.reconcile.rhai"),
+        function: Some(String::from("reconcile")),
+    }
+}
+
+fn default_journal_doc() -> crate::alias_doc::AliasJournalDoc {
+    crate::alias_doc::AliasJournalDoc {
+        namespace: String::from("default"),
+        stderr: true,
+        identifier: None,
+    }
+}
+
+fn default_bashcomp_doc() -> crate::alias_doc::AliasBashcompDoc {
+    crate::alias_doc::AliasBashcompDoc {
+        disabled: false,
+        passthrough: false,
+        script: None,
+        rhai_script: None,
+        rhai_function: None,
+    }
+}
+
+fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> String {
+    match field {
+        TomlField::Exec => doc.exec.clone(),
+        TomlField::Args => doc.args.join(", "),
+        TomlField::Env => {
+            let mut entries: Vec<_> = doc
+                .env
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect();
+            entries.sort();
+            entries.join(", ")
+        }
+        TomlField::EnvRemove => doc.env_remove.join(", "),
+        TomlField::JournalEnabled => doc.journal.is_some().to_string(),
+        TomlField::JournalNamespace => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.namespace.clone())
+            .unwrap_or_else(|| String::from("default")),
+        TomlField::JournalStderr => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.stderr.to_string())
+            .unwrap_or_else(|| String::from("true")),
+        TomlField::JournalIdentifier => doc
+            .journal
+            .as_ref()
+            .and_then(|journal| journal.identifier.clone())
+            .unwrap_or_default(),
+        TomlField::ReconcileEnabled => doc.reconcile.is_some().to_string(),
+        TomlField::ReconcileScript => doc
+            .reconcile
+            .as_ref()
+            .map(|reconcile| reconcile.script.clone())
+            .unwrap_or_default(),
+        TomlField::ReconcileFunction => doc
+            .reconcile
+            .as_ref()
+            .and_then(|reconcile| reconcile.function.clone())
+            .unwrap_or_else(|| String::from("reconcile")),
+        TomlField::BashcompEnabled => doc.bashcomp.is_some().to_string(),
+        TomlField::BashcompDisabled => doc
+            .bashcomp
+            .as_ref()
+            .map(|bashcomp| bashcomp.disabled.to_string())
+            .unwrap_or_else(|| String::from("false")),
+        TomlField::BashcompPassthrough => doc
+            .bashcomp
+            .as_ref()
+            .map(|bashcomp| bashcomp.passthrough.to_string())
+            .unwrap_or_else(|| String::from("false")),
+        TomlField::BashcompScript => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.script.clone())
+            .unwrap_or_default(),
+        TomlField::BashcompRhaiScript => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.rhai_script.clone())
+            .unwrap_or_default(),
+        TomlField::BashcompRhaiFunction => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|bashcomp| bashcomp.rhai_function.clone())
+            .unwrap_or_default(),
+    }
+}
+
+fn toggle_toml_field(
+    doc: &mut crate::alias_doc::AliasDoc,
+    field: TomlField,
+    alias: &str,
 ) -> anyhow::Result<()> {
-    let Some(alias) = state.aliases.get(state.selected).cloned() else {
-        state.alert_message = Some(String::from("No alias selected"));
-        return Ok(());
-    };
-    warn_missing_targets_for_active_alias(state, &alias);
-    let surface = state.active_surface;
-    execute_surface_action(state, terminal, &alias, surface)?;
+    match field {
+        TomlField::JournalEnabled => {
+            doc.journal = if doc.journal.is_some() {
+                None
+            } else {
+                Some(default_journal_doc())
+            };
+        }
+        TomlField::JournalStderr => {
+            let journal = doc.journal.get_or_insert_with(default_journal_doc);
+            journal.stderr = !journal.stderr;
+        }
+        TomlField::ReconcileEnabled => {
+            doc.reconcile = if doc.reconcile.is_some() {
+                None
+            } else {
+                Some(default_reconcile_doc(alias))
+            };
+        }
+        TomlField::BashcompEnabled => {
+            doc.bashcomp = if doc.bashcomp.is_some() {
+                None
+            } else {
+                Some(default_bashcomp_doc())
+            };
+        }
+        TomlField::BashcompDisabled => {
+            let bashcomp = doc.bashcomp.get_or_insert_with(default_bashcomp_doc);
+            bashcomp.disabled = !bashcomp.disabled;
+        }
+        TomlField::BashcompPassthrough => {
+            let bashcomp = doc.bashcomp.get_or_insert_with(default_bashcomp_doc);
+            bashcomp.passthrough = !bashcomp.passthrough;
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "field `{}` is not a toggle field",
+                field.label()
+            ));
+        }
+    }
     Ok(())
+}
+
+fn apply_toml_field_input(
+    doc: &mut crate::alias_doc::AliasDoc,
+    field: TomlField,
+    input: &str,
+    alias: &str,
+) -> anyhow::Result<()> {
+    match field {
+        TomlField::Exec => {
+            doc.exec = input.to_string();
+        }
+        TomlField::Args => {
+            doc.args = split_csv(input);
+        }
+        TomlField::Env => {
+            doc.env.clear();
+            for entry in split_csv(input) {
+                let (key, value) = crate::alias_admin_validation::parse_env_assignment(&entry)?;
+                doc.env.insert(key, value);
+            }
+        }
+        TomlField::EnvRemove => {
+            doc.env_remove = split_csv(input);
+        }
+        TomlField::JournalEnabled
+        | TomlField::JournalStderr
+        | TomlField::ReconcileEnabled
+        | TomlField::BashcompEnabled
+        | TomlField::BashcompDisabled
+        | TomlField::BashcompPassthrough => {
+            let bool_value = crate::alias_admin_validation::parse_bool_flag(input, field.label())?;
+            match field {
+                TomlField::JournalEnabled => {
+                    doc.journal = if bool_value {
+                        Some(doc.journal.clone().unwrap_or_else(default_journal_doc))
+                    } else {
+                        None
+                    };
+                }
+                TomlField::JournalStderr => {
+                    doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+                    if let Some(journal) = doc.journal.as_mut() {
+                        journal.stderr = bool_value;
+                    }
+                }
+                TomlField::ReconcileEnabled => {
+                    doc.reconcile = if bool_value {
+                        Some(
+                            doc.reconcile
+                                .clone()
+                                .unwrap_or_else(|| default_reconcile_doc(alias)),
+                        )
+                    } else {
+                        None
+                    };
+                }
+                TomlField::BashcompEnabled => {
+                    doc.bashcomp = if bool_value {
+                        Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc))
+                    } else {
+                        None
+                    };
+                }
+                TomlField::BashcompDisabled => {
+                    doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+                    if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                        bashcomp.disabled = bool_value;
+                    }
+                }
+                TomlField::BashcompPassthrough => {
+                    doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+                    if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                        bashcomp.passthrough = bool_value;
+                    }
+                }
+                _ => {}
+            }
+        }
+        TomlField::JournalNamespace => {
+            doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+            if let Some(journal) = doc.journal.as_mut() {
+                journal.namespace = input.to_string();
+            }
+        }
+        TomlField::JournalIdentifier => {
+            doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+            if let Some(journal) = doc.journal.as_mut() {
+                journal.identifier = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::ReconcileScript => {
+            doc.reconcile = Some(
+                doc.reconcile
+                    .clone()
+                    .unwrap_or_else(|| default_reconcile_doc(alias)),
+            );
+            if let Some(reconcile) = doc.reconcile.as_mut() {
+                reconcile.script = input.to_string();
+            }
+        }
+        TomlField::ReconcileFunction => {
+            doc.reconcile = Some(
+                doc.reconcile
+                    .clone()
+                    .unwrap_or_else(|| default_reconcile_doc(alias)),
+            );
+            if let Some(reconcile) = doc.reconcile.as_mut() {
+                reconcile.function = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompScript => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.script = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompRhaiScript => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.rhai_script = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+        TomlField::BashcompRhaiFunction => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.rhai_function = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
+fn split_csv(input: &str) -> Vec<String> {
+    if input.trim().is_empty() {
+        return Vec::new();
+    }
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn activate_reconcile_quick(
@@ -530,7 +1015,7 @@ fn activate_reconcile_quick(
 
     warn_missing_targets_for_active_alias(state, &alias);
     set_active_surface(state, ControlSurface::Reconcile);
-    execute_surface_action(state, terminal, &alias, ControlSurface::Reconcile)?;
+    execute_reconcile_action(state, terminal, &alias)?;
     Ok(())
 }
 
@@ -549,44 +1034,24 @@ fn warn_missing_targets_for_active_alias(state: &mut AppState, alias: &str) {
     state.alert_message = Some(format!("warning for `{alias}`: {first}"));
 }
 
-fn execute_surface_action(
+fn execute_reconcile_action(
     state: &mut AppState,
     terminal: &mut AppTerminal,
     alias: &str,
-    surface: ControlSurface,
 ) -> anyhow::Result<()> {
     sync_artifacts_for_selection(state);
-    let result = match surface {
-        ControlSurface::Toml => {
-            let path = if let Some(path) = state.artifacts.toml_path.clone() {
-                path
-            } else {
-                let (doc, path) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
-                if !path.is_file() {
-                    crate::alias_admin::save_alias_doc_at(&path, &doc)?;
-                }
-                path
-            };
-            pause_terminal_for_subprocess(terminal, || {
-                crate::tui_nvim::open_alias_editor(&path, state.tmux_mode)
-                    .with_context(|| format!("failed to open TOML config for alias `{alias}`"))
-            })
-        }
-        ControlSurface::Reconcile => {
-            if let Some(path) = state.artifacts.reconcile_script_path.clone() {
-                pause_terminal_for_subprocess(terminal, || {
-                    crate::tui_nvim::open_rhai_editor_with_mode(
-                        &path,
-                        &crate::rhai_api_catalog::exported_api_names(),
-                        state.tmux_mode,
-                    )
-                    .with_context(|| format!("failed to open reconcile script for alias `{alias}`"))
-                })
-            } else {
-                create_missing_reconcile_artifact(state, terminal, alias)?;
-                return Ok(());
-            }
-        }
+    let result = if let Some(path) = state.artifacts.reconcile_script_path.clone() {
+        pause_terminal_for_subprocess(terminal, || {
+            crate::tui_nvim::open_rhai_editor_with_mode(
+                &path,
+                &crate::rhai_api_catalog::exported_api_names(),
+                state.tmux_mode,
+            )
+            .with_context(|| format!("failed to open reconcile script for alias `{alias}`"))
+        })
+    } else {
+        create_missing_reconcile_artifact(state, terminal, alias)?;
+        return Ok(());
     };
 
     if let Err(err) = result {
@@ -680,8 +1145,7 @@ fn collect_alias_artifacts(alias: &str) -> AliasArtifacts {
         .as_ref()
         .and_then(|path| crate::parser::parse(path).ok())
         .and_then(|manifest| manifest.reconcile)
-        .map(|reconcile| reconcile.script)
-        .filter(|path| path.is_file());
+        .map(|reconcile| reconcile.script);
 
     AliasArtifacts {
         selected_alias: Some(alias.to_string()),
@@ -711,7 +1175,11 @@ fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool
 
 fn set_active_surface(state: &mut AppState, surface: ControlSurface) {
     state.active_surface = surface;
-    state.inspector_mode = InspectorMode::Browse;
+    state.inspector_mode = if surface == ControlSurface::Toml {
+        InspectorMode::TomlMenu
+    } else {
+        InspectorMode::Browse
+    };
     if state.layout == LayoutKind::Modal {
         state.focus = PaneFocus::Inspector;
     }
@@ -721,7 +1189,7 @@ fn cycle_surface(state: &mut AppState, forward: bool) {
     let all = ControlSurface::all();
     let Some(mut idx) = all.iter().position(|value| *value == state.active_surface) else {
         state.active_surface = ControlSurface::Toml;
-        state.inspector_mode = InspectorMode::Browse;
+        state.inspector_mode = InspectorMode::TomlMenu;
         return;
     };
     for _ in 0..all.len() {
@@ -731,7 +1199,11 @@ fn cycle_surface(state: &mut AppState, forward: bool) {
             (idx + all.len() - 1) % all.len()
         };
         state.active_surface = all[idx];
-        state.inspector_mode = InspectorMode::Browse;
+        state.inspector_mode = if state.active_surface == ControlSurface::Toml {
+            InspectorMode::TomlMenu
+        } else {
+            InspectorMode::Browse
+        };
         return;
     }
 }
@@ -778,7 +1250,7 @@ where
 }
 
 fn draw(
-    terminal: &mut AppTerminal,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &AppState,
     layout_plan: LayoutPlan,
 ) -> anyhow::Result<()> {
@@ -914,6 +1386,11 @@ fn prompt_hint(prompt: &PromptState, state: &AppState) -> String {
                 prompt.input,
             )
         }
+        PromptKind::EditTomlField(field) => format!(
+            "Edit {} = {} (Enter to save, Esc to cancel)",
+            field.label(),
+            prompt.input
+        ),
     }
 }
 
@@ -934,7 +1411,7 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn banner_guidance(state: &AppState) -> String {
     format!(
-        "Enter: inspect/activate {} | Tab: tabs | +/%/!/-: alias ops | e: reconcile | r: refresh | q: quit",
+        "Enter/→: inspect {} | Tab/1/2: tabs | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit",
         state.active_surface.label()
     )
 }
@@ -1178,43 +1655,305 @@ fn render_inspector_details(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn surface_detail_content(state: &AppState) -> InspectorDetailContent {
-    let mut lines = Vec::new();
     match state.active_surface {
-        ControlSurface::Toml => {
-            lines.push(String::from("toml editor"));
-            if let Some(path) = &state.artifacts.toml_path {
-                lines.push(format!("file: {}", path.display()));
-                lines.push(String::from("Enter: open TOML editor"));
-            } else {
-                if let Some(alias) = state.artifacts.selected_alias.as_deref() {
-                    lines.push(format!(
-                        "file: {}",
-                        crate::alias_admin::default_toml_path(alias).display()
-                    ));
-                } else {
-                    lines.push(String::from("file: <select an alias>"));
-                }
-                lines.push(String::from("Enter: create and edit TOML config"));
-            }
-            lines.push(String::from("Tab: switch tabs | e: reconcile editor"));
-        }
-        ControlSurface::Reconcile => {
-            if let Some(path) = &state.artifacts.reconcile_script_path {
-                lines.push(String::from("reconcile tab"));
-                lines.push(format!("script: {}", path.display()));
-                lines.push(String::from("Enter/e: edit reconcile script"));
-            } else {
-                lines.push(String::from("reconcile tab (script missing)"));
-                lines.push(String::from(
-                    "Enter/e: open draft script; save persists script and TOML linkage",
+        ControlSurface::Toml => toml_inspector_content(state),
+        ControlSurface::Reconcile => InspectorDetailContent {
+            lines: reconcile_preview_lines(state),
+            cursor_line: None,
+        },
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TomlPropertyEntry {
+    field: TomlField,
+    rendered: String,
+    is_non_default: bool,
+}
+
+fn toml_inspector_content(state: &AppState) -> InspectorDetailContent {
+    let mut lines = vec![String::from("toml inspector")];
+    let mut cursor_line = None;
+    let mut field_cursor = 0usize;
+    let cursor_enabled = state.focus == PaneFocus::Inspector
+        && state.active_surface == ControlSurface::Toml
+        && state.inspector_mode == InspectorMode::TomlMenu;
+
+    let Some(alias) = state.artifacts.selected_alias.as_deref() else {
+        lines.push(String::from("file: <select an alias>"));
+        return InspectorDetailContent { lines, cursor_line };
+    };
+    let path = state
+        .artifacts
+        .toml_path
+        .clone()
+        .unwrap_or_else(|| crate::alias_admin::default_toml_path(alias));
+    lines.push(format!("file: {}", path.display()));
+    lines.push(String::new());
+
+    let doc = if path.is_file() {
+        match crate::alias_doc::load_alias_doc(&path) {
+            Ok(doc) => doc,
+            Err(err) => {
+                lines.push(format!("invalid TOML: {err}"));
+                lines.push(String::new());
+                let (_, available) = split_toml_entries(toml_property_entries(
+                    &crate::alias_admin::minimal_alias_doc(),
                 ));
+                append_toml_property_section(
+                    &mut lines,
+                    &mut cursor_line,
+                    "available properties (defaults when unset)",
+                    &available,
+                    state.toml_cursor,
+                    cursor_enabled,
+                    &mut field_cursor,
+                );
+                return InspectorDetailContent { lines, cursor_line };
             }
         }
+    } else {
+        lines.push(String::from("file does not exist"));
+        lines.push(String::new());
+        crate::alias_admin::minimal_alias_doc()
+    };
+
+    let (configured, available) = split_toml_entries(toml_property_entries(&doc));
+    append_toml_property_section(
+        &mut lines,
+        &mut cursor_line,
+        "configured values",
+        &configured,
+        state.toml_cursor,
+        cursor_enabled,
+        &mut field_cursor,
+    );
+    lines.push(String::new());
+    append_toml_property_section(
+        &mut lines,
+        &mut cursor_line,
+        "available properties (defaults when unset)",
+        &available,
+        state.toml_cursor,
+        cursor_enabled,
+        &mut field_cursor,
+    );
+    InspectorDetailContent { lines, cursor_line }
+}
+
+fn toml_fields_in_display_order(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlField> {
+    let (configured, available) = split_toml_entries(toml_property_entries(doc));
+    configured
+        .into_iter()
+        .chain(available)
+        .map(|entry| entry.field)
+        .collect()
+}
+
+fn append_toml_property_section(
+    lines: &mut Vec<String>,
+    cursor_line: &mut Option<usize>,
+    title: &str,
+    entries: &[TomlPropertyEntry],
+    toml_cursor: usize,
+    cursor_enabled: bool,
+    field_cursor: &mut usize,
+) {
+    lines.push(title.to_string());
+    if entries.is_empty() {
+        lines.push(String::from("- (none)"));
+        return;
     }
-    InspectorDetailContent {
-        lines,
-        cursor_line: None,
+
+    for entry in entries {
+        let selected = cursor_enabled && *field_cursor == toml_cursor;
+        let marker = if selected { ">" } else { " " };
+        if selected {
+            *cursor_line = Some(lines.len());
+        }
+        lines.push(format!("{marker} {}", entry.rendered));
+        *field_cursor += 1;
     }
+}
+
+fn split_toml_entries(
+    entries: Vec<TomlPropertyEntry>,
+) -> (Vec<TomlPropertyEntry>, Vec<TomlPropertyEntry>) {
+    entries.into_iter().partition(|entry| entry.is_non_default)
+}
+
+fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEntry> {
+    let mut entries = Vec::new();
+    let journal = doc.journal.as_ref();
+    let reconcile = doc.reconcile.as_ref();
+    let bashcomp = doc.bashcomp.as_ref();
+
+    push_toml_entry(&mut entries, doc, TomlField::Exec, true);
+    push_toml_entry(&mut entries, doc, TomlField::Args, !doc.args.is_empty());
+    push_toml_entry(&mut entries, doc, TomlField::Env, !doc.env.is_empty());
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::EnvRemove,
+        !doc.env_remove.is_empty(),
+    );
+
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::JournalEnabled,
+        journal.is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::JournalNamespace,
+        journal
+            .map(|value| value.namespace.as_str())
+            .unwrap_or("default")
+            != "default",
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::JournalStderr,
+        !journal.map(|value| value.stderr).unwrap_or(true),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::JournalIdentifier,
+        journal
+            .and_then(|value| value.identifier.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some(),
+    );
+
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::ReconcileEnabled,
+        reconcile.is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::ReconcileScript,
+        reconcile.is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::ReconcileFunction,
+        reconcile
+            .and_then(|value| value.function.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("reconcile")
+            != "reconcile",
+    );
+
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompEnabled,
+        bashcomp.is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompDisabled,
+        bashcomp.map(|value| value.disabled).unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompPassthrough,
+        bashcomp.map(|value| value.passthrough).unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompScript,
+        bashcomp
+            .and_then(|value| value.script.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompRhaiScript,
+        bashcomp
+            .and_then(|value| value.rhai_script.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some(),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::BashcompRhaiFunction,
+        bashcomp
+            .and_then(|value| value.rhai_function.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some(),
+    );
+    entries
+}
+
+fn push_toml_entry(
+    entries: &mut Vec<TomlPropertyEntry>,
+    doc: &crate::alias_doc::AliasDoc,
+    field: TomlField,
+    is_non_default: bool,
+) {
+    entries.push(TomlPropertyEntry {
+        field,
+        rendered: format!("{} = {}", field.label(), toml_field_value(doc, field)),
+        is_non_default,
+    });
+}
+
+fn reconcile_preview_lines(state: &AppState) -> Vec<String> {
+    let mut lines = vec![String::from("reconcile")];
+    let Some(path) = state.artifacts.reconcile_script_path.as_ref() else {
+        lines.push(String::from(
+            "file does not exist (reconcile.script is unset or missing)",
+        ));
+        return lines;
+    };
+    lines.push(format!("script: {}", path.display()));
+    lines.push(String::new());
+
+    match fs_err::read_to_string(path) {
+        Ok(content) => {
+            lines.push(String::from("script preview"));
+            if content.trim().is_empty() {
+                lines.push(String::from("(empty file)"));
+            } else {
+                const MAX_PREVIEW_LINES: usize = 300;
+                let all_lines: Vec<_> = content.lines().collect();
+                let total_lines = all_lines.len();
+                for line in all_lines.into_iter().take(MAX_PREVIEW_LINES) {
+                    lines.push(line.to_string());
+                }
+                if total_lines > MAX_PREVIEW_LINES {
+                    lines.push(String::from("..."));
+                }
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            lines.push(String::from("file does not exist"));
+        }
+        Err(err) => {
+            lines.push(format!("failed to read reconcile script: {err}"));
+        }
+    }
+    lines
 }
 
 fn inspector_scroll_position(cursor_line: Option<usize>, rows: usize, total_lines: usize) -> usize {
@@ -1434,7 +2173,7 @@ mod tests {
         alias_viewport_rows, compute_layout, content_height, cycle_surface,
         ensure_selection_visible, handle_key_event, inspector_scroll_position, set_active_surface,
         surface_has_data, AppState, ControlSurface, InspectorMode, LayoutKind, LoopAction,
-        PaneFocus, TabStripMode,
+        PaneFocus, TabStripMode, TomlField,
     };
     use crate::tui_nvim::TmuxMode;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -1449,6 +2188,7 @@ mod tests {
             active_surface: ControlSurface::Toml,
             artifacts: Default::default(),
             inspector_mode: InspectorMode::Browse,
+            toml_cursor: 0,
             prompt: None,
             alert_message: None,
             diagnostics: Vec::new(),
@@ -1625,7 +2365,7 @@ mod tests {
         );
         assert_eq!(action, LoopAction::Continue);
         assert_eq!(state.focus, PaneFocus::Inspector);
-        assert_eq!(state.inspector_mode, InspectorMode::Browse);
+        assert_eq!(state.inspector_mode, InspectorMode::TomlMenu);
     }
 
     #[test]
@@ -1644,16 +2384,90 @@ mod tests {
     }
 
     #[test]
-    fn enter_from_inspector_on_toml_activates_editor_surface() {
+    fn enter_from_inspector_on_toml_opens_field_prompt() {
         let mut state = sample_state(LayoutKind::Split);
         state.focus = PaneFocus::Inspector;
         state.active_surface = ControlSurface::Toml;
-        state.inspector_mode = InspectorMode::Browse;
+        state.inspector_mode = InspectorMode::TomlMenu;
+        state.toml_cursor = 0;
         let action = handle_key_event(
             &mut state,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             10,
         );
-        assert_eq!(action, LoopAction::ActivateCurrentSurface);
+        assert_eq!(action, LoopAction::Continue);
+        assert!(matches!(
+            state.prompt.as_ref().map(|prompt| prompt.kind),
+            Some(super::PromptKind::EditTomlField(TomlField::Exec))
+        ));
+    }
+
+    #[test]
+    fn e_key_switches_to_reconcile_and_requests_editor_launch() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.active_surface = ControlSurface::Toml;
+        let action = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+            10,
+        );
+        assert_eq!(action, LoopAction::ActivateReconcileQuick);
+        assert_eq!(state.active_surface, ControlSurface::Reconcile);
+    }
+
+    #[test]
+    fn toml_menu_navigation_uses_jk_without_moving_alias_selection() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.focus = PaneFocus::Inspector;
+        state.active_surface = ControlSurface::Toml;
+        state.inspector_mode = InspectorMode::TomlMenu;
+        let initial_selected = state.selected;
+
+        let down = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            10,
+        );
+        assert_eq!(down, LoopAction::Continue);
+        assert_eq!(state.selected, initial_selected);
+        assert_eq!(state.toml_cursor, 1);
+
+        let up = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+            10,
+        );
+        assert_eq!(up, LoopAction::Continue);
+        assert_eq!(state.selected, initial_selected);
+        assert_eq!(state.toml_cursor, 0);
+    }
+
+    #[test]
+    fn apply_toml_field_input_updates_bashcomp_rhai_script() {
+        let mut doc = crate::alias_admin::minimal_alias_doc();
+        super::apply_toml_field_input(
+            &mut doc,
+            TomlField::BashcompRhaiScript,
+            "scripts/complete.rhai",
+            "demo",
+        )
+        .expect("apply field input");
+        assert_eq!(
+            doc.bashcomp
+                .as_ref()
+                .and_then(|bashcomp| bashcomp.rhai_script.as_deref()),
+            Some("scripts/complete.rhai")
+        );
+    }
+
+    #[test]
+    fn toggle_toml_field_flips_reconcile_enabled() {
+        let mut doc = crate::alias_admin::minimal_alias_doc();
+        super::toggle_toml_field(&mut doc, TomlField::ReconcileEnabled, "demo").expect("toggle on");
+        assert!(doc.reconcile.is_some());
+
+        super::toggle_toml_field(&mut doc, TomlField::ReconcileEnabled, "demo")
+            .expect("toggle off");
+        assert!(doc.reconcile.is_none());
     }
 }
