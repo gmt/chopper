@@ -192,7 +192,9 @@ fn validate_script_shape(trimmed: &str, field: &str) -> Result<()> {
         return Err(anyhow!("{field} cannot end with a path separator"));
     }
     if ends_with_dot_component(trimmed) {
-        return Err(anyhow!("{field} cannot end with `.` or `..` path components"));
+        return Err(anyhow!(
+            "{field} cannot end with `.` or `..` path components"
+        ));
     }
     if !Path::new(trimmed).is_absolute() && !has_meaningful_relative_segment(trimmed) {
         return Err(anyhow!(
@@ -315,7 +317,9 @@ mod tests {
         let err = doc
             .validate()
             .expect_err("blank reconcile script should fail");
-        assert!(err.to_string().contains("`reconcile.script` cannot be blank"));
+        assert!(err
+            .to_string()
+            .contains("`reconcile.script` cannot be blank"));
     }
 
     #[test]

@@ -34,7 +34,10 @@ fn collect_extension_warnings(dir: &Path, warnings: &mut Vec<String>) {
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(extension) = Path::new(file_name).extension().and_then(|ext| ext.to_str()) else {
+        let Some(extension) = Path::new(file_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+        else {
             continue;
         };
         if extension.eq_ignore_ascii_case("toml") || extension.eq_ignore_ascii_case("rhai") {
@@ -50,7 +53,10 @@ fn collect_extension_warnings(dir: &Path, warnings: &mut Vec<String>) {
 pub(crate) fn manifest_missing_target_warnings(manifest: &Manifest) -> Vec<String> {
     let mut warnings = Vec::new();
     if path_is_explicit(&manifest.exec) && !manifest.exec.exists() {
-        warnings.push(format!("exec target does not exist: {}", manifest.exec.display()));
+        warnings.push(format!(
+            "exec target does not exist: {}",
+            manifest.exec.display()
+        ));
     }
 
     if let Some(reconcile) = &manifest.reconcile {
@@ -101,7 +107,8 @@ mod tests {
         let aliases_dir = temp.path().join("aliases");
         fs::create_dir_all(&aliases_dir).expect("create aliases dir");
         fs::write(aliases_dir.join("good.toml"), "exec = \"echo\"\n").expect("write toml");
-        fs::write(aliases_dir.join("good.rhai"), "fn reconcile(ctx) { #{} }\n").expect("write rhai");
+        fs::write(aliases_dir.join("good.rhai"), "fn reconcile(ctx) { #{} }\n")
+            .expect("write rhai");
         fs::write(aliases_dir.join("odd.ini"), "value=1\n").expect("write ini");
 
         let warnings = scan_extension_warnings(temp.path());

@@ -30,8 +30,8 @@ The TUI opens directly into an alias list, not a command menu.
 - `1`..`2`: jump directly to `toml`, `reconcile` tabs
 - `Enter`:
   - from list focus: move into inspector/wizard
-  - from inspector focus on `toml`: open/edit selected schema field inside TUI
-    (no `(n)vim` handoff)
+  - from inspector focus on `toml`: open external editor for the selected alias
+    TOML file
   - from inspector focus on `reconcile`: open external editor for script flows
 - `e`: quick action for reconcile editing/creation
 - `r`: refresh alias list
@@ -76,10 +76,9 @@ scrollbar indicates overflow.
 Editing actions:
 
 - `toml` tab:
-  - schema-bound properties are edited inside the TUI inspector menu
-  - optional sections (`journal`, `reconcile`, `bashcomp`) can be added/removed
-    by toggling their enabled fields
-  - no external `(n)vim` launch for normal TOML property updates
+  - `Enter` opens external editor for alias TOML content
+  - if the alias has no TOML config yet, `Enter` creates/opens the default
+    TOML path for editing
 - `reconcile` tab:
   - `Enter`/`e` opens external editor for reconcile script content
   - if missing, a draft script is opened with instructional comment lines

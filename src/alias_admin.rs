@@ -1,7 +1,5 @@
 use crate::alias_admin_validation::{parse_bool_flag, parse_env_assignment};
-use crate::alias_doc::{
-    load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc,
-};
+use crate::alias_doc::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc};
 use crate::alias_validation;
 use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeSet, HashMap};
@@ -273,7 +271,11 @@ pub(crate) fn remove_alias_for_tui(alias: &str, keep_configs: bool) -> Result<()
     remove_alias_with_mode(alias, mode, None)
 }
 
-fn remove_alias_with_mode(alias: &str, mode: RemoveMode, symlink_path: Option<PathBuf>) -> Result<()> {
+fn remove_alias_with_mode(
+    alias: &str,
+    mode: RemoveMode,
+    symlink_path: Option<PathBuf>,
+) -> Result<()> {
     let mut removed_any = false;
     let symlink_candidate = symlink_path
         .or_else(|| which::which(alias).ok())
@@ -648,11 +650,17 @@ mod tests {
         env::set_var("CHOPPER_CONFIG_DIR", cfg);
 
         let duplicate_path = duplicate_alias("source", "copy").expect("duplicate alias");
-        assert_eq!(duplicate_path.file_name().and_then(|v| v.to_str()), Some("copy.toml"));
+        assert_eq!(
+            duplicate_path.file_name().and_then(|v| v.to_str()),
+            Some("copy.toml")
+        );
         assert!(duplicate_path.is_file());
 
         let renamed_path = rename_alias("copy", "renamed").expect("rename alias");
-        assert_eq!(renamed_path.file_name().and_then(|v| v.to_str()), Some("renamed.toml"));
+        assert_eq!(
+            renamed_path.file_name().and_then(|v| v.to_str()),
+            Some("renamed.toml")
+        );
         assert!(renamed_path.is_file());
         assert!(!duplicate_path.exists());
 

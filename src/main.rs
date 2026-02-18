@@ -38,7 +38,10 @@ pub(crate) fn config_dir() -> PathBuf {
 
 pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
     let cfg = config_dir();
-    [cfg.join("aliases").join(format!("{name}.toml")), cfg.join(format!("{name}.toml"))]
+    [
+        cfg.join("aliases").join(format!("{name}.toml")),
+        cfg.join(format!("{name}.toml")),
+    ]
     .into_iter()
     .find(|path| path.is_file())
 }
