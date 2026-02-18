@@ -66,7 +66,8 @@ guidance (`Enter`, `Tab`, `+/%/!/-`, `e`, `r`, `q`). Bottom rows are used for:
 - asynchronous config warnings (extension-scan results), and
 - prompts or temporary blocking/error messages.
 
-When aliases exceed visible rows, a vertical scrollbar indicates overflow.
+When alias or inspector detail content exceeds visible rows, a vertical
+scrollbar indicates overflow.
 
 ---
 

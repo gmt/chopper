@@ -211,6 +211,12 @@ struct AppState {
     tmux_mode: crate::tui_nvim::TmuxMode,
 }
 
+#[derive(Debug)]
+struct InspectorDetailContent {
+    lines: Vec<String>,
+    cursor_line: Option<usize>,
+}
+
 pub fn run_tui(options: TuiOptions) -> i32 {
     match run_tui_inner(options) {
         Ok(()) => 0,
@@ -854,7 +860,11 @@ fn apply_toml_field_input(
                 }
                 TomlField::ReconcileEnabled => {
                     doc.reconcile = if bool_value {
-                        Some(doc.reconcile.clone().unwrap_or_else(|| default_reconcile_doc(alias)))
+                        Some(
+                            doc.reconcile
+                                .clone()
+                                .unwrap_or_else(|| default_reconcile_doc(alias)),
+                        )
                     } else {
                         None
                     };
@@ -1125,7 +1135,10 @@ fn create_missing_reconcile_artifact(
 
 fn resolve_alias_path(alias: &str) -> Option<PathBuf> {
     let cfg = crate::config_dir();
-    [cfg.join("aliases").join(format!("{alias}.toml")), cfg.join(format!("{alias}.toml"))]
+    [
+        cfg.join("aliases").join(format!("{alias}.toml")),
+        cfg.join(format!("{alias}.toml")),
+    ]
     .into_iter()
     .find(|path| path.is_file())
 }
@@ -1356,21 +1369,33 @@ fn prompt_hint(prompt: &PromptState, state: &AppState) -> String {
             prompt.input
         ),
         PromptKind::RenameAlias => {
-            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            let source = state
+                .aliases
+                .get(state.selected)
+                .map(String::as_str)
+                .unwrap_or("");
             format!(
                 "Rename `{source}` to: {} (Enter to apply, Esc to cancel)",
                 prompt.input
             )
         }
         PromptKind::DuplicateAlias => {
-            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            let source = state
+                .aliases
+                .get(state.selected)
+                .map(String::as_str)
+                .unwrap_or("");
             format!(
                 "Duplicate `{source}` as: {} (Enter to apply, Esc to cancel)",
                 prompt.input
             )
         }
         PromptKind::DeleteAlias => {
-            let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            let source = state
+                .aliases
+                .get(state.selected)
+                .map(String::as_str)
+                .unwrap_or("");
             let keep_configs = if prompt.keep_configs { "[x]" } else { "[ ]" };
             format!(
                 "Delete `{source}`? {keep_configs} keep configs (k toggles). type `y` + Enter (Esc cancels): {}",
@@ -1564,8 +1589,7 @@ fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: T
         chunks[1],
     );
 
-    let details = surface_detail_lines(state, chunks[2].width as usize, chunks[2].height as usize);
-    frame.render_widget(Paragraph::new(details.join("\n")), chunks[2]);
+    render_inspector_details(frame, chunks[2], state);
 }
 
 fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> {
@@ -1592,7 +1616,9 @@ fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> 
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else if has_data {
-            Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -1602,24 +1628,76 @@ fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> 
     Line::from(spans)
 }
 
-fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<String> {
+fn render_inspector_details(frame: &mut Frame, area: Rect, state: &AppState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let rows = area.height as usize;
+    if rows == 0 {
+        return;
+    }
+
+    let details = surface_detail_content(state);
+    let total_lines = details.lines.len();
+    let overflow = total_lines > rows;
+    let (text_area, scrollbar_area) = if overflow && area.width > 1 {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+        (columns[0], Some(columns[1]))
+    } else {
+        (area, None)
+    };
+
+    let scroll = inspector_scroll_position(details.cursor_line, rows, total_lines);
+    let visible_lines = details
+        .lines
+        .into_iter()
+        .skip(scroll)
+        .take(rows)
+        .map(|line| truncate_line(&line, text_area.width as usize))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(visible_lines.join("\n")), text_area);
+
+    if let Some(scrollbar_area) = scrollbar_area {
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(scroll);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            scrollbar_area,
+            &mut scrollbar_state,
+        );
+    }
+}
+
+fn surface_detail_content(state: &AppState) -> InspectorDetailContent {
     let mut lines = Vec::new();
+    let mut cursor_line = None;
     match state.active_surface {
         ControlSurface::Toml => {
             lines.push(String::from("toml schema designer"));
             if let Some(path) = &state.artifacts.toml_path {
                 lines.push(format!("file: {}", path.display()));
             } else {
-                lines.push(String::from("file: <new TOML will be created on first save>"));
+                lines.push(String::from(
+                    "file: <new TOML will be created on first save>",
+                ));
             }
-            lines.push(String::from("Enter: edit selected field | Tab: switch tabs"));
+            lines.push(String::from(
+                "Enter: edit selected field | Tab: switch tabs",
+            ));
             lines.push(String::from("j/k: move field | Esc: close prompt"));
 
-            if state.focus == PaneFocus::Inspector && state.inspector_mode == InspectorMode::TomlMenu
+            if state.focus == PaneFocus::Inspector
+                && state.inspector_mode == InspectorMode::TomlMenu
             {
                 if let Some(alias_name) = state.artifacts.selected_alias.as_deref() {
                     match crate::alias_admin::load_or_seed_alias_doc(alias_name) {
                         Ok((doc, _)) => {
+                            let field_rows_start = lines.len();
+                            let max_field_idx = TomlField::all().len().saturating_sub(1);
+                            cursor_line =
+                                Some(field_rows_start + state.toml_cursor.min(max_field_idx));
                             for (idx, field) in TomlField::all().iter().enumerate() {
                                 let prefix = if idx == state.toml_cursor { ">" } else { " " };
                                 let value = toml_field_value(&doc, *field);
@@ -1646,11 +1724,20 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
             }
         }
     }
-    lines
-        .into_iter()
-        .take(rows.max(1))
-        .map(|line| truncate_line(&line, width))
-        .collect()
+    InspectorDetailContent { lines, cursor_line }
+}
+
+fn inspector_scroll_position(cursor_line: Option<usize>, rows: usize, total_lines: usize) -> usize {
+    if rows == 0 || total_lines <= rows {
+        return 0;
+    }
+    let max_scroll = total_lines - rows;
+    let Some(cursor_line) = cursor_line else {
+        return 0;
+    };
+    cursor_line
+        .saturating_sub(rows.saturating_sub(1))
+        .min(max_scroll)
 }
 
 fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: TabStripMode) {
@@ -1854,9 +1941,10 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, compute_layout, content_height, cycle_surface, ensure_selection_visible,
-        handle_key_event, set_active_surface, surface_has_data, AppState, ControlSurface,
-        InspectorMode, LayoutKind, LoopAction, PaneFocus, TabStripMode,
+        alias_viewport_rows, compute_layout, content_height, cycle_surface,
+        ensure_selection_visible, handle_key_event, inspector_scroll_position, set_active_surface,
+        surface_has_data, AppState, ControlSurface, InspectorMode, LayoutKind, LoopAction,
+        PaneFocus, TabStripMode,
     };
     use crate::tui_nvim::TmuxMode;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -1958,6 +2046,21 @@ mod tests {
     }
 
     #[test]
+    fn inspector_scroll_tracks_cursor_visibility_when_overflowed() {
+        assert_eq!(inspector_scroll_position(Some(0), 5, 20), 0);
+        assert_eq!(inspector_scroll_position(Some(4), 5, 20), 0);
+        assert_eq!(inspector_scroll_position(Some(5), 5, 20), 1);
+        assert_eq!(inspector_scroll_position(Some(19), 5, 20), 15);
+    }
+
+    #[test]
+    fn inspector_scroll_defaults_to_top_without_cursor_or_overflow() {
+        assert_eq!(inspector_scroll_position(None, 5, 20), 0);
+        assert_eq!(inspector_scroll_position(Some(8), 8, 8), 0);
+        assert_eq!(inspector_scroll_position(Some(8), 0, 30), 0);
+    }
+
+    #[test]
     fn ensure_selection_visible_uses_modal_alias_row_budget() {
         let mut state = sample_state(LayoutKind::Modal);
         state.selected = 9;
@@ -2026,7 +2129,11 @@ mod tests {
     fn enter_on_toml_tab_switches_to_toml_menu_mode() {
         let mut state = sample_state(LayoutKind::Split);
         state.active_surface = ControlSurface::Toml;
-        let action = handle_key_event(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 10);
+        let action = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            10,
+        );
         assert_eq!(action, LoopAction::Continue);
         assert_eq!(state.focus, PaneFocus::Inspector);
         assert_eq!(state.inspector_mode, InspectorMode::TomlMenu);
@@ -2037,7 +2144,11 @@ mod tests {
         let mut state = sample_state(LayoutKind::Split);
         state.active_surface = ControlSurface::Reconcile;
         state.focus = PaneFocus::List;
-        let action = handle_key_event(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 10);
+        let action = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            10,
+        );
         assert_eq!(action, LoopAction::Continue);
         assert_eq!(state.focus, PaneFocus::Inspector);
         assert_eq!(state.inspector_mode, InspectorMode::Browse);
@@ -2052,8 +2163,11 @@ mod tests {
 
         let last_idx = super::TomlField::all().len().saturating_sub(1);
         for _ in 0..=last_idx + 2 {
-            let action =
-                handle_key_event(&mut state, KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), 10);
+            let action = handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+                10,
+            );
             assert_eq!(action, LoopAction::Continue);
         }
 
