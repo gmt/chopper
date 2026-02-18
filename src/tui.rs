@@ -13,7 +13,7 @@ use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
 const SPLIT_MAX_LEFT_WIDTH: u16 = 60;
-const SPLIT_MIN_RIGHT_WIDTH: u16 = 25;
+const SPLIT_MIN_RIGHT_WIDTH: u16 = 30;
 const SPLIT_MIN_HEIGHT: u16 = 3;
 
 type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
@@ -919,10 +919,7 @@ fn compute_layout(width: u16, height: u16, state: &AppState) -> LayoutPlan {
     let full_tabs_width = full_tab_strip_width();
     let compact_tabs_width = compact_tab_strip_width(state);
 
-    let right_width_if_full = width
-        .saturating_sub(left_width)
-        .saturating_sub(separator_width);
-    let right_width_if_compact = width
+    let right_width = width
         .saturating_sub(left_width)
         .saturating_sub(separator_width);
 
@@ -932,7 +929,7 @@ fn compute_layout(width: u16, height: u16, state: &AppState) -> LayoutPlan {
         .saturating_add(separator_width)
         .saturating_add(full_tabs_width)
         <= width
-        && right_width_if_full >= SPLIT_MIN_RIGHT_WIDTH
+        && right_width >= SPLIT_MIN_RIGHT_WIDTH
         && has_enough_height
     {
         LayoutPlan {
@@ -944,7 +941,7 @@ fn compute_layout(width: u16, height: u16, state: &AppState) -> LayoutPlan {
         .saturating_add(separator_width)
         .saturating_add(compact_tabs_width)
         <= width
-        && right_width_if_compact >= SPLIT_MIN_RIGHT_WIDTH
+        && right_width >= SPLIT_MIN_RIGHT_WIDTH
         && has_enough_height
     {
         LayoutPlan {
