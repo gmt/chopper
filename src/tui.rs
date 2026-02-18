@@ -7,13 +7,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::{Frame, Terminal};
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
-const SPLIT_MIN_WIDTH: u16 = 100;
-const SPLIT_MIN_HEIGHT: u16 = 24;
 const SPLIT_MAX_LEFT_WIDTH: u16 = 60;
 
 type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
@@ -35,6 +33,19 @@ impl Default for TuiOptions {
 enum LayoutKind {
     Split,
     Modal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabStripMode {
+    Full,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LayoutPlan {
+    kind: LayoutKind,
+    left_width: u16,
+    tab_mode: TabStripMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,14 +143,15 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
 
     loop {
         let (width, height) = terminal::size().context("failed to read terminal size")?;
-        state.layout = layout_for_size(width, height);
         sync_artifacts_for_selection(&mut state);
+        let layout_plan = compute_layout(width, height, &state);
+        state.layout = layout_plan.kind;
         let content_rows = content_height(height, state.alert_message.is_some());
-        let alias_rows = alias_viewport_rows(state.layout, content_rows);
+        let alias_rows = alias_viewport_rows(layout_plan.kind, content_rows);
         ensure_selection_visible(&mut state, alias_rows);
         sync_artifacts_for_selection(&mut state);
 
-        draw(&mut terminal, &state)?;
+        draw(&mut terminal, &state, layout_plan)?;
 
         let event = event::read().context("failed to read keyboard event")?;
         let action = handle_event(&mut state, event, alias_rows);
@@ -436,7 +448,7 @@ fn set_active_surface(state: &mut AppState, surface: ControlSurface) {
     if surface_available(&state.artifacts, surface) {
         state.active_surface = surface;
     } else {
-        state.alert_message = Some(format!("`{}` surface is unavailable", surface.label()));
+        state.alert_message = Some(format!("`{}` tab is unavailable", surface.label()));
     }
 }
 
@@ -501,14 +513,18 @@ where
     }
 }
 
-fn draw(terminal: &mut AppTerminal, state: &AppState) -> anyhow::Result<()> {
+fn draw(
+    terminal: &mut AppTerminal,
+    state: &AppState,
+    layout_plan: LayoutPlan,
+) -> anyhow::Result<()> {
     terminal
-        .draw(|frame| render_frame(frame, state))
+        .draw(|frame| render_frame(frame, state, layout_plan))
         .context("failed to render terminal frame")?;
     Ok(())
 }
 
-fn render_frame(frame: &mut Frame, state: &AppState) {
+fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
     let area = frame.area();
     if area.width == 0 || area.height == 0 {
         return;
@@ -532,7 +548,7 @@ fn render_frame(frame: &mut Frame, state: &AppState) {
     }
 
     render_banner(frame, chunks[0], state);
-    render_content(frame, chunks[1], state);
+    render_content(frame, chunks[1], state, layout_plan);
 
     if let (Some(message), Some(alert_area)) = (&state.alert_message, chunks.get(2)) {
         frame.render_widget(
@@ -563,35 +579,31 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn banner_guidance(state: &AppState) -> String {
-    let alias = state
-        .artifacts
-        .selected_alias
-        .as_deref()
-        .unwrap_or("<none>");
     format!(
-        "alias list active (`{alias}` selected): [Enter] open {} surface, [Tab] switch surfaces, editor save `:wq`, abort `:q!`",
+        "Enter: open {} tab | Tab: cycle tabs | e: reconcile | r: refresh | q: quit",
         state.active_surface.label()
     )
 }
 
-fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_content(frame: &mut Frame, area: Rect, state: &AppState, layout_plan: LayoutPlan) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    match state.layout {
-        LayoutKind::Split => render_split_content(frame, area, state),
-        LayoutKind::Modal => render_modal_content(frame, area, state),
+    match layout_plan.kind {
+        LayoutKind::Split => render_split_content(frame, area, state, layout_plan),
+        LayoutKind::Modal => render_modal_content(frame, area, state, layout_plan.tab_mode),
     }
 }
 
-fn render_split_content(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_split_content(frame: &mut Frame, area: Rect, state: &AppState, layout_plan: LayoutPlan) {
     if area.width < 3 {
-        render_modal_content(frame, area, state);
+        render_modal_content(frame, area, state, layout_plan.tab_mode);
         return;
     }
 
-    let left_width = split_left_width(area.width)
+    let left_width = layout_plan
+        .left_width
         .min(area.width.saturating_sub(2))
         .max(1);
     let columns = Layout::default()
@@ -606,46 +618,98 @@ fn render_split_content(frame: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    let rows = area.height as usize;
-    let left_lines = split_left_lines(state, rows, columns[0].width as usize);
-    frame.render_widget(Paragraph::new(left_lines.join("\n")), columns[0]);
+    render_alias_list(frame, columns[0], state);
 
+    let rows = area.height as usize;
     let separator = std::iter::repeat_n("|", rows)
         .collect::<Vec<_>>()
         .join("\n");
     frame.render_widget(Paragraph::new(separator), columns[1]);
 
-    render_inspector(frame, columns[2], state);
+    render_inspector(frame, columns[2], state, layout_plan.tab_mode);
 }
 
-fn split_left_lines(state: &AppState, rows: usize, width: usize) -> Vec<String> {
+fn render_alias_list(frame: &mut Frame, area: Rect, state: &AppState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let rows = area.height as usize;
+    let overflow = state.aliases.len() > rows;
+    let (list_area, scrollbar_area) = if overflow && area.width > 1 {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+        (columns[0], Some(columns[1]))
+    } else {
+        (area, None)
+    };
+
+    let lines = split_left_lines(state, list_area.height as usize, list_area.width as usize);
+    frame.render_widget(Paragraph::new(lines), list_area);
+
+    if let Some(scrollbar_area) = scrollbar_area {
+        let mut scrollbar_state = ScrollbarState::new(state.aliases.len()).position(state.scroll);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            scrollbar_area,
+            &mut scrollbar_state,
+        );
+    }
+}
+
+fn split_left_lines(state: &AppState, rows: usize, width: usize) -> Vec<Line<'static>> {
     (0..rows)
         .map(|idx| {
             let alias_row = state.scroll + idx;
-            let raw = if state.aliases.is_empty() {
+            let line = if state.aliases.is_empty() {
                 match idx {
-                    0 => String::from("  aliases"),
-                    1 => String::from("  (empty)"),
-                    _ => String::new(),
+                    0 => Line::from(truncate_line("aliases", width)),
+                    1 => Line::from(truncate_line("(empty)", width)),
+                    _ => Line::from(""),
                 }
             } else if let Some(alias) = state.aliases.get(alias_row) {
                 let selected = alias_row == state.selected;
-                let pointer = if selected { ">" } else { " " };
-                let focus = if selected && state.focus == PaneFocus::List {
-                    "*"
+                let truncated = truncate_line(alias, width);
+                if selected {
+                    let padded = pad_line_to_width(&truncated, width);
+                    Line::from(Span::styled(padded, selected_alias_style(state)))
                 } else {
-                    " "
-                };
-                format!("{pointer}{focus} {alias}")
+                    Line::from(truncated)
+                }
             } else {
-                String::new()
+                Line::from("")
             };
-            truncate_line(&raw, width)
+            line
         })
         .collect()
 }
 
-fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState) {
+fn selected_alias_style(state: &AppState) -> Style {
+    if state.layout == LayoutKind::Split && state.focus == PaneFocus::Inspector {
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default().add_modifier(Modifier::REVERSED)
+    }
+}
+
+fn pad_line_to_width(input: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let mut line = truncate_line(input, width);
+    let chars = line.chars().count();
+    if chars >= width {
+        return line;
+    }
+    line.push_str(&" ".repeat(width - chars));
+    line
+}
+
+fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: TabStripMode) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -673,13 +737,25 @@ fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState) {
         chunks[0],
     );
 
-    frame.render_widget(Paragraph::new(surface_tabs_line(state)), chunks[1]);
+    frame.render_widget(
+        Paragraph::new(surface_tabs_line(state, tab_mode)),
+        chunks[1],
+    );
 
     let details = surface_detail_lines(state, chunks[2].width as usize, chunks[2].height as usize);
     frame.render_widget(Paragraph::new(details.join("\n")), chunks[2]);
 }
 
-fn surface_tabs_line(state: &AppState) -> Line<'static> {
+fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> {
+    if tab_mode == TabStripMode::Compact {
+        return Line::from(Span::styled(
+            state.active_surface.label(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     let mut spans = Vec::new();
     for surface in ControlSurface::all() {
         let enabled = surface_available(&state.artifacts, surface);
@@ -713,46 +789,42 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
         .unwrap_or("<none>");
     match state.active_surface {
         ControlSurface::Summary => {
-            lines.push(format!(
-                "`{alias}` overview: choose a surface tab, then press Enter."
-            ));
+            lines.push(format!("`{alias}` overview"));
             if let Some(path) = &state.artifacts.resolved_config_path {
                 lines.push(format!("preferred config: {}", path.display()));
             } else {
                 lines.push(String::from("preferred config: <missing>"));
             }
-            lines.push(String::from("quick keys: Tab/Shift-Tab, 1..4, Enter, e, r"));
+            lines.push(String::from("Enter: edit the selected tab target"));
         }
         ControlSurface::Toml => {
             if let Some(path) = &state.artifacts.toml_path {
-                lines.push(String::from("TOML surface"));
+                lines.push(String::from("toml tab"));
                 lines.push(format!("file: {}", path.display()));
-                lines.push(String::from("Enter: edit TOML config"));
+                lines.push(String::from("Enter: edit toml config"));
             } else {
-                lines.push(String::from(
-                    "TOML surface unavailable (no extant TOML file).",
-                ));
+                lines.push(String::from("toml tab unavailable (no extant TOML file)."));
             }
         }
         ControlSurface::Legacy => {
             if let Some(path) = &state.artifacts.legacy_path {
-                lines.push(String::from("Legacy surface"));
+                lines.push(String::from("legacy tab"));
                 lines.push(format!("file: {}", path.display()));
                 lines.push(String::from("Enter: edit legacy config"));
             } else {
                 lines.push(String::from(
-                    "Legacy surface unavailable (no extant legacy file).",
+                    "legacy tab unavailable (no extant legacy file).",
                 ));
             }
         }
         ControlSurface::Reconcile => {
             if let Some(path) = &state.artifacts.reconcile_script_path {
-                lines.push(String::from("Reconcile surface"));
+                lines.push(String::from("reconcile tab"));
                 lines.push(format!("script: {}", path.display()));
                 lines.push(String::from("Enter/e: edit reconcile script"));
             } else {
                 lines.push(String::from(
-                    "Reconcile surface unavailable (no extant reconcile script file).",
+                    "reconcile tab unavailable (no extant reconcile script file).",
                 ));
                 lines.push(String::from(
                     "Configure `reconcile.script` in TOML, ensure file exists, then refresh.",
@@ -767,7 +839,7 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
         .collect()
 }
 
-fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: TabStripMode) {
     if state.aliases.is_empty() {
         frame.render_widget(
             Paragraph::new("No aliases configured.").style(Style::default().fg(Color::DarkGray)),
@@ -778,69 +850,17 @@ fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
-    if chunks.len() < 4 {
+    if chunks.len() < 2 {
         return;
     }
 
-    let selected_alias = state
-        .artifacts
-        .selected_alias
-        .as_deref()
-        .unwrap_or("<none>");
     frame.render_widget(
-        Paragraph::new(truncate_line(
-            &format!("selected: {selected_alias}"),
-            chunks[0].width as usize,
-        ))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(surface_tabs_line(state, tab_mode)),
         chunks[0],
     );
-
-    frame.render_widget(Paragraph::new(surface_tabs_line(state)), chunks[1]);
-    frame.render_widget(
-        Paragraph::new(truncate_line(
-            &format!(
-                "[Enter] open {} surface  [Tab] switch surfaces",
-                state.active_surface.label()
-            ),
-            chunks[2].width as usize,
-        ))
-        .style(Style::default().fg(Color::Gray)),
-        chunks[2],
-    );
-
-    let list_rows = chunks[3].height as usize;
-    let lines = (0..list_rows)
-        .map(|idx| {
-            let alias_row = state.scroll + idx;
-            let raw = if let Some(alias) = state.aliases.get(alias_row) {
-                let pointer = if alias_row == state.selected {
-                    ">"
-                } else {
-                    " "
-                };
-                format!("{pointer} {alias}")
-            } else {
-                String::new()
-            };
-            truncate_line(&raw, chunks[3].width as usize)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    frame.render_widget(Paragraph::new(lines), chunks[3]);
-}
-
-fn split_left_width(width: u16) -> u16 {
-    let base = (width / 3).max(24);
-    let bounded = base.min(width.saturating_sub(30));
-    bounded.min(SPLIT_MAX_LEFT_WIDTH)
+    render_alias_list(frame, chunks[1], state);
 }
 
 fn ensure_selection_visible(state: &mut AppState, list_height: usize) {
@@ -874,17 +894,74 @@ fn content_height(height: u16, alert_visible: bool) -> usize {
 fn alias_viewport_rows(layout: LayoutKind, content_rows: usize) -> usize {
     match layout {
         LayoutKind::Split => content_rows,
-        // Modal reserves rows for selected alias, tabs, and quick action hint.
-        LayoutKind::Modal => content_rows.saturating_sub(3),
+        // Modal reserves one row for the tab strip.
+        LayoutKind::Modal => content_rows.saturating_sub(1),
     }
 }
 
-fn layout_for_size(width: u16, height: u16) -> LayoutKind {
-    if width >= SPLIT_MIN_WIDTH && height >= SPLIT_MIN_HEIGHT {
-        LayoutKind::Split
+fn compute_layout(width: u16, _height: u16, state: &AppState) -> LayoutPlan {
+    let left_width = required_left_width(state);
+    let separator_width = 1u16;
+    let full_tabs_width = full_tab_strip_width();
+    let compact_tabs_width = compact_tab_strip_width(state);
+
+    if left_width
+        .saturating_add(separator_width)
+        .saturating_add(full_tabs_width)
+        <= width
+    {
+        LayoutPlan {
+            kind: LayoutKind::Split,
+            left_width,
+            tab_mode: TabStripMode::Full,
+        }
+    } else if left_width
+        .saturating_add(separator_width)
+        .saturating_add(compact_tabs_width)
+        <= width
+    {
+        LayoutPlan {
+            kind: LayoutKind::Split,
+            left_width,
+            tab_mode: TabStripMode::Compact,
+        }
     } else {
-        LayoutKind::Modal
+        LayoutPlan {
+            kind: LayoutKind::Modal,
+            left_width: 0,
+            tab_mode: if width >= full_tabs_width {
+                TabStripMode::Full
+            } else {
+                TabStripMode::Compact
+            },
+        }
     }
+}
+
+fn required_left_width(state: &AppState) -> u16 {
+    let max_alias = state
+        .aliases
+        .iter()
+        .map(|alias| alias.chars().count() as u16)
+        .max()
+        .unwrap_or(0);
+    let min_width = "aliases".chars().count() as u16 + 2 + 1;
+    max_alias
+        .saturating_add(2)
+        .saturating_add(1)
+        .max(min_width)
+        .min(SPLIT_MAX_LEFT_WIDTH)
+}
+
+fn full_tab_strip_width() -> u16 {
+    ControlSurface::all()
+        .into_iter()
+        .map(|surface| surface.label().chars().count() as u16 + 3)
+        .sum()
+}
+
+fn compact_tab_strip_width(state: &AppState) -> u16 {
+    state.active_surface.label().chars().count() as u16
 }
 
 fn truncate_line(input: &str, width: usize) -> String {
@@ -936,9 +1013,9 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, content_height, cycle_surface, ensure_selection_visible,
-        handle_key_event, layout_for_size, set_active_surface, split_left_width, surface_available,
-        AppState, ControlSurface, LayoutKind, LoopAction, PaneFocus,
+        alias_viewport_rows, compute_layout, content_height, cycle_surface,
+        ensure_selection_visible, handle_key_event, set_active_surface, surface_available,
+        AppState, ControlSurface, LayoutKind, LoopAction, PaneFocus, TabStripMode,
     };
     use crate::tui_nvim::TmuxMode;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -958,14 +1035,46 @@ mod tests {
     }
 
     #[test]
-    fn layout_prefers_split_on_large_terminals() {
-        assert_eq!(layout_for_size(120, 30), LayoutKind::Split);
+    fn content_driven_layout_uses_full_tabs_when_split_fits() {
+        let state = sample_state(LayoutKind::Modal);
+        let plan = compute_layout(60, 10, &state);
+        assert_eq!(plan.kind, LayoutKind::Split);
+        assert_eq!(plan.tab_mode, TabStripMode::Full);
     }
 
     #[test]
-    fn layout_falls_back_to_modal_on_small_terminals() {
-        assert_eq!(layout_for_size(90, 30), LayoutKind::Modal);
-        assert_eq!(layout_for_size(120, 20), LayoutKind::Modal);
+    fn content_driven_layout_compacts_tabs_before_modal_fallback() {
+        let state = sample_state(LayoutKind::Modal);
+        let plan = compute_layout(30, 10, &state);
+        assert_eq!(plan.kind, LayoutKind::Split);
+        assert_eq!(plan.tab_mode, TabStripMode::Compact);
+    }
+
+    #[test]
+    fn content_driven_layout_falls_back_to_modal_for_wide_aliases() {
+        let mut state = sample_state(LayoutKind::Modal);
+        state.aliases = vec![String::from(
+            "a-very-long-alias-name-that-forces-layout-to-fallback",
+        )];
+        let plan = compute_layout(40, 10, &state);
+        assert_eq!(plan.kind, LayoutKind::Modal);
+    }
+
+    #[test]
+    fn content_driven_layout_caps_left_width_for_long_aliases() {
+        let mut state = sample_state(LayoutKind::Modal);
+        state.aliases = vec!["x".repeat(200)];
+        let plan = compute_layout(200, 20, &state);
+        assert_eq!(plan.kind, LayoutKind::Split);
+        assert_eq!(plan.left_width, 60);
+    }
+
+    #[test]
+    fn content_driven_modal_uses_compact_tabs_on_narrow_terminals() {
+        let state = sample_state(LayoutKind::Modal);
+        let plan = compute_layout(16, 10, &state);
+        assert_eq!(plan.kind, LayoutKind::Modal);
+        assert_eq!(plan.tab_mode, TabStripMode::Compact);
     }
 
     #[test]
@@ -975,16 +1084,9 @@ mod tests {
     }
 
     #[test]
-    fn split_left_width_is_bounded_for_pathological_terminal_sizes() {
-        assert_eq!(split_left_width(120), 40);
-        assert_eq!(split_left_width(600), 60);
-        assert_eq!(split_left_width(u16::MAX), 60);
-    }
-
-    #[test]
     fn modal_alias_rows_reserve_header_and_tabs_rows() {
-        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 10), 7);
-        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 3), 0);
+        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 10), 9);
+        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 1), 0);
         assert_eq!(alias_viewport_rows(LayoutKind::Split, 10), 10);
     }
 
@@ -993,13 +1095,13 @@ mod tests {
         let mut state = sample_state(LayoutKind::Modal);
         state.selected = 9;
 
-        // Modal content rows might be 7, but three lines are reserved for chrome.
+        // Modal content rows might be 5, but one line is reserved for tab chrome.
         state.aliases = (0..20).map(|idx| format!("alias-{idx}")).collect();
         state.selected = 19;
         let alias_rows = alias_viewport_rows(LayoutKind::Modal, 5);
         ensure_selection_visible(&mut state, alias_rows);
-        assert_eq!(alias_rows, 2);
-        assert_eq!(state.scroll, 18);
+        assert_eq!(alias_rows, 4);
+        assert_eq!(state.scroll, 16);
     }
 
     #[test]
@@ -1048,7 +1150,7 @@ mod tests {
             .alert_message
             .as_deref()
             .unwrap_or_default()
-            .contains("unavailable"));
+            .contains("tab"));
     }
 
     #[test]

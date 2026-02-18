@@ -26,29 +26,33 @@ The TUI opens directly into an alias list, not a command menu.
 - `j`/`k` or `Up`/`Down`: move selection
 - `g` / `Home`: jump to top
 - `G` / `End`: jump to bottom
-- `Tab` / `Shift+Tab`: cycle inspector control-surface tabs
+- `Tab` / `Shift+Tab`: cycle inspector tabs
 - `1`..`4`: jump directly to `summary`, `toml`, `legacy`, `reconcile` tabs
 - `Enter`: run the active tab action for the selected alias
 - `e`: quick action for reconcile editing (when an extant reconcile script exists)
 - `r`: refresh alias list
 - `q` or `Esc`: quit
-- `h`/`l` or `Left`/`Right`: list/inspector focus (split layout); also surface cycling when already in inspector
+- `h`/`l` or `Left`/`Right`: list/inspector focus (split layout); also tab cycling when already in inspector
 
 ---
 
 ## Layout behavior
 
-The TUI chooses between two layouts based on terminal size:
+The TUI chooses layout from what can be shown without unreasonable truncation:
 
-- **Split layout** on larger terminals:
+- **Split layout (preferred)**:
   - alias list on the left
-  - inspector on the right with tabbed control surfaces (`summary`, `toml`, `legacy`, `reconcile`)
-- **Modal layout** on smaller terminals:
-  - single-pane alias list with selected-alias context and tab strip
+  - inspector on the right with tabs (`summary`, `toml`, `legacy`, `reconcile`)
+  - if horizontal space tightens, tab chrome compacts to the active tab label
+- **Modal layout (fallback)**:
+  - single-pane alias list with a tab strip row above it
+  - used only when split cannot remain functional after compaction
 
-The top banner keeps `chopper` as the bold brand token and provides contextual
-guidance for editing the selected alias. Bottom status is normally hidden; a
-high-contrast alert bar appears only for temporary blocking/error messages.
+The top banner keeps `chopper` as the bold brand token and shows concise action
+guidance (`Enter`, `Tab`, `e`, `r`, `q`). A bottom alert bar appears only for
+temporary blocking/error messages.
+
+When aliases exceed visible rows, a vertical scrollbar indicates overflow.
 
 ---
 
@@ -56,7 +60,7 @@ high-contrast alert bar appears only for temporary blocking/error messages.
 
 Editing actions:
 
-- `Enter`: edits the file/action represented by the active control-surface tab
+- `Enter`: edits the file/action represented by the active tab
 - `e`: fast path for reconcile script editing when the script exists
 
 Both use `nvim` (preferred) or `vim` (fallback).

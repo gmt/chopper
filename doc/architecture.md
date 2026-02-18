@@ -73,7 +73,7 @@ High-level map of the runtime flow and main modules.
   - mutation parsing/validation and TOML persistence for managed aliases
 - `src/tui.rs` / `src/tui_nvim.rs`
   - alias-first interactive terminal UI (`--tui`) with event-driven key handling
-  - ratatui frame rendering on a crossterm backend with adaptive split/modal layout and tabbed inspector control surfaces
+  - ratatui frame rendering on a crossterm backend with content-driven split/modal fallback, compact tab chrome, and alias-list scrollbar support
   - editor launch orchestration with tmux policy (`auto|on|off`) using direct current-pane editing inside tmux and session/tmuxless fallback outside
   - `(n)vim` launch/bootstrap and Rhai API completion dictionary generation for Rhai editing
 

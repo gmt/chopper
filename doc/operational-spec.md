@@ -378,12 +378,16 @@ launching external editor subprocesses, then re-enters the interactive view.
 
 Layout behavior:
 
-- Large terminals use a split view (alias list + inspector/details pane).
-- Smaller terminals fall back to a modal/single-pane list view.
-- The inspector uses tabbed control surfaces (`summary`, `toml`, `legacy`,
-  `reconcile`) with unavailable surfaces rendered as disabled.
-- The top banner provides contextual action guidance for the currently selected
-  alias; persistent status text is suppressed.
+- Layout is content-driven. Split view (alias list + inspector/details pane) is
+  preferred when both panes remain functional without unreasonable truncation.
+- If width becomes constrained, tab chrome compacts to the active-tab label.
+- If split still cannot remain functional, the UI falls back to a
+  modal/single-pane list view with a tab strip row.
+- The inspector uses tabs (`summary`, `toml`, `legacy`, `reconcile`) with
+  unavailable tabs rendered as disabled.
+- The top banner provides concise action guidance (`Enter`, `Tab`, `e`, `r`,
+  `q`); persistent status text is suppressed.
+- Alias overflow is represented by a vertical scrollbar.
 - A bottom alert bar appears only for temporary blocking/error conditions.
 
 Editing behavior:
