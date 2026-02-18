@@ -322,8 +322,8 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
                 && state.active_surface == ControlSurface::Toml
                 && state.inspector_mode == InspectorMode::TomlMenu
             {
-                let max_idx = TomlField::all().len().saturating_sub(1);
-                if state.toml_cursor < max_idx {
+                let field_count = TomlField::all().len();
+                if state.toml_cursor.saturating_add(1) < field_count {
                     state.toml_cursor += 1;
                 }
             } else if state.selected + 1 < state.aliases.len() {
@@ -2026,5 +2026,22 @@ mod tests {
         assert_eq!(action, LoopAction::Continue);
         assert_eq!(state.focus, PaneFocus::Inspector);
         assert_eq!(state.inspector_mode, InspectorMode::TomlMenu);
+    }
+
+    #[test]
+    fn toml_cursor_can_reach_last_field_with_j_navigation() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.focus = PaneFocus::Inspector;
+        state.active_surface = ControlSurface::Toml;
+        state.inspector_mode = InspectorMode::TomlMenu;
+
+        let last_idx = super::TomlField::all().len().saturating_sub(1);
+        for _ in 0..=last_idx + 2 {
+            let action =
+                handle_key_event(&mut state, KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), 10);
+            assert_eq!(action, LoopAction::Continue);
+        }
+
+        assert_eq!(state.toml_cursor, last_idx);
     }
 }
