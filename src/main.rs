@@ -5,6 +5,7 @@ mod alias_validation;
 mod arg_validation;
 mod cache;
 mod completion;
+mod config_diagnostics;
 mod env_util;
 mod env_validation;
 mod executor;
@@ -37,13 +38,7 @@ pub(crate) fn config_dir() -> PathBuf {
 
 pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
     let cfg = config_dir();
-    [
-        cfg.join("aliases").join(format!("{name}.toml")),
-        cfg.join(format!("{name}.toml")),
-        cfg.join(name),
-        cfg.join(format!("{name}.conf")),
-        cfg.join(format!("{name}.rhai")),
-    ]
+    [cfg.join("aliases").join(format!("{name}.toml")), cfg.join(format!("{name}.toml"))]
     .into_iter()
     .find(|path| path.is_file())
 }
@@ -178,6 +173,7 @@ fn run_builtin_action(action: BuiltinAction) {
             print!("{}", include_str!("bashcomp.bash"));
         }
         BuiltinAction::ListAliases => {
+            emit_config_scan_warnings();
             run_list_aliases();
         }
         BuiltinAction::PrintExec(alias) => {
@@ -190,6 +186,7 @@ fn run_builtin_action(action: BuiltinAction) {
             std::process::exit(run_complete_builtin(&raw_args));
         }
         BuiltinAction::Alias(raw_args) => {
+            emit_config_scan_warnings();
             std::process::exit(alias_admin::run_alias_action(&raw_args));
         }
         BuiltinAction::Tui(raw_args) => {
@@ -273,6 +270,12 @@ fn run_list_aliases() {
     }
 }
 
+fn emit_config_scan_warnings() {
+    for warning in config_diagnostics::scan_extension_warnings(&config_dir()) {
+        eprintln!("warning: {warning}");
+    }
+}
+
 fn alias_name_from_dir_entry(entry: &std::fs::DirEntry) -> Option<String> {
     let path = entry.path();
     // Accept regular files and symlinks that resolve to regular files.
@@ -281,16 +284,7 @@ fn alias_name_from_dir_entry(entry: &std::fs::DirEntry) -> Option<String> {
     }
     let name = entry.file_name();
     let name = name.to_str()?;
-    // Strip known extensions to get alias name
-    let alias = if let Some(base) = name.strip_suffix(".toml") {
-        base
-    } else if let Some(base) = name.strip_suffix(".conf") {
-        base
-    } else if let Some(base) = name.strip_suffix(".rhai") {
-        base
-    } else {
-        name
-    };
+    let alias = name.strip_suffix(".toml")?;
     if alias.is_empty() {
         return None;
     }

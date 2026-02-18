@@ -101,9 +101,6 @@ Lookup order for alias `<name>`:
 
 1. `aliases/<name>.toml`
 2. `<name>.toml`
-3. `<name>`
-4. `<name>.conf`
-5. `<name>.rhai`
 
 ---
 

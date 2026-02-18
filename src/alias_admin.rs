@@ -1,6 +1,6 @@
 use crate::alias_admin_validation::{parse_bool_flag, parse_env_assignment};
 use crate::alias_doc::{
-    load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc, AliasReconcileDoc,
+    load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc,
 };
 use crate::alias_validation;
 use anyhow::{anyhow, Context, Result};
@@ -82,6 +82,9 @@ fn run_get(alias: &str) -> Result<()> {
     let config_path = crate::find_config(alias)
         .ok_or_else(|| anyhow!("alias `{alias}` not found in configuration"))?;
     let manifest = crate::parser::parse(&config_path)?;
+    for warning in crate::config_diagnostics::manifest_missing_target_warnings(&manifest) {
+        eprintln!("warning: {warning}");
+    }
     let output = serde_json::json!({
         "alias": alias,
         "config_path": config_path,
@@ -255,6 +258,22 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
         }
     }
 
+    remove_alias_with_mode(alias, mode, symlink_path)?;
+    println!("removed alias `{alias}` ({mode:?})");
+    Ok(())
+}
+
+pub(crate) fn remove_alias_for_tui(alias: &str, keep_configs: bool) -> Result<()> {
+    validate_alias(alias)?;
+    let mode = if keep_configs {
+        RemoveMode::Dirty
+    } else {
+        RemoveMode::Clean
+    };
+    remove_alias_with_mode(alias, mode, None)
+}
+
+fn remove_alias_with_mode(alias: &str, mode: RemoveMode, symlink_path: Option<PathBuf>) -> Result<()> {
     let mut removed_any = false;
     let symlink_candidate = symlink_path
         .or_else(|| which::which(alias).ok())
@@ -280,12 +299,12 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
         RemoveMode::Dirty => {
             let Some(path) = symlink_candidate else {
                 return Err(anyhow!(
-                    "dirty remove requires a discoverable symlink; pass --symlink-path <path>"
+                    "keep-configs delete requires a discoverable symlink; pass --symlink-path <path>"
                 ));
             };
             if !path.is_symlink() {
                 return Err(anyhow!(
-                    "dirty remove only removes symlinks; `{}` is not a symlink",
+                    "keep-configs delete only removes symlinks; `{}` is not a symlink",
                     path.display()
                 ));
             }
@@ -298,7 +317,6 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
     if !removed_any {
         return Err(anyhow!("nothing was removed for alias `{alias}`"));
     }
-    println!("removed alias `{alias}` ({mode:?})");
     Ok(())
 }
 
@@ -449,42 +467,13 @@ pub(crate) fn load_or_seed_alias_doc(alias: &str) -> Result<(AliasDoc, PathBuf)>
     let Some(config_path) = crate::find_config(alias) else {
         return Ok((minimal_alias_doc(), default_toml_path(alias)));
     };
-    if is_toml_path(&config_path) {
-        let doc = load_alias_doc(&config_path).with_context(|| {
-            format!(
-                "alias `{alias}` must be a TOML config to edit schema fields (found {})",
-                config_path.display()
-            )
-        })?;
-        return Ok((doc, config_path));
-    }
-
-    let manifest = crate::parser::parse(&config_path)
-        .with_context(|| format!("failed to parse alias `{alias}` for TOML conversion"))?;
-    let mut doc = minimal_alias_doc();
-    doc.exec = manifest.exec.display().to_string();
-    doc.args = manifest.args;
-    doc.env = manifest.env;
-    doc.env_remove = manifest.env_remove;
-    doc.journal = manifest.journal.map(|journal| AliasJournalDoc {
-        namespace: journal.namespace,
-        stderr: journal.stderr,
-        identifier: journal.identifier,
-    });
-    doc.reconcile = manifest.reconcile.map(|reconcile| AliasReconcileDoc {
-        script: reconcile.script.display().to_string(),
-        function: Some(reconcile.function),
-    });
-    if let Some(bashcomp) = manifest.bashcomp {
-        doc.bashcomp = Some(crate::alias_doc::AliasBashcompDoc {
-            disabled: bashcomp.disabled,
-            passthrough: bashcomp.passthrough,
-            script: bashcomp.script.map(|path| path.display().to_string()),
-            rhai_script: bashcomp.rhai_script.map(|path| path.display().to_string()),
-            rhai_function: bashcomp.rhai_function,
-        });
-    }
-    Ok((doc, default_toml_path(alias)))
+    let doc = load_alias_doc(&config_path).with_context(|| {
+        format!(
+            "alias `{alias}` must be a TOML config to edit schema fields (found {})",
+            config_path.display()
+        )
+    })?;
+    Ok((doc, config_path))
 }
 
 pub(crate) fn save_alias_doc_at(path: &Path, doc: &AliasDoc) -> Result<()> {
@@ -505,16 +494,6 @@ pub(crate) fn create_alias(alias: &str) -> Result<PathBuf> {
     let path = default_toml_path(alias);
     save_alias_doc_at(&path, &minimal_alias_doc())?;
     Ok(path)
-}
-
-pub(crate) fn remove_alias_config(alias: &str) -> Result<()> {
-    validate_alias(alias)?;
-    let path = crate::find_config(alias)
-        .ok_or_else(|| anyhow!("alias `{alias}` does not exist in configuration"))?;
-    fs_err::remove_file(&path)
-        .with_context(|| format!("failed to remove alias config {}", path.display()))?;
-    crate::cache::prune_alias(alias);
-    Ok(())
 }
 
 pub(crate) fn duplicate_alias(source_alias: &str, target_alias: &str) -> Result<PathBuf> {
@@ -577,27 +556,7 @@ fn sibling_alias_path_for_target(source_path: &Path, target_alias: &str) -> Path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(crate::config_dir);
-    let file_name = source_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default();
-    let target_name = if file_name.ends_with(".toml") {
-        format!("{target_alias}.toml")
-    } else if file_name.ends_with(".conf") {
-        format!("{target_alias}.conf")
-    } else if file_name.ends_with(".rhai") {
-        format!("{target_alias}.rhai")
-    } else {
-        target_alias.to_string()
-    };
-    parent.join(target_name)
-}
-
-fn is_toml_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("toml"))
-        .unwrap_or(false)
+    parent.join(format!("{target_alias}.toml"))
 }
 
 fn discover_aliases_in_dir(dir: &Path, aliases: &mut BTreeSet<String>) -> Result<()> {
@@ -614,14 +573,8 @@ fn discover_aliases_in_dir(dir: &Path, aliases: &mut BTreeSet<String>) -> Result
         }
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
-        let alias = if let Some(base) = file_name.strip_suffix(".toml") {
-            base
-        } else if let Some(base) = file_name.strip_suffix(".conf") {
-            base
-        } else if let Some(base) = file_name.strip_suffix(".rhai") {
-            base
-        } else {
-            &file_name
+        let Some(alias) = file_name.strip_suffix(".toml") else {
+            continue;
         };
         if !alias.is_empty() {
             aliases.insert(alias.to_string());
@@ -691,15 +644,15 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let cfg = temp.path();
         fs::create_dir_all(cfg).expect("create cfg");
-        fs::write(cfg.join("source.conf"), "echo hello\n").expect("write source");
+        fs::write(cfg.join("source.toml"), "exec = \"echo\"\n").expect("write source");
         env::set_var("CHOPPER_CONFIG_DIR", cfg);
 
         let duplicate_path = duplicate_alias("source", "copy").expect("duplicate alias");
-        assert_eq!(duplicate_path.file_name().and_then(|v| v.to_str()), Some("copy.conf"));
+        assert_eq!(duplicate_path.file_name().and_then(|v| v.to_str()), Some("copy.toml"));
         assert!(duplicate_path.is_file());
 
         let renamed_path = rename_alias("copy", "renamed").expect("rename alias");
-        assert_eq!(renamed_path.file_name().and_then(|v| v.to_str()), Some("renamed.conf"));
+        assert_eq!(renamed_path.file_name().and_then(|v| v.to_str()), Some("renamed.toml"));
         assert!(renamed_path.is_file());
         assert!(!duplicate_path.exists());
 

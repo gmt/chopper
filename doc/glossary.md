@@ -20,10 +20,9 @@ Invocation form where executable basename itself is treated as alias name.
 
 Normalized in-memory representation of an alias after parse + validation.
 
-## Legacy alias
+## Legacy alias (removed)
 
-One-line alias file (`<alias>`, `<alias>.conf`, `<alias>.rhai`) using the first
-non-empty, non-comment line as command + args.
+Historical one-line alias files were removed; aliases are now TOML-only.
 
 ## Reconcile
 

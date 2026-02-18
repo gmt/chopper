@@ -9,14 +9,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn parse(path: &Path) -> Result<Manifest> {
+    if !is_toml_path(path) {
+        return Err(anyhow!(
+            "unsupported alias config format `{}`; expected a .toml file",
+            path.display()
+        ));
+    }
+
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read alias config {}", path.display()))?;
-
-    if is_toml_path(path) {
-        parse_toml(strip_utf8_bom(&content), path)
-    } else {
-        parse_trivial(&content, path)
-    }
+    parse_toml(strip_utf8_bom(&content), path)
 }
 
 fn is_toml_path(path: &Path) -> bool {
@@ -24,32 +26,6 @@ fn is_toml_path(path: &Path) -> bool {
         .and_then(|s| s.to_str())
         .map(|ext| ext.eq_ignore_ascii_case("toml"))
         .unwrap_or(false)
-}
-
-fn parse_trivial(content: &str, path: &Path) -> Result<Manifest> {
-    let line = content
-        .lines()
-        .map(normalize_legacy_line)
-        .find(|line| !line.is_empty() && !line.starts_with('#'))
-        .ok_or_else(|| anyhow!("empty config file"))?;
-
-    let parts = shell_words::split(line)?;
-    if parts.is_empty() {
-        return Err(anyhow!("no command found"));
-    }
-    validate_legacy_command_token(&parts[0])?;
-    validate_arg_values(&parts[1..], "legacy alias args")?;
-
-    let base_dir = config_base_dir(path);
-    let exec = resolve_exec_path(&base_dir, &parts[0]);
-
-    let args = parts[1..].to_vec();
-
-    Ok(Manifest::simple(exec).with_args(args))
-}
-
-fn normalize_legacy_line(line: &str) -> &str {
-    line.trim().trim_start_matches('\u{feff}').trim()
 }
 
 fn strip_utf8_bom(content: &str) -> &str {
@@ -352,32 +328,6 @@ fn validate_arg_values(values: &[String], field: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_legacy_command_token(command: &str) -> Result<()> {
-    if command.trim().is_empty() {
-        return Err(anyhow!("legacy alias command cannot be empty"));
-    }
-    if matches!(
-        arg_validation::validate_arg_value(command),
-        Err(ArgViolation::ContainsNul)
-    ) {
-        return Err(anyhow!("legacy alias command cannot contain NUL bytes"));
-    }
-    if command == "." || command == ".." {
-        return Err(anyhow!("legacy alias command cannot be `.` or `..`"));
-    }
-    if command.ends_with('/') || command.ends_with('\\') {
-        return Err(anyhow!(
-            "legacy alias command cannot end with a path separator"
-        ));
-    }
-    if ends_with_dot_component(command) {
-        return Err(anyhow!(
-            "legacy alias command cannot end with `.` or `..` path components"
-        ));
-    }
-    Ok(())
-}
-
 fn resolve_script_path(base_dir: &Path, script: &str) -> PathBuf {
     let script_path = PathBuf::from(script);
     if script_path.is_absolute() {
@@ -486,318 +436,13 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn parses_trivial_legacy_alias() {
+    fn rejects_non_toml_alias_configs() {
         let temp = TempDir::new().expect("create tempdir");
         let alias = temp.path().join("legacy");
         fs::write(&alias, "echo hello world").expect("write config");
 
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(
-            manifest.exec.file_name().and_then(|x| x.to_str()),
-            Some("echo")
-        );
-        assert_eq!(manifest.args, vec!["hello", "world"]);
-        assert!(manifest.journal.is_none());
-    }
-
-    #[test]
-    fn parses_trivial_legacy_alias_with_symbolic_and_pathlike_args() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(
-            &alias,
-            r#"echo --flag=value ../relative/path 'semi;colon&and' '$DOLLAR' 'brace{value}' 'windows\path'"#,
-        )
-        .expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(
-            manifest.exec.file_name().and_then(|x| x.to_str()),
-            Some("echo")
-        );
-        assert_eq!(
-            manifest.args,
-            vec![
-                "--flag=value".to_string(),
-                "../relative/path".to_string(),
-                "semi;colon&and".to_string(),
-                "$DOLLAR".to_string(),
-                "brace{value}".to_string(),
-                r"windows\path".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn resolves_relative_legacy_command_against_config_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config_dir = temp.path().join("chopper");
-        fs::create_dir_all(&config_dir).expect("create config dir");
-        let alias = config_dir.join("legacy-relative");
-        fs::write(&alias, "'bin/runner @v1' base").expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(manifest.exec, config_dir.join("bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn resolves_dot_prefixed_legacy_command_against_config_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config_dir = temp.path().join("chopper");
-        fs::create_dir_all(&config_dir).expect("create config dir");
-        let alias = config_dir.join("legacy-dot-relative");
-        fs::write(&alias, "'./bin/runner @v1' base").expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(manifest.exec, config_dir.join("./bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn resolves_parent_relative_legacy_command_against_config_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let root_dir = temp.path().join("root");
-        let config_dir = root_dir.join("chopper");
-        fs::create_dir_all(&config_dir).expect("create config dir");
-        let alias = config_dir.join("legacy-parent-relative");
-        fs::write(&alias, "'../outside-bin/runner @v1' base").expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(manifest.exec, config_dir.join("../outside-bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn resolves_relative_legacy_command_against_symlink_target_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let aliases_dir = temp.path().join("aliases");
-        let shared_dir = temp.path().join("shared");
-        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
-        fs::create_dir_all(&shared_dir).expect("create shared dir");
-
-        let target = shared_dir.join("legacy-target");
-        fs::write(&target, "'bin/runner @v1' base").expect("write target config");
-        let link = aliases_dir.join("legacy-link");
-        symlink(&target, &link).expect("create legacy symlink");
-
-        let manifest = parse(&link).expect("parse symlinked legacy config");
-        assert_eq!(manifest.exec, shared_dir.join("bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn resolves_dot_prefixed_legacy_command_against_symlink_target_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let aliases_dir = temp.path().join("aliases");
-        let shared_dir = temp.path().join("shared");
-        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
-        fs::create_dir_all(&shared_dir).expect("create shared dir");
-
-        let target = shared_dir.join("legacy-dot-target");
-        fs::write(&target, "'./bin/runner @v1' base").expect("write target config");
-        let link = aliases_dir.join("legacy-dot-link");
-        symlink(&target, &link).expect("create legacy symlink");
-
-        let manifest = parse(&link).expect("parse symlinked legacy config");
-        assert_eq!(manifest.exec, shared_dir.join("./bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn resolves_parent_relative_legacy_command_against_symlink_target_directory() {
-        let temp = TempDir::new().expect("create tempdir");
-        let aliases_dir = temp.path().join("aliases");
-        let shared_dir = temp.path().join("shared");
-        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
-        fs::create_dir_all(&shared_dir).expect("create shared dir");
-
-        let target = shared_dir.join("legacy-parent-target");
-        fs::write(&target, "'../outside-bin/runner @v1' base").expect("write target config");
-        let link = aliases_dir.join("legacy-parent-link");
-        symlink(&target, &link).expect("create legacy symlink");
-
-        let manifest = parse(&link).expect("parse symlinked legacy config");
-        assert_eq!(manifest.exec, shared_dir.join("../outside-bin/runner @v1"));
-        assert_eq!(manifest.args, vec!["base"]);
-    }
-
-    #[test]
-    fn parses_trivial_legacy_alias_after_blank_and_comment_lines() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(
-            &alias,
-            r#"
-
-# heading comment
-    # indented comment
-echo hello world
-"#,
-        )
-        .expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(
-            manifest.exec.file_name().and_then(|x| x.to_str()),
-            Some("echo")
-        );
-        assert_eq!(manifest.args, vec!["hello", "world"]);
-    }
-
-    #[test]
-    fn rejects_trivial_legacy_alias_with_only_blank_and_comment_lines() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(
-            &alias,
-            r#"
-
-# heading comment
-    # indented comment
-
-"#,
-        )
-        .expect("write config");
-
         let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err.to_string().contains("empty config file"));
-    }
-
-    #[test]
-    fn parses_trivial_legacy_alias_with_utf8_bom() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "\u{feff}echo hello world").expect("write config");
-
-        let manifest = parse(&alias).expect("parse legacy config");
-        assert_eq!(
-            manifest.exec.file_name().and_then(|x| x.to_str()),
-            Some("echo")
-        );
-        assert_eq!(manifest.args, vec!["hello", "world"]);
-    }
-
-    #[test]
-    fn rejects_legacy_alias_args_containing_nul_bytes() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "echo ok\0bad").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias args entries cannot contain NUL bytes"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_command_containing_nul_bytes() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "ec\0ho ok").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot contain NUL bytes"));
-    }
-
-    #[test]
-    fn rejects_trivial_legacy_alias_with_only_bom_and_comments() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(
-            &alias,
-            "\u{feff}\n# heading comment\n  # indented comment\n",
-        )
-        .expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err.to_string().contains("empty config file"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_with_empty_command_token() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "\"\" runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot be empty"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_with_dot_command_token() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, ". runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot be `.` or `..`"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_with_parent_command_token() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, ".. runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot be `.` or `..`"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_command_with_trailing_separator() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "bin/ runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot end with a path separator"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_command_with_trailing_backslash_separator() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "'bin\\' runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot end with a path separator"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_command_with_trailing_dot_component() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "bin/.. runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot end with `.` or `..` path components"));
-    }
-
-    #[test]
-    fn rejects_legacy_alias_command_with_backslash_dot_component() {
-        let temp = TempDir::new().expect("create tempdir");
-        let alias = temp.path().join("legacy");
-        fs::write(&alias, "'bin\\..' runtime").expect("write config");
-
-        let err = parse(&alias).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("legacy alias command cannot end with `.` or `..` path components"));
+        assert!(err.to_string().contains("expected a .toml file"), "{err}");
     }
 
     #[test]

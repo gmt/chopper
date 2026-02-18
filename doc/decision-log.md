@@ -24,9 +24,11 @@ syntax surprise.
 
 ## 3) Keep legacy one-line aliases
 
-**Decision:** Preserve legacy single-line alias support while introducing TOML.
+**Decision (superseded):** Preserve legacy single-line alias support while introducing TOML.
 
-**Why:** Enables incremental migration without forcing a flag-day rewrite.
+**Why (historical):** Enabled incremental migration without forcing a flag-day rewrite.
+
+**Current state:** Legacy one-line alias support has been removed; runtime discovery is TOML-only.
 
 ---
 

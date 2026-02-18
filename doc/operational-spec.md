@@ -137,25 +137,16 @@ Lookup order for alias `foo`:
 
 1. `aliases/foo.toml`
 2. `foo.toml`
-3. `foo`
-4. `foo.conf`
-5. `foo.rhai`
 
 Only regular files are considered valid alias configs in this lookup. Symlinks
 that resolve to regular files are accepted.
 
-Files `foo`, `foo.conf`, `foo.rhai` are treated as **legacy one-line command
-aliases**. For legacy files, `chopper` uses the first non-empty, non-comment
-(`# ...`) line. If that first executable line starts with a UTF-8 BOM, the BOM
-is ignored.
+Legacy one-line alias files are no longer parsed. Alias configs must be TOML.
 
-The first executable token must be a non-empty command. Legacy command token
-cannot be `.` or `..`, and cannot end with path separators or trailing `.`
-/ `..` path components. Legacy command and argument tokens cannot contain NUL
-bytes. Legacy arguments are otherwise preserved as provided (for example
-`--flag=value`, `../relative/path`, `$DOLLAR`, and `windows\path`). If a legacy
-command token is a relative path (for example `bin/runner`), it is resolved
-against the alias file's real directory (following symlinks).
+Configuration-oriented flows (`--list-aliases`, `--alias ...`, and TUI scans)
+emit warnings for suspicious config files with extensions other than `.toml`
+or `.rhai`. These diagnostics are advisory and do not alter alias invocation
+semantics.
 
 ---
 
@@ -220,7 +211,7 @@ process execution and environment mutation:
 Other symbolic/path-like shapes are intentionally preserved (for example
 slashes, backslashes, dots, dashes, braces, dollar signs, and semicolons),
 including for alias args, reconcile args, env values, env keys, env_remove
-entries, journal namespace/identifier, and legacy one-line alias args.
+entries, and journal namespace/identifier.
 
 When authoring TOML that contains backslashes, prefer literal strings
 (`'windows\path'`) if you want raw backslashes preserved exactly.
@@ -383,27 +374,28 @@ Layout behavior:
 - If width becomes constrained, tab chrome compacts to the active-tab label.
 - If split still cannot remain functional, the UI falls back to a
   modal/single-pane list view with a tab strip row.
-- The inspector uses tabs (`summary`, `toml`, `legacy`, `reconcile`) that are
+- The inspector uses tabs (`toml`, `reconcile`) that are
   always selectable; tabs with backing data are emphasized, while empty tabs
   remain selectable for creation flows.
 - The top banner provides concise action guidance (`Enter`, `Tab`, `e`, `r`,
-  `q` plus alias ops). A bottom status row is used for prompts/errors.
+  `q` plus alias ops). Bottom rows are used for async config warnings and
+  prompts/errors.
 - Alias overflow is represented by a vertical scrollbar.
 - In modal fallback, inspector/editor interaction opens as a wizard-like
   full-screen pane while list mode remains available.
 
 Editing behavior:
 
-- `Enter` on a selected alias activates the active surface.
+- `Enter` from list focus moves into inspector focus for the active tab.
 - TOML schema-bound fields are edited directly in the TUI inspector (no
   external editor handoff for normal property edits).
 - `e` is a reconcile quick action; when reconcile script is missing, the TUI can
   open a draft creation flow.
-- For unstructured file creation/editing (`legacy`, `reconcile`), draft files
-  include instructional comments and only persist if the user saves before exit.
-  Aborting with `:q!` discards draft changes.
+- Reconcile script draft files include instructional comments and only persist
+  if the user saves before exit. Aborting with `:q!` discards draft changes.
 - Alias lifecycle actions are available in TUI (`new`, `rename`, `duplicate`,
-  `delete`) via prompt-driven controls.
+  `delete`) via prompt-driven controls. Delete prompt supports a `keep configs`
+  toggle (`k`) to switch between clean removal and symlink-only removal.
 - `--tmux=auto` (default) uses tmux only when appropriate:
   - inside tmux: launches editor directly in the current pane (no split pane)
   - outside tmux with no running server: launches a dedicated tmux session
@@ -569,17 +561,8 @@ use a clean cache entry again.
 
 Likewise, chopper refuses to write invalid manifests into cache in the first
 place, so malformed cache state only persists if files are externally altered.
-For aliases whose names require filename sanitization, legacy cache filenames
-are migrated automatically; malformed or non-deserializable legacy entries are
-pruned instead of being migrated, then rebuilt from source on successful
-invocation.
-
-When a valid hashed entry already exists, stale legacy files are cleaned up on
-cache hit. If hashed and legacy entries are both unusable, chopper falls back
-to source parsing and rewrites a fresh hashed entry. The same prune/reparse
-rules also apply to safe aliases that use unhashed cache filenames (for example
-`safealias.bin`): stale or corrupted entries are removed and regenerated from
-source manifests.
+The same prune/reparse rules apply to both safe aliases (for example
+`safealias.bin`) and hashed unsafe-alias cache filenames.
 
 For extraordinary debugging scenarios, cache can be bypassed per-invocation:
 

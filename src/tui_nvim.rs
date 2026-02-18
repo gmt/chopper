@@ -101,14 +101,6 @@ pub fn open_alias_editor(path: &Path, tmux_mode: TmuxMode) -> Result<()> {
     launch_editor(invocation, tmux_mode)
 }
 
-pub fn open_alias_draft_editor_with_mode(
-    target_path: &Path,
-    template: &str,
-    tmux_mode: TmuxMode,
-) -> Result<bool> {
-    open_draft_editor_with_mode(target_path, template, None, tmux_mode)
-}
-
 pub fn open_rhai_draft_editor_with_mode(
     target_path: &Path,
     template: &str,

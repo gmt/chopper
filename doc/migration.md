@@ -1,31 +1,25 @@
 # chopper migration guide
 
-This page helps migrate existing aliases into the TOML DSL incrementally.
+Legacy one-line alias configs are no longer supported. Alias discovery is now
+TOML-only:
+
+1. `aliases/<alias>.toml`
+2. `<alias>.toml`
+
+If you still have historical one-line aliases in backups or old branches,
+convert them to TOML before use.
 
 ---
 
-## 1) Keep legacy aliases working while migrating
+## Convert one-line alias to TOML
 
-Legacy one-line files are still supported via discovery order, so you can
-migrate alias-by-alias without a flag day.
-
-Legacy lookup positions (after TOML paths):
-
-1. `<alias>`
-2. `<alias>.conf`
-3. `<alias>.rhai`
-
----
-
-## 2) Convert a one-line alias to TOML
-
-Legacy:
+Before:
 
 ```text
 kubectl get pods -A
 ```
 
-TOML:
+After:
 
 ```toml
 exec = "kubectl"
@@ -40,89 +34,16 @@ Recommended location:
 
 ---
 
-## 3) Move inline env assumptions into `[env]`
+## Recommended rollout
 
-Before (implicit via shell profile):
-
-- relies on caller environment state
-
-After (explicit per-alias):
-
-```toml
-[env]
-KUBECONFIG = "/home/me/.kube/config"
-```
-
-Use `env_remove` to strip inherited variables you do not want:
-
-```toml
-env_remove = ["AWS_PROFILE"]
-```
-
----
-
-## 4) Add journald routing only where needed
-
-```toml
-[journal]
-namespace = "ops"
-stderr = true
-identifier = "my-alias"
-```
-
-This keeps logging behavior explicit and scoped to selected aliases.
-
----
-
-## 5) Introduce Rhai reconcile incrementally
-
-Start with static TOML first, then add `[reconcile]` only for aliases that need
-runtime adaptation.
-
-Alias:
-
-```toml
-[reconcile]
-script = "my.reconcile.rhai"
-function = "reconcile"
-```
-
-Script:
-
-```rhai
-fn reconcile(ctx) {
-  let out = #{};
-  if ctx.runtime_args.contains("--prod") {
-    out["set_env"] = #{ "APP_ENV": "production" };
-  }
-  out
-}
-```
-
----
-
-## 6) Validate behavior while migrating
-
-Useful checks:
-
-- `chopper --print-config-dir`
-- `chopper --print-cache-dir`
-- `CHOPPER_DISABLE_CACHE=1 chopper <alias> ...` (source-only run)
-- `CHOPPER_DISABLE_RECONCILE=1 chopper <alias> ...` (skip reconcile)
-- disable toggles are truthy-only (`1|true|yes|on`, trimmed/ASCII
-  case-insensitive);
-  falsey (`0|false|no|off`), blank, and unknown values (including CRLF
-  wrappers) keep features enabled.
-
----
-
-## 7) Recommended migration order
-
-1. Convert low-risk aliases to TOML first.
-2. Make env dependencies explicit (`[env]` / `env_remove`).
-3. Enable journald on aliases needing stderr namespace routing.
-4. Add reconcile only where static args/env are insufficient.
-5. Remove legacy files after each alias is validated.
+1. Convert command/args into TOML `exec` + `args`.
+2. Move environment assumptions into `[env]` / `env_remove`.
+3. Add `[journal]` and `[reconcile]` only where needed.
+4. Validate with:
+   - `chopper --print-config-dir`
+   - `chopper --print-cache-dir`
+   - `CHOPPER_DISABLE_CACHE=1 chopper <alias> ...`
+   - `CHOPPER_DISABLE_RECONCILE=1 chopper <alias> ...`
 
 ---
 

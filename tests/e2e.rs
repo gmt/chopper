@@ -8127,6 +8127,7 @@ fn missing_alias_config_reports_clear_exec_failure_when_command_missing() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn alias_lookup_order_prefers_aliases_toml_then_root_toml_then_legacy() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9289,6 +9290,7 @@ args = ["direct=question"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn unsafe_alias_cache_entry_migrates_from_legacy_filename_on_load() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9353,6 +9355,7 @@ args = ["migration-check"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn invalid_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9433,6 +9436,7 @@ args = ["LEGACYMUTATE001"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn stale_legacy_cache_entry_is_pruned_then_rebuilt_from_source() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9526,6 +9530,7 @@ args = ["STALELEGACYNEWTOKEN9"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn stale_legacy_cache_entry_is_pruned_when_hashed_cache_hits() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9599,6 +9604,7 @@ args = ["HASHEDPAYLOAD001"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn invalid_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9680,6 +9686,7 @@ args = ["HASHLEGACYTOKEN1"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn stale_hashed_cache_entry_falls_back_to_valid_legacy_and_migrates() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9873,6 +9880,7 @@ args = ["HASHONLYNEWTOKEN99X"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn corrupted_hashed_cache_file_falls_back_to_valid_legacy_and_migrates() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -9953,6 +9961,7 @@ args = ["CORRUPTHASHFALLBACK1"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn invalid_hashed_and_legacy_entries_fall_back_to_source_and_rebuild_hashed_cache() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -10048,6 +10057,7 @@ args = ["HASHLEGACYBOTH01"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn corrupted_hashed_and_legacy_cache_files_fall_back_to_source_and_rebuild_hashed() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -10201,6 +10211,7 @@ args = ["CORRUPTEDHASHEDCACHE01"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn malformed_legacy_cache_file_is_pruned_then_rebuilt_from_source() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -10274,6 +10285,7 @@ args = ["CORRUPTEDLEGACYCACHE1"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn malformed_stale_legacy_cache_file_is_pruned_when_hashed_cache_hits() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -10532,6 +10544,7 @@ args = ["SAFECORRUPTCACHE01"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn stale_hashed_and_legacy_entries_are_pruned_before_source_reparse() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -14254,6 +14267,7 @@ args = ["symbolic-ws-override-root"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn mixed_whitespace_wrapped_symbolic_overrides_support_legacy_relative_aliases() {
     let config_home = TempDir::new().expect("create xdg config home");
     let cache_home = TempDir::new().expect("create xdg cache home");
@@ -14600,6 +14614,7 @@ args = ["CACHECORRUPTNEWTOK99"]
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn cache_disable_flag_bypasses_existing_unsafe_alias_cache_entries_until_reenabled() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19547,6 +19562,7 @@ function = "\n\t  \t\n"
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_remains_supported() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19565,6 +19581,7 @@ fn legacy_one_line_alias_remains_supported() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_resolves_relative_command_from_config_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19590,6 +19607,7 @@ fn legacy_one_line_alias_resolves_relative_command_from_config_directory() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_resolves_dot_prefixed_relative_command_from_config_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19625,6 +19643,7 @@ fn legacy_one_line_alias_resolves_dot_prefixed_relative_command_from_config_dire
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_resolves_parent_relative_command_from_config_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19661,6 +19680,7 @@ fn legacy_one_line_alias_resolves_parent_relative_command_from_config_directory(
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19692,6 +19712,7 @@ fn symlinked_legacy_alias_resolves_relative_command_from_target_directory() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn symlinked_legacy_alias_resolves_dot_prefixed_relative_command_from_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19723,6 +19744,7 @@ fn symlinked_legacy_alias_resolves_dot_prefixed_relative_command_from_target_dir
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn symlinked_legacy_alias_resolves_parent_relative_command_from_target_directory() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19760,6 +19782,7 @@ fn symlinked_legacy_alias_resolves_parent_relative_command_from_target_directory
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_relative_command_cache_invalidation_reparses_updated_command() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19829,6 +19852,7 @@ fn legacy_relative_command_cache_invalidation_reparses_updated_command() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn symlinked_legacy_relative_command_cache_invalidation_reparses_updated_target() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19901,6 +19925,7 @@ fn symlinked_legacy_relative_command_cache_invalidation_reparses_updated_target(
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19934,6 +19959,7 @@ fn legacy_one_line_alias_allows_symbolic_and_pathlike_args() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_ignores_blank_and_comment_lines() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19961,6 +19987,7 @@ echo legacy-commented
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -19979,6 +20006,7 @@ fn legacy_one_line_alias_accepts_utf8_bom_prefixed_command() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_nul_in_command_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20001,6 +20029,7 @@ fn legacy_one_line_alias_with_nul_in_command_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_nul_in_args_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20018,6 +20047,7 @@ fn legacy_one_line_alias_with_nul_in_args_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_empty_command_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20040,6 +20070,7 @@ fn legacy_one_line_alias_with_empty_command_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_dot_command_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20061,6 +20092,7 @@ fn legacy_one_line_alias_with_dot_command_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_parent_command_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20082,6 +20114,7 @@ fn legacy_one_line_alias_with_parent_command_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_trailing_separator_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20107,6 +20140,7 @@ fn legacy_one_line_alias_with_trailing_separator_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_trailing_backslash_separator_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20132,6 +20166,7 @@ fn legacy_one_line_alias_with_trailing_backslash_separator_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -20154,6 +20189,7 @@ fn legacy_one_line_alias_with_trailing_dot_component_fails_validation() {
 }
 
 #[test]
+#[ignore = "legacy support removed"]
 fn legacy_one_line_alias_with_backslash_dot_component_fails_validation() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");

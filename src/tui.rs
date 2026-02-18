@@ -11,6 +11,8 @@ use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarStat
 use ratatui::{Frame, Terminal};
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 
 const SPLIT_MAX_LEFT_WIDTH: u16 = 60;
 const SPLIT_MIN_RIGHT_WIDTH: u16 = 30;
@@ -58,24 +60,20 @@ enum PaneFocus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControlSurface {
-    Summary,
     Toml,
-    Legacy,
     Reconcile,
 }
 
 impl ControlSurface {
     fn label(self) -> &'static str {
         match self {
-            Self::Summary => "summary",
             Self::Toml => "toml",
-            Self::Legacy => "legacy",
             Self::Reconcile => "reconcile",
         }
     }
 
-    fn all() -> [Self; 4] {
-        [Self::Summary, Self::Toml, Self::Legacy, Self::Reconcile]
+    fn all() -> [Self; 2] {
+        [Self::Toml, Self::Reconcile]
     }
 }
 
@@ -186,14 +184,13 @@ enum PromptKind {
 struct PromptState {
     kind: PromptKind,
     input: String,
+    keep_configs: bool,
 }
 
 #[derive(Debug, Default, Clone)]
 struct AliasArtifacts {
     selected_alias: Option<String>,
-    resolved_config_path: Option<PathBuf>,
     toml_path: Option<PathBuf>,
-    legacy_path: Option<PathBuf>,
     reconcile_script_path: Option<PathBuf>,
 }
 
@@ -210,6 +207,7 @@ struct AppState {
     toml_cursor: usize,
     prompt: Option<PromptState>,
     alert_message: Option<String>,
+    diagnostics: Vec<String>,
     tmux_mode: crate::tui_nvim::TmuxMode,
 }
 
@@ -235,14 +233,16 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         scroll: 0,
         focus: PaneFocus::List,
         layout: LayoutKind::Modal,
-        active_surface: ControlSurface::Summary,
+        active_surface: ControlSurface::Toml,
         artifacts: AliasArtifacts::default(),
-        inspector_mode: InspectorMode::Browse,
+        inspector_mode: InspectorMode::TomlMenu,
         toml_cursor: 0,
         prompt: None,
         alert_message: None,
+        diagnostics: Vec::new(),
         tmux_mode: options.tmux_mode,
     };
+    let mut diagnostics_rx = Some(spawn_config_scan_worker());
 
     let _guard = TerminalGuard::new()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -250,6 +250,7 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
     terminal.clear().context("failed to clear terminal")?;
 
     loop {
+        receive_config_diagnostics(&mut state, &mut diagnostics_rx);
         let (width, height) = terminal::size().context("failed to read terminal size")?;
         sync_artifacts_for_selection(&mut state);
         let layout_plan = compute_layout(width, height, &state);
@@ -257,6 +258,7 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         let content_rows = content_height(
             height,
             state.alert_message.is_some() || state.prompt.is_some(),
+            !state.diagnostics.is_empty(),
         );
         let alias_rows = alias_viewport_rows(layout_plan.kind, content_rows);
         ensure_selection_visible(&mut state, alias_rows);
@@ -264,12 +266,16 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
 
         draw(&mut terminal, &state, layout_plan)?;
 
+        if !event::poll(Duration::from_millis(100)).context("failed to poll keyboard events")? {
+            continue;
+        }
         let event = event::read().context("failed to read keyboard event")?;
         let action = handle_event(&mut state, event, alias_rows);
         match action {
             LoopAction::Continue => {}
             LoopAction::Refresh => {
                 refresh_aliases(&mut state)?;
+                diagnostics_rx = Some(spawn_config_scan_worker());
             }
             LoopAction::ActivateCurrentSurface => {
                 activate_current_surface(&mut state, &mut terminal)?;
@@ -282,6 +288,31 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn spawn_config_scan_worker() -> Receiver<Vec<String>> {
+    let (tx, rx) = mpsc::channel();
+    let config_root = crate::config_dir();
+    std::thread::spawn(move || {
+        let warnings = crate::config_diagnostics::scan_extension_warnings(&config_root);
+        let _ = tx.send(warnings);
+    });
+    rx
+}
+
+fn receive_config_diagnostics(state: &mut AppState, receiver: &mut Option<Receiver<Vec<String>>>) {
+    let Some(rx) = receiver.take() else {
+        return;
+    };
+    match rx.try_recv() {
+        Ok(warnings) => {
+            state.diagnostics = warnings;
+        }
+        Err(mpsc::TryRecvError::Empty) => {
+            *receiver = Some(rx);
+        }
+        Err(mpsc::TryRecvError::Disconnected) => {}
+    }
 }
 
 fn handle_event(state: &mut AppState, event: Event, list_height: usize) -> LoopAction {
@@ -350,9 +381,11 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
         KeyCode::Char('l') | KeyCode::Right => {
             if state.focus == PaneFocus::List {
                 state.focus = PaneFocus::Inspector;
-                if state.active_surface == ControlSurface::Toml {
-                    state.inspector_mode = InspectorMode::TomlMenu;
-                }
+                state.inspector_mode = if state.active_surface == ControlSurface::Toml {
+                    InspectorMode::TomlMenu
+                } else {
+                    InspectorMode::Browse
+                };
             } else {
                 cycle_surface(state, true);
             }
@@ -367,18 +400,10 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             LoopAction::Continue
         }
         KeyCode::Char('1') => {
-            set_active_surface(state, ControlSurface::Summary);
-            LoopAction::Continue
-        }
-        KeyCode::Char('2') => {
             set_active_surface(state, ControlSurface::Toml);
             LoopAction::Continue
         }
-        KeyCode::Char('3') => {
-            set_active_surface(state, ControlSurface::Legacy);
-            LoopAction::Continue
-        }
-        KeyCode::Char('4') => {
+        KeyCode::Char('2') => {
             set_active_surface(state, ControlSurface::Reconcile);
             LoopAction::Continue
         }
@@ -386,6 +411,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             state.prompt = Some(PromptState {
                 kind: PromptKind::NewAlias,
                 input: String::new(),
+                keep_configs: false,
             });
             LoopAction::Continue
         }
@@ -398,6 +424,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             state.prompt = Some(PromptState {
                 kind: PromptKind::RenameAlias,
                 input: seed,
+                keep_configs: false,
             });
             LoopAction::Continue
         }
@@ -405,6 +432,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             state.prompt = Some(PromptState {
                 kind: PromptKind::DuplicateAlias,
                 input: String::new(),
+                keep_configs: false,
             });
             LoopAction::Continue
         }
@@ -412,19 +440,24 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
             state.prompt = Some(PromptState {
                 kind: PromptKind::DeleteAlias,
                 input: String::new(),
+                keep_configs: false,
             });
             LoopAction::Continue
         }
         KeyCode::Char('r') => LoopAction::Refresh,
         KeyCode::Char('e') => LoopAction::ActivateReconcileQuick,
         KeyCode::Enter => {
+            if state.focus == PaneFocus::List {
+                state.focus = PaneFocus::Inspector;
+                state.inspector_mode = if state.active_surface == ControlSurface::Toml {
+                    InspectorMode::TomlMenu
+                } else {
+                    InspectorMode::Browse
+                };
+                return LoopAction::Continue;
+            }
             if state.active_surface == ControlSurface::Toml {
                 return handle_toml_enter(state);
-            }
-            if state.focus == PaneFocus::List && state.layout == LayoutKind::Modal {
-                state.focus = PaneFocus::Inspector;
-                state.inspector_mode = InspectorMode::Browse;
-                return LoopAction::Continue;
             }
             LoopAction::ActivateCurrentSurface
         }
@@ -455,6 +488,7 @@ fn handle_toml_enter(state: &mut AppState) -> LoopAction {
             state.prompt = Some(PromptState {
                 kind: PromptKind::EditTomlField(field),
                 input: value,
+                keep_configs: false,
             });
         }
         Err(err) => {
@@ -479,6 +513,18 @@ fn handle_prompt_key_event(state: &mut AppState, key: KeyEvent, list_height: usi
         }
         KeyCode::Backspace => {
             prompt.input.pop();
+            LoopAction::Continue
+        }
+        KeyCode::Char('k') | KeyCode::Char('K') => {
+            if prompt.kind == PromptKind::DeleteAlias {
+                prompt.keep_configs = !prompt.keep_configs;
+                return LoopAction::Continue;
+            }
+            let ch = match key.code {
+                KeyCode::Char(ch) => ch,
+                _ => unreachable!(),
+            };
+            prompt.input.push(ch);
             LoopAction::Continue
         }
         KeyCode::Char(ch) => {
@@ -536,7 +582,7 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
                 return;
             };
             if matches!(input.as_str(), "y" | "Y" | "yes" | "YES" | "Yes") {
-                crate::alias_admin::remove_alias_config(&alias)
+                crate::alias_admin::remove_alias_for_tui(&alias, prompt.keep_configs)
                     .map(|_| refresh_aliases_after_delete(state, list_height))
             } else {
                 state.alert_message = Some(String::from("delete aborted"));
@@ -941,6 +987,7 @@ fn activate_current_surface(
         state.alert_message = Some(String::from("No alias selected"));
         return Ok(());
     };
+    warn_missing_targets_for_active_alias(state, &alias);
     let surface = state.active_surface;
     execute_surface_action(state, terminal, &alias, surface)?;
     Ok(())
@@ -955,9 +1002,25 @@ fn activate_reconcile_quick(
         return Ok(());
     };
 
+    warn_missing_targets_for_active_alias(state, &alias);
     set_active_surface(state, ControlSurface::Reconcile);
     execute_surface_action(state, terminal, &alias, ControlSurface::Reconcile)?;
     Ok(())
+}
+
+fn warn_missing_targets_for_active_alias(state: &mut AppState, alias: &str) {
+    let Some(config_path) = state.artifacts.toml_path.clone() else {
+        return;
+    };
+    let Ok(manifest) = crate::parser::parse(&config_path) else {
+        return;
+    };
+    let warnings = crate::config_diagnostics::manifest_missing_target_warnings(&manifest);
+    if warnings.is_empty() {
+        return;
+    }
+    let first = warnings.first().map(String::as_str).unwrap_or("");
+    state.alert_message = Some(format!("warning for `{alias}`: {first}"));
 }
 
 fn execute_surface_action(
@@ -968,17 +1031,6 @@ fn execute_surface_action(
 ) -> anyhow::Result<()> {
     sync_artifacts_for_selection(state);
     let result = match surface {
-        ControlSurface::Summary => {
-            if let Some(path) = state.artifacts.resolved_config_path.clone() {
-                pause_terminal_for_subprocess(terminal, || {
-                    crate::tui_nvim::open_alias_editor(&path, state.tmux_mode)
-                        .with_context(|| format!("failed to open editor for alias `{alias}`"))
-                })
-            } else {
-                state.alert_message = Some(format!("No config file found for alias `{alias}`"));
-                return Ok(());
-            }
-        }
         ControlSurface::Toml => {
             if let Some(path) = state.artifacts.toml_path.clone() {
                 pause_terminal_for_subprocess(terminal, || {
@@ -987,37 +1039,6 @@ fn execute_surface_action(
                 })
             } else {
                 state.alert_message = Some(format!("Alias `{alias}` has no TOML config file"));
-                return Ok(());
-            }
-        }
-        ControlSurface::Legacy => {
-            if let Some(path) = state.artifacts.legacy_path.clone() {
-                pause_terminal_for_subprocess(terminal, || {
-                    crate::tui_nvim::open_alias_editor(&path, state.tmux_mode).with_context(|| {
-                        format!("failed to open legacy config for alias `{alias}`")
-                    })
-                })
-            } else {
-                let target_path = crate::config_dir().join(alias);
-                let template = legacy_draft_template(alias);
-                let persisted = pause_terminal_for_subprocess(terminal, || {
-                    crate::tui_nvim::open_alias_draft_editor_with_mode(
-                        &target_path,
-                        &template,
-                        state.tmux_mode,
-                    )
-                    .with_context(|| format!("failed to open legacy draft for alias `{alias}`"))
-                })?;
-                if persisted {
-                    refresh_aliases(state)?;
-                    state.alert_message = Some(format!(
-                        "created legacy config for `{alias}` at {}",
-                        target_path.display()
-                    ));
-                } else {
-                    state.alert_message =
-                        Some(format!("legacy creation aborted for alias `{alias}`"));
-                }
                 return Ok(());
             }
         }
@@ -1045,12 +1066,6 @@ fn execute_surface_action(
 
     refresh_aliases(state)?;
     Ok(())
-}
-
-fn legacy_draft_template(alias: &str) -> String {
-    format!(
-        "# CHOPPER_DRAFT: legacy alias draft for `{alias}`\n# CHOPPER_DRAFT: write and quit to save, or :q! to abort\n# Example: exec --flag value\n"
-    )
 }
 
 fn reconcile_draft_template(alias: &str) -> String {
@@ -1110,13 +1125,7 @@ fn create_missing_reconcile_artifact(
 
 fn resolve_alias_path(alias: &str) -> Option<PathBuf> {
     let cfg = crate::config_dir();
-    [
-        cfg.join("aliases").join(format!("{alias}.toml")),
-        cfg.join(format!("{alias}.toml")),
-        cfg.join(alias),
-        cfg.join(format!("{alias}.conf")),
-        cfg.join(format!("{alias}.rhai")),
-    ]
+    [cfg.join("aliases").join(format!("{alias}.toml")), cfg.join(format!("{alias}.toml"))]
     .into_iter()
     .find(|path| path.is_file())
 }
@@ -1131,21 +1140,9 @@ fn resolve_toml_path(alias: &str) -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-fn resolve_legacy_path(alias: &str) -> Option<PathBuf> {
-    let cfg = crate::config_dir();
-    [
-        cfg.join(alias),
-        cfg.join(format!("{alias}.conf")),
-        cfg.join(format!("{alias}.rhai")),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-}
-
 fn collect_alias_artifacts(alias: &str) -> AliasArtifacts {
     let resolved_config_path = resolve_alias_path(alias);
     let toml_path = resolve_toml_path(alias);
-    let legacy_path = resolve_legacy_path(alias);
     let reconcile_script_path = resolved_config_path
         .as_ref()
         .and_then(|path| crate::parser::parse(path).ok())
@@ -1155,9 +1152,7 @@ fn collect_alias_artifacts(alias: &str) -> AliasArtifacts {
 
     AliasArtifacts {
         selected_alias: Some(alias.to_string()),
-        resolved_config_path,
         toml_path,
-        legacy_path,
         reconcile_script_path,
     }
 }
@@ -1176,9 +1171,7 @@ fn sync_artifacts_for_selection(state: &mut AppState) {
 
 fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
     match surface {
-        ControlSurface::Summary => true,
-        ControlSurface::Toml => artifacts.toml_path.is_some(),
-        ControlSurface::Legacy => artifacts.legacy_path.is_some(),
+        ControlSurface::Toml => true,
         ControlSurface::Reconcile => artifacts.reconcile_script_path.is_some(),
     }
 }
@@ -1198,7 +1191,8 @@ fn set_active_surface(state: &mut AppState, surface: ControlSurface) {
 fn cycle_surface(state: &mut AppState, forward: bool) {
     let all = ControlSurface::all();
     let Some(mut idx) = all.iter().position(|value| *value == state.active_surface) else {
-        state.active_surface = ControlSurface::Summary;
+        state.active_surface = ControlSurface::Toml;
+        state.inspector_mode = InspectorMode::TomlMenu;
         return;
     };
     for _ in 0..all.len() {
@@ -1276,15 +1270,14 @@ fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
     }
 
     let has_status_row = state.alert_message.is_some() || state.prompt.is_some();
-    let constraints = if has_status_row {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ]
-    } else {
-        vec![Constraint::Length(1), Constraint::Min(0)]
-    };
+    let has_diagnostics_row = !state.diagnostics.is_empty();
+    let mut constraints = vec![Constraint::Length(1), Constraint::Min(0)];
+    if has_diagnostics_row {
+        constraints.push(Constraint::Length(1));
+    }
+    if has_status_row {
+        constraints.push(Constraint::Length(1));
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -1296,7 +1289,24 @@ fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
     render_banner(frame, chunks[0], state);
     render_content(frame, chunks[1], state, layout_plan);
 
-    if let Some(status_area) = chunks.get(2) {
+    let mut next_row = 2usize;
+    if has_diagnostics_row {
+        if let Some(diagnostics_area) = chunks.get(next_row) {
+            let summary = diagnostics_summary_line(state, diagnostics_area.width as usize);
+            frame.render_widget(
+                Paragraph::new(summary).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                *diagnostics_area,
+            );
+        }
+        next_row += 1;
+    }
+
+    if let Some(status_area) = chunks.get(next_row) {
         if let Some(prompt) = &state.prompt {
             let prompt_text = prompt_hint(prompt, state);
             frame.render_widget(
@@ -1322,6 +1332,23 @@ fn render_frame(frame: &mut Frame, state: &AppState, layout_plan: LayoutPlan) {
     }
 }
 
+fn diagnostics_summary_line(state: &AppState, width: usize) -> String {
+    let total = state.diagnostics.len();
+    let first = state
+        .diagnostics
+        .first()
+        .map(String::as_str)
+        .unwrap_or("configuration warning");
+    if total <= 1 {
+        truncate_line(&format!("Warnings: {first}"), width)
+    } else {
+        truncate_line(
+            &format!("Warnings ({total}): {first} (+{} more)", total - 1),
+            width,
+        )
+    }
+}
+
 fn prompt_hint(prompt: &PromptState, state: &AppState) -> String {
     match prompt.kind {
         PromptKind::NewAlias => format!(
@@ -1344,9 +1371,10 @@ fn prompt_hint(prompt: &PromptState, state: &AppState) -> String {
         }
         PromptKind::DeleteAlias => {
             let source = state.aliases.get(state.selected).map(String::as_str).unwrap_or("");
+            let keep_configs = if prompt.keep_configs { "[x]" } else { "[ ]" };
             format!(
-                "Delete `{source}`? type `y` and Enter to confirm (Esc to cancel): {}",
-                prompt.input
+                "Delete `{source}`? {keep_configs} keep configs (k toggles). type `y` + Enter (Esc cancels): {}",
+                prompt.input,
             )
         }
         PromptKind::EditTomlField(field) => format!(
@@ -1374,7 +1402,7 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn banner_guidance(state: &AppState) -> String {
     format!(
-        "Enter: activate {} | Tab: tabs | +/%/!/-: alias ops | e: reconcile | r: refresh | q: quit",
+        "Enter: inspect/activate {} | Tab: tabs | +/%/!/-: alias ops | e: reconcile | r: refresh | q: quit",
         state.active_surface.label()
     )
 }
@@ -1576,22 +1604,7 @@ fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> 
 
 fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<String> {
     let mut lines = Vec::new();
-    let alias = state
-        .artifacts
-        .selected_alias
-        .as_deref()
-        .unwrap_or("<none>");
     match state.active_surface {
-        ControlSurface::Summary => {
-            lines.push(format!("`{alias}` overview"));
-            if let Some(path) = &state.artifacts.resolved_config_path {
-                lines.push(format!("preferred config: {}", path.display()));
-            } else {
-                lines.push(String::from("preferred config: <missing>"));
-            }
-            lines.push(String::from("Actions: + new | % rename | ! duplicate | - delete"));
-            lines.push(String::from("Modal wizard: Enter/right opens inspector in modal layout"));
-        }
         ControlSurface::Toml => {
             lines.push(String::from("toml schema designer"));
             if let Some(path) = &state.artifacts.toml_path {
@@ -1618,16 +1631,6 @@ fn surface_detail_lines(state: &AppState, width: usize, rows: usize) -> Vec<Stri
                         }
                     }
                 }
-            }
-        }
-        ControlSurface::Legacy => {
-            if let Some(path) = &state.artifacts.legacy_path {
-                lines.push(String::from("legacy tab"));
-                lines.push(format!("file: {}", path.display()));
-                lines.push(String::from("Enter: edit legacy config"));
-            } else {
-                lines.push(String::from("legacy tab (no file yet)"));
-                lines.push(String::from("Enter: open draft and save to create legacy file"));
             }
         }
         ControlSurface::Reconcile => {
@@ -1708,9 +1711,9 @@ fn ensure_selection_visible(state: &mut AppState, list_height: usize) {
     }
 }
 
-fn content_height(height: u16, alert_visible: bool) -> usize {
-    // 1 banner row + optional 1 alert row.
-    height.saturating_sub(1 + u16::from(alert_visible)) as usize
+fn content_height(height: u16, status_visible: bool, diagnostics_visible: bool) -> usize {
+    // 1 banner row + optional diagnostics/status rows.
+    height.saturating_sub(1 + u16::from(status_visible) + u16::from(diagnostics_visible)) as usize
 }
 
 fn alias_viewport_rows(layout: LayoutKind, content_rows: usize) -> usize {
@@ -1865,12 +1868,13 @@ mod tests {
             scroll: 0,
             focus: PaneFocus::List,
             layout,
-            active_surface: ControlSurface::Summary,
+            active_surface: ControlSurface::Toml,
             artifacts: Default::default(),
-            inspector_mode: InspectorMode::Browse,
+            inspector_mode: InspectorMode::TomlMenu,
             toml_cursor: 0,
             prompt: None,
             alert_message: None,
+            diagnostics: Vec::new(),
             tmux_mode: TmuxMode::Off,
         }
     }
@@ -1888,7 +1892,7 @@ mod tests {
         let state = sample_state(LayoutKind::Modal);
         let plan = compute_layout(45, 10, &state);
         assert_eq!(plan.kind, LayoutKind::Split);
-        assert_eq!(plan.tab_mode, TabStripMode::Compact);
+        assert_eq!(plan.tab_mode, TabStripMode::Full);
     }
 
     #[test]
@@ -1935,9 +1939,11 @@ mod tests {
     }
 
     #[test]
-    fn content_height_accounts_for_optional_alert_row() {
-        assert_eq!(content_height(30, false), 29);
-        assert_eq!(content_height(30, true), 28);
+    fn content_height_accounts_for_optional_status_and_diagnostics_rows() {
+        assert_eq!(content_height(30, false, false), 29);
+        assert_eq!(content_height(30, true, false), 28);
+        assert_eq!(content_height(30, false, true), 28);
+        assert_eq!(content_height(30, true, true), 27);
     }
 
     #[test]
@@ -1968,9 +1974,7 @@ mod tests {
     #[test]
     fn control_surfaces_report_data_presence() {
         let artifacts = super::AliasArtifacts::default();
-        assert!(surface_has_data(&artifacts, ControlSurface::Summary));
-        assert!(!surface_has_data(&artifacts, ControlSurface::Toml));
-        assert!(!surface_has_data(&artifacts, ControlSurface::Legacy));
+        assert!(surface_has_data(&artifacts, ControlSurface::Toml));
         assert!(!surface_has_data(&artifacts, ControlSurface::Reconcile));
     }
 
@@ -2013,9 +2017,9 @@ mod tests {
     fn surface_cycle_visits_all_surfaces_even_without_data() {
         let mut state = sample_state(LayoutKind::Split);
         cycle_surface(&mut state, true);
-        assert_eq!(state.active_surface, ControlSurface::Toml);
+        assert_eq!(state.active_surface, ControlSurface::Reconcile);
         cycle_surface(&mut state, true);
-        assert_eq!(state.active_surface, ControlSurface::Legacy);
+        assert_eq!(state.active_surface, ControlSurface::Toml);
     }
 
     #[test]
@@ -2026,6 +2030,17 @@ mod tests {
         assert_eq!(action, LoopAction::Continue);
         assert_eq!(state.focus, PaneFocus::Inspector);
         assert_eq!(state.inspector_mode, InspectorMode::TomlMenu);
+    }
+
+    #[test]
+    fn enter_from_list_on_reconcile_moves_focus_without_activation() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.active_surface = ControlSurface::Reconcile;
+        state.focus = PaneFocus::List;
+        let action = handle_key_event(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 10);
+        assert_eq!(action, LoopAction::Continue);
+        assert_eq!(state.focus, PaneFocus::Inspector);
+        assert_eq!(state.inspector_mode, InspectorMode::Browse);
     }
 
     #[test]

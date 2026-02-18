@@ -14,7 +14,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 | --- | --- |
 | Day-to-day CLI user | [`quick-reference.md`](quick-reference.md) |
 | Alias author | [`config-reference.md`](config-reference.md) |
-| Migrating from legacy aliases | [`migration.md`](migration.md) |
+| Converting historical non-TOML aliases | [`migration.md`](migration.md) |
 | Debugging runtime issues | [`troubleshooting.md`](troubleshooting.md) |
 | Contributor/maintainer | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 
@@ -25,7 +25,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 - **starter files to drop in** → [`templates/`](templates)
 - **Rhai facade function catalog** → [`rhai-facade-reference.md`](rhai-facade-reference.md)
 - **interactive TUI usage** → [`tui-reference.md`](tui-reference.md)
-- **migration steps from legacy aliases** → [`migration.md`](migration.md)
+- **conversion steps from historical non-TOML aliases** → [`migration.md`](migration.md)
 - **help diagnosing a failure** → [`troubleshooting.md`](troubleshooting.md)
 - **current completion snapshot** → [`project-status.md`](project-status.md)
 - **full exact semantics** → [`operational-spec.md`](operational-spec.md)
@@ -59,9 +59,9 @@ Use this directory when you need behavior details beyond quickstart usage.
 - [`examples.md`](examples.md)
   - copy/paste alias patterns
   - common workflows
-  - quick recipes for env/journal/reconcile/legacy usage
+  - quick recipes for env/journal/reconcile usage
 - [`migration.md`](migration.md)
-  - phased migration from legacy one-line aliases to TOML
+  - TOML-only conversion notes for historical one-line aliases
   - practical conversion flow for env/journal/reconcile adoption
 - [`templates/`](templates)
   - starter files for common alias/reconcile setups

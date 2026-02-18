@@ -25,7 +25,7 @@ High-level map of the runtime flow and main modules.
   - top-level orchestration (`resolve -> load/parse -> reconcile -> execute`)
 
 - `src/parser.rs`
-  - TOML DSL parsing + legacy one-line fallback parsing
+  - TOML DSL parsing
   - normalization and path-resolution rules
   - field-level validation handoff
 
