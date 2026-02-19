@@ -136,6 +136,34 @@ impl AliasDoc {
                     return Err(anyhow!("`journal.identifier` cannot contain NUL bytes"));
                 }
             }
+            if let Some(max_use) = &journal.max_use {
+                match journal_validation::validate_max_use(max_use) {
+                    Ok(_) => {}
+                    Err(journal_validation::MaxUseViolation::Empty) => {
+                        return Err(anyhow!("`journal.max_use` cannot be blank when provided"));
+                    }
+                    Err(journal_validation::MaxUseViolation::ContainsNul) => {
+                        return Err(anyhow!("`journal.max_use` cannot contain NUL bytes"));
+                    }
+                    Err(journal_validation::MaxUseViolation::InvalidFormat) => {
+                        return Err(anyhow!(
+                            "`journal.max_use` must be a valid size (e.g. 256M, 1G)"
+                        ));
+                    }
+                }
+            }
+            if let Some(burst) = journal.rate_limit_burst {
+                if burst == 0 {
+                    return Err(anyhow!("`journal.rate_limit_burst` must be > 0"));
+                }
+            }
+            if let Some(interval) = journal.rate_limit_interval_usec {
+                if interval == 0 {
+                    return Err(anyhow!(
+                        "`journal.rate_limit_interval_usec` must be > 0"
+                    ));
+                }
+            }
         }
         if let Some(reconcile) = &self.reconcile {
             validate_required_script_field(&reconcile.script, "`reconcile.script`")?;

@@ -8745,6 +8745,54 @@ user_scope = true
 }
 
 #[test]
+fn journal_policy_fields_are_parsed_and_forwarded_in_alias_get() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-policy.toml"),
+        r#"
+exec = "echo"
+
+[journal]
+namespace = "ops"
+stderr = true
+ensure = true
+max_use = "256M"
+rate_limit_interval_usec = 30000000
+rate_limit_burst = 500
+"#,
+    )
+    .expect("write alias config");
+
+    let get = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "get", "journal-policy"],
+    );
+    assert!(
+        get.status.success(),
+        "{}",
+        String::from_utf8_lossy(&get.stderr)
+    );
+    let get_stdout = String::from_utf8_lossy(&get.stdout);
+    assert!(
+        get_stdout.contains("\"max_use\": \"256M\""),
+        "{get_stdout}"
+    );
+    assert!(
+        get_stdout.contains("\"rate_limit_interval_usec\": 30000000"),
+        "{get_stdout}"
+    );
+    assert!(
+        get_stdout.contains("\"rate_limit_burst\": 500"),
+        "{get_stdout}"
+    );
+}
+
+#[test]
 fn journal_parser_trimming_uses_trimmed_namespace_and_drops_blank_identifier() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
