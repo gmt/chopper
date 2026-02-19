@@ -50,11 +50,21 @@ High-level map of the runtime flow and main modules.
 - `src/rhai_api_catalog.rs`
   - authoritative API name catalog used for editor completion bootstrap
 
-- `src/journal.rs` / journal execution path
+- `src/executor.rs` / journal execution path
   - `systemd-cat --namespace=...` integration
-  - optional user-scoped namespace derivation (`u<uid>-<user>-<logical>`)
-  - optional broker preflight (`CHOPPER_JOURNAL_BROKER_CMD ... ensure --namespace`)
+  - user-scoped namespace derivation (`u<uid>-<user>-<logical>`, default)
+  - optional D-Bus broker preflight (`com.chopperproject.JournalBroker1`)
+  - journal policy options (`max_use`, `rate_limit_interval_usec`, `rate_limit_burst`)
   - stderr forwarding path and child exit propagation
+
+- `src/journal_broker_client.rs`
+  - D-Bus client for `chopper-journal-broker` daemon
+  - `ensure_namespace_via_dbus()` method call
+
+- `src/broker/` (broker daemon)
+  - `dbus_interface.rs` — D-Bus object implementing `EnsureNamespace`
+  - `policy.rs` — namespace ownership validation, anti-abuse limits
+  - `systemd.rs` — journald drop-in writing, namespace socket management
 
 - `src/env_util.rs`
   - env toggle/override parsing (`CHOPPER_*`)

@@ -84,10 +84,35 @@ an overwhelming spec dump.
 
 ---
 
-## 9) Dynamic journal namespaces remain opt-in
+## 9) User-scoped journal namespaces as new default
 
-**Decision:** Keep literal journal namespace passthrough as default and add
-opt-in `journal.user_scope` + `journal.ensure`.
+**Decision:** `journal.user_scope` defaults to `true`. User-scoped namespace
+derivation (`u<uid>-<username>-<namespace>`) is the default for all new
+`[journal]` configurations. Literal passthrough requires explicit
+`user_scope = false`.
 
-**Why:** Preserves backward compatibility for existing aliases while enabling
-broker-backed user-scoped namespace workflows where needed.
+**Why:** Anti-collision and security measure — prevents users from
+accidentally writing to each other's namespaces.
+
+---
+
+## 10) D-Bus broker instead of CLI subprocess
+
+**Decision:** The journal namespace broker (`chopper-journal-broker`) is a
+D-Bus system service called via `com.chopperproject.JournalBroker1`, not a
+CLI subprocess.
+
+**Why:** D-Bus provides credential-based UID verification, polkit integration,
+and bus-activation. This is the standard pattern for privileged system services
+on Linux (c.f. `systemd-hostnamed`, `systemd-timedated`).
+
+---
+
+## 11) Journal policy fields are client-side with broker-side enforcement
+
+**Decision:** Per-alias journal policy fields (`max_use`,
+`rate_limit_interval_usec`, `rate_limit_burst`) are specified in the alias
+TOML config and passed to the broker via D-Bus. The broker enforces hard
+server-side limits.
+
+**Why:** Allows per-alias customization while preventing abuse.
