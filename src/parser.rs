@@ -408,7 +408,7 @@ struct JournalConfigInput {
     #[serde(default = "default_true")]
     stderr: bool,
     identifier: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     user_scope: bool,
     #[serde(default)]
     ensure: bool,
@@ -493,7 +493,7 @@ script = "hooks/reconcile.rhai"
             manifest.journal.as_ref().map(|j| j.namespace.as_str()),
             Some("ops")
         );
-        assert_eq!(manifest.journal.as_ref().map(|j| j.user_scope), Some(false));
+        assert_eq!(manifest.journal.as_ref().map(|j| j.user_scope), Some(true));
         assert_eq!(manifest.journal.as_ref().map(|j| j.ensure), Some(false));
         assert_eq!(
             manifest

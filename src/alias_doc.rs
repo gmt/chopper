@@ -30,7 +30,7 @@ pub struct AliasJournalDoc {
     pub stderr: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub user_scope: bool,
     #[serde(default)]
     pub ensure: bool,

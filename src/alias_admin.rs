@@ -528,7 +528,7 @@ fn build_journal_from_mutation(
         .journal_identifier
         .clone()
         .filter(|value| !value.trim().is_empty());
-    let user_scope = mutation.journal_user_scope.unwrap_or(false);
+    let user_scope = mutation.journal_user_scope.unwrap_or(true);
     let ensure = mutation.journal_ensure.unwrap_or(false);
     let max_use = mutation.journal_max_use.clone();
     let rate_limit_interval_usec = mutation.journal_rate_limit_interval_usec;

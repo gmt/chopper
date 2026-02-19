@@ -728,7 +728,7 @@ fn default_journal_doc() -> crate::alias_doc::AliasJournalDoc {
         namespace: String::from("default"),
         stderr: true,
         identifier: None,
-        user_scope: false,
+        user_scope: true,
         ensure: false,
         max_use: None,
         rate_limit_interval_usec: None,
@@ -775,7 +775,7 @@ fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Strin
             .journal
             .as_ref()
             .map(|journal| journal.user_scope.to_string())
-            .unwrap_or_else(|| String::from("false")),
+            .unwrap_or_else(|| String::from("true")),
         TomlField::JournalEnsure => doc
             .journal
             .as_ref()
@@ -1877,7 +1877,7 @@ fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEn
         &mut entries,
         doc,
         TomlField::JournalUserScope,
-        journal.map(|value| value.user_scope).unwrap_or(false),
+        journal.map(|value| value.user_scope).unwrap_or(true),
     );
     push_toml_entry(
         &mut entries,

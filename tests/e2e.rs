@@ -8625,6 +8625,7 @@ args = ["-c", "printf 'OUT_STREAM\n'; printf 'ERR_STREAM\n' 1>&2"]
 namespace = "ops-e2e"
 stderr = true
 identifier = "journal-test"
+user_scope = false
 "#,
     )
     .expect("write alias config");
@@ -8760,6 +8761,7 @@ args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
 namespace = "  ops-e2e  "
 stderr = true
 identifier = "   "
+user_scope = false
 "#,
     )
     .expect("write alias config");
@@ -8829,6 +8831,7 @@ args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
 namespace = "  ops-e2e  "
 stderr = true
 identifier = "\n\t  \t\n"
+user_scope = false
 "#,
     )
     .expect("write alias config");
@@ -8889,6 +8892,7 @@ args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
 namespace = "ops-e2e"
 stderr = true
 identifier = "  id-trimmed  "
+user_scope = false
 "#,
     )
     .expect("write alias config");
@@ -8949,6 +8953,7 @@ args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
 namespace = "\n\t ops-e2e \t\n"
 stderr = true
 identifier = "\n\t id-trimmed \t\n"
+user_scope = false
 "#,
     )
     .expect("write alias config");
@@ -9017,6 +9022,7 @@ args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
 namespace = "  ops/ns.prod@2026  "
 stderr = true
 identifier = '  svc.id/worker\edge@2026  '
+user_scope = false
 "#,
     )
     .expect("write alias config");
