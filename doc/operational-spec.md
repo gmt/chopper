@@ -164,6 +164,8 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"                # required when [journal] is present
 stderr = true                    # optional, default true
 identifier = "kpods"             # optional (blank values are treated as unset)
+user_scope = false               # optional, default false
+ensure = false                   # optional, default false
 
 [reconcile]                      # optional
 script = "kpods.reconcile.rhai"  # required
@@ -240,15 +242,23 @@ This means reconcile `set_env` can intentionally re-introduce a key that alias
 
 When `[journal]` is configured with `stderr = true`, `chopper`:
 
+- computes effective namespace:
+  - `journal.user_scope = false` (default): uses normalized `journal.namespace`
+  - `journal.user_scope = true`: derives
+    `u<uid>-<sanitized-username>-<sanitized-namespace>`
+- when `journal.ensure = true`, runs broker preflight first:
+  - `${CHOPPER_JOURNAL_BROKER_CMD:-chopper-journal-broker} ensure --namespace <effective_namespace>`
 - launches `systemd-cat --namespace=...` first
 - verifies the journal sink is alive before launching the target command
 - launches target command only after journal sink startup succeeds
 - captures target stderr
-- forwards stderr into `systemd-cat --namespace=<namespace>`
+- forwards stderr into `systemd-cat --namespace=<effective_namespace>`
 - keeps stdout attached normally
 
 If `systemd-cat` is missing or does not support `--namespace` (systemd < 256),
 execution fails with an explicit error.
+If broker preflight is enabled and broker command fails, execution aborts
+before `systemd-cat` and before child process spawn.
 
 ---
 
@@ -333,6 +343,13 @@ Key semantics:
 
 - `add` writes TOML alias configs under `aliases/<alias>.toml`.
 - `set` updates existing TOML alias configs.
+- journal mutation flags:
+  - `--journal-namespace <value>`
+  - `--journal-stderr <true|false>`
+  - `--journal-identifier <value>`
+  - `--journal-user-scope <true|false>`
+  - `--journal-ensure <true|false>`
+  - `--journal-clear`
 - `remove --mode clean` removes config + cache and attempts symlink cleanup.
 - `remove --mode dirty` removes symlink only, preserving config for reactivation.
 

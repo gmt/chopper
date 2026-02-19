@@ -57,6 +57,25 @@ stderr = true
 identifier = "my-alias"
 ```
 
+## 4b) User-scoped journald namespace with broker preflight
+
+```toml
+exec = "sh"
+args = ["-c", "echo ok; echo err >&2"]
+
+[journal]
+namespace = "ops"
+stderr = true
+user_scope = true
+ensure = true
+```
+
+Optional broker override:
+
+```bash
+CHOPPER_JOURNAL_BROKER_CMD="/usr/local/bin/chopper-journal-broker --profile user" chopper myalias
+```
+
 ---
 
 ## 5) Reconcile runtime args with Rhai

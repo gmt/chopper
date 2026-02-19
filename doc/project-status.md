@@ -10,6 +10,8 @@ Current implementation status against the DSL implementation goals.
 - ✅ Per-alias env injection (`[env]`)
 - ✅ Per-alias static args (`args`)
 - ✅ Journald namespace stderr routing (`[journal]`)
+- ✅ Dynamic user-scoped journal namespace derivation (`journal.user_scope`)
+- ✅ Optional journal broker preflight (`journal.ensure`)
 - ✅ Optional Rhai runtime reconciliation (`[reconcile]`)
 - ✅ Legacy one-line alias compatibility
 - ✅ Automatic manifest caching + invalidation

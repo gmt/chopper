@@ -103,6 +103,13 @@ Notes:
 
 - `add` creates `aliases/<alias>.toml`.
 - `set` updates TOML alias documents.
+- `add` / `set` journal flags include:
+  - `--journal-namespace <value>`
+  - `--journal-stderr <true|false>`
+  - `--journal-identifier <value>`
+  - `--journal-user-scope <true|false>`
+  - `--journal-ensure <true|false>`
+  - `--journal-clear`
 - `remove --mode clean` removes config + cache and best-effort symlink.
 - `remove --mode dirty` removes symlink only (config remains; relinking reactivates).
 

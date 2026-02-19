@@ -100,6 +100,8 @@ enum TomlField {
     JournalEnabled,
     JournalNamespace,
     JournalStderr,
+    JournalUserScope,
+    JournalEnsure,
     JournalIdentifier,
     ReconcileEnabled,
     ReconcileScript,
@@ -113,7 +115,7 @@ enum TomlField {
 }
 
 impl TomlField {
-    fn all() -> [Self; 17] {
+    fn all() -> [Self; 19] {
         [
             Self::Exec,
             Self::Args,
@@ -122,6 +124,8 @@ impl TomlField {
             Self::JournalEnabled,
             Self::JournalNamespace,
             Self::JournalStderr,
+            Self::JournalUserScope,
+            Self::JournalEnsure,
             Self::JournalIdentifier,
             Self::ReconcileEnabled,
             Self::ReconcileScript,
@@ -144,6 +148,8 @@ impl TomlField {
             Self::JournalEnabled => "journal.enabled",
             Self::JournalNamespace => "journal.namespace",
             Self::JournalStderr => "journal.stderr",
+            Self::JournalUserScope => "journal.user_scope",
+            Self::JournalEnsure => "journal.ensure",
             Self::JournalIdentifier => "journal.identifier",
             Self::ReconcileEnabled => "reconcile.enabled",
             Self::ReconcileScript => "reconcile.script",
@@ -162,6 +168,8 @@ impl TomlField {
             self,
             Self::JournalEnabled
                 | Self::JournalStderr
+                | Self::JournalUserScope
+                | Self::JournalEnsure
                 | Self::ReconcileEnabled
                 | Self::BashcompEnabled
                 | Self::BashcompDisabled
@@ -720,6 +728,8 @@ fn default_journal_doc() -> crate::alias_doc::AliasJournalDoc {
         namespace: String::from("default"),
         stderr: true,
         identifier: None,
+        user_scope: false,
+        ensure: false,
     }
 }
 
@@ -758,6 +768,16 @@ fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Strin
             .as_ref()
             .map(|journal| journal.stderr.to_string())
             .unwrap_or_else(|| String::from("true")),
+        TomlField::JournalUserScope => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.user_scope.to_string())
+            .unwrap_or_else(|| String::from("false")),
+        TomlField::JournalEnsure => doc
+            .journal
+            .as_ref()
+            .map(|journal| journal.ensure.to_string())
+            .unwrap_or_else(|| String::from("false")),
         TomlField::JournalIdentifier => doc
             .journal
             .as_ref()
@@ -820,6 +840,14 @@ fn toggle_toml_field(
             let journal = doc.journal.get_or_insert_with(default_journal_doc);
             journal.stderr = !journal.stderr;
         }
+        TomlField::JournalUserScope => {
+            let journal = doc.journal.get_or_insert_with(default_journal_doc);
+            journal.user_scope = !journal.user_scope;
+        }
+        TomlField::JournalEnsure => {
+            let journal = doc.journal.get_or_insert_with(default_journal_doc);
+            journal.ensure = !journal.ensure;
+        }
         TomlField::ReconcileEnabled => {
             doc.reconcile = if doc.reconcile.is_some() {
                 None
@@ -877,6 +905,8 @@ fn apply_toml_field_input(
         }
         TomlField::JournalEnabled
         | TomlField::JournalStderr
+        | TomlField::JournalUserScope
+        | TomlField::JournalEnsure
         | TomlField::ReconcileEnabled
         | TomlField::BashcompEnabled
         | TomlField::BashcompDisabled
@@ -894,6 +924,18 @@ fn apply_toml_field_input(
                     doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
                     if let Some(journal) = doc.journal.as_mut() {
                         journal.stderr = bool_value;
+                    }
+                }
+                TomlField::JournalUserScope => {
+                    doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+                    if let Some(journal) = doc.journal.as_mut() {
+                        journal.user_scope = bool_value;
+                    }
+                }
+                TomlField::JournalEnsure => {
+                    doc.journal = Some(doc.journal.clone().unwrap_or_else(default_journal_doc));
+                    if let Some(journal) = doc.journal.as_mut() {
+                        journal.ensure = bool_value;
                     }
                 }
                 TomlField::ReconcileEnabled => {
@@ -1204,20 +1246,17 @@ fn cycle_surface(state: &mut AppState, forward: bool) {
         state.inspector_mode = InspectorMode::TomlMenu;
         return;
     };
-    for _ in 0..all.len() {
-        idx = if forward {
-            (idx + 1) % all.len()
-        } else {
-            (idx + all.len() - 1) % all.len()
-        };
-        state.active_surface = all[idx];
-        state.inspector_mode = if state.active_surface == ControlSurface::Toml {
-            InspectorMode::TomlMenu
-        } else {
-            InspectorMode::Browse
-        };
-        return;
-    }
+    idx = if forward {
+        (idx + 1) % all.len()
+    } else {
+        (idx + all.len() - 1) % all.len()
+    };
+    state.active_surface = all[idx];
+    state.inspector_mode = if state.active_surface == ControlSurface::Toml {
+        InspectorMode::TomlMenu
+    } else {
+        InspectorMode::Browse
+    };
 }
 
 fn pause_terminal_for_subprocess<T, F>(terminal: &mut AppTerminal, run: F) -> anyhow::Result<T>
@@ -1834,6 +1873,18 @@ fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEn
     push_toml_entry(
         &mut entries,
         doc,
+        TomlField::JournalUserScope,
+        journal.map(|value| value.user_scope).unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::JournalEnsure,
+        journal.map(|value| value.ensure).unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
         TomlField::JournalIdentifier,
         journal
             .and_then(|value| value.identifier.as_deref())
@@ -2138,13 +2189,11 @@ fn truncate_line(input: &str, width: usize) -> String {
         return String::new();
     }
     let mut out = String::new();
-    let mut count = 0usize;
-    for ch in input.chars() {
+    for (count, ch) in input.chars().enumerate() {
         if count + 1 >= width {
             break;
         }
         out.push(ch);
-        count += 1;
     }
     if input.chars().count() <= width {
         input.to_string()

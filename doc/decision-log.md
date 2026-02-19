@@ -81,3 +81,13 @@ unknown and do not accidentally disable features.
 
 **Why:** Reduces onboarding friction and prevents quickstart docs from becoming
 an overwhelming spec dump.
+
+---
+
+## 9) Dynamic journal namespaces remain opt-in
+
+**Decision:** Keep literal journal namespace passthrough as default and add
+opt-in `journal.user_scope` + `journal.ensure`.
+
+**Why:** Preserves backward compatibility for existing aliases while enabling
+broker-backed user-scoped namespace workflows where needed.

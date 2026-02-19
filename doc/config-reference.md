@@ -71,6 +71,26 @@ For full behavioral semantics and edge cases, see `operational-spec.md`.
   - blank values treated as unset
   - cannot contain NUL
 
+### `user_scope` (optional)
+
+- Type: boolean
+- Default: `false`
+- Notes:
+  - when `true`, `namespace` is treated as a logical user namespace name
+  - chopper derives effective namespace:
+    - `u<uid>-<sanitized-username>-<sanitized-namespace>`
+  - only affects the namespace passed to `systemd-cat --namespace=...`
+
+### `ensure` (optional)
+
+- Type: boolean
+- Default: `false`
+- Notes:
+  - when `true`, chopper runs a broker preflight before `systemd-cat`
+  - broker command:
+    - `${CHOPPER_JOURNAL_BROKER_CMD:-chopper-journal-broker} ensure --namespace <effective_namespace>`
+  - non-zero broker exit fails invocation before child process spawn
+
 ---
 
 ## `[reconcile]` table (optional)
@@ -168,6 +188,8 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"
 stderr = true
 identifier = "kpods"
+user_scope = false
+ensure = false
 
 [reconcile]
 script = "kpods.reconcile.rhai"

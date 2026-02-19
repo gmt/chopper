@@ -3,6 +3,7 @@ use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
+use std::env;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
@@ -10,6 +11,8 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+const DEFAULT_JOURNAL_BROKER_CMD: &str = "chopper-journal-broker";
 
 pub fn run(invocation: Invocation) -> Result<()> {
     if let Some(journal) = invocation.journal.clone() {
@@ -28,6 +31,9 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
     let (namespace, identifier) = normalize_journal_config_for_command(&journal)?;
+    if journal.ensure {
+        ensure_journal_namespace_ready(&namespace)?;
+    }
 
     let mut journal_cmd = Command::new("systemd-cat");
     journal_cmd.arg(format!("--namespace={namespace}"));
@@ -184,7 +190,7 @@ fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
 fn normalize_journal_config_for_command(
     journal: &JournalConfig,
 ) -> Result<(String, Option<String>)> {
-    let namespace = match journal_validation::normalize_namespace(&journal.namespace) {
+    let logical_namespace = match journal_validation::normalize_namespace(&journal.namespace) {
         Ok(namespace) => namespace,
         Err(JournalNamespaceViolation::Empty) => {
             return Err(anyhow!("journal namespace cannot be empty"));
@@ -204,7 +210,130 @@ fn normalize_journal_config_for_command(
             return Err(anyhow!("journal identifier cannot contain NUL bytes"));
         }
     };
+    let namespace = if journal.user_scope {
+        derive_user_scoped_namespace(&logical_namespace)?
+    } else {
+        logical_namespace
+    };
     Ok((namespace, identifier))
+}
+
+fn derive_user_scoped_namespace(namespace: &str) -> Result<String> {
+    let uid = current_effective_uid();
+    let username = current_username(uid);
+    let user_component = sanitize_namespace_component(&username);
+    let namespace_component = sanitize_namespace_component(namespace);
+    Ok(format!("u{uid}-{user_component}-{namespace_component}"))
+}
+
+fn current_effective_uid() -> u32 {
+    env::var("UID")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .or_else(|| {
+            command_stdout_trimmed("id", &["-u"]).and_then(|value| value.parse::<u32>().ok())
+        })
+        .unwrap_or(0)
+}
+
+fn current_username(uid: u32) -> String {
+    if let Ok(user) = env::var("USER") {
+        let trimmed = user.trim();
+        if !trimmed.is_empty() && !trimmed.contains('\0') {
+            return trimmed.to_string();
+        }
+    }
+    if let Some(username) = command_stdout_trimmed("id", &["-un"]) {
+        return username;
+    }
+    format!("uid{uid}")
+}
+
+fn command_stdout_trimmed(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn sanitize_namespace_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut previous_was_dash = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            previous_was_dash = false;
+            continue;
+        }
+        if ch == '.' || ch == '_' || ch == '-' {
+            out.push(ch);
+            previous_was_dash = ch == '-';
+            continue;
+        }
+        if !previous_was_dash {
+            out.push('-');
+            previous_was_dash = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "x".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn ensure_journal_namespace_ready(namespace: &str) -> Result<()> {
+    let broker = env::var("CHOPPER_JOURNAL_BROKER_CMD")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JOURNAL_BROKER_CMD.to_string());
+
+    let mut tokens = shell_words::split(&broker)
+        .with_context(|| "CHOPPER_JOURNAL_BROKER_CMD must be a valid shell-style command line")?;
+    if tokens.is_empty() {
+        return Err(anyhow!(
+            "CHOPPER_JOURNAL_BROKER_CMD did not resolve to an executable command"
+        ));
+    }
+
+    let executable = tokens.remove(0);
+    let mut broker_cmd = Command::new(&executable);
+    broker_cmd.args(tokens);
+    broker_cmd.arg("ensure");
+    broker_cmd.arg("--namespace");
+    broker_cmd.arg(namespace);
+    broker_cmd.stdin(Stdio::null());
+    broker_cmd.stdout(Stdio::null());
+    broker_cmd.stderr(Stdio::inherit());
+
+    let status = broker_cmd.status().with_context(|| {
+        format!(
+            "failed to spawn journal namespace broker `{executable}`; set CHOPPER_JOURNAL_BROKER_CMD or install `{DEFAULT_JOURNAL_BROKER_CMD}`"
+        )
+    })?;
+    if !status.success() {
+        return Err(anyhow!(
+            "journal namespace broker `{executable}` failed with status {status} while ensuring namespace `{namespace}`"
+        ));
+    }
+    Ok(())
 }
 
 fn exit_like_child(status: ExitStatus) -> Result<()> {
@@ -224,8 +353,14 @@ fn exit_like_child(status: ExitStatus) -> Result<()> {
 mod tests {
     use super::command_for_invocation;
     use crate::manifest::{Invocation, JournalConfig};
+    use crate::test_support::ENV_LOCK;
     use std::collections::HashMap;
+    use std::env;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn invocation() -> Invocation {
         Invocation {
@@ -329,6 +464,8 @@ mod tests {
             namespace: "   ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
         };
 
         let err =
@@ -346,6 +483,8 @@ mod tests {
             namespace: "ops\0prod".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
         };
 
         let err =
@@ -363,6 +502,8 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
         };
 
         let err =
@@ -380,6 +521,8 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("svc\0id".to_string()),
+            user_scope: false,
+            ensure: false,
         };
 
         let err =
@@ -389,5 +532,66 @@ mod tests {
                 .contains("journal identifier cannot contain NUL bytes"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn user_scoped_namespace_derivation_prefixes_uid_and_sanitizes_components() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        env::set_var("USER", "User Name+Ops");
+        let namespace =
+            super::derive_user_scoped_namespace("ops/ns.prod@2026").expect("derive namespace");
+        let uid = super::current_effective_uid();
+        assert_eq!(namespace, format!("u{uid}-user-name-ops-ops-ns.prod-2026"));
+        env::remove_var("USER");
+    }
+
+    #[test]
+    fn broker_preflight_invokes_configured_broker_command() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        let script = temp.path().join("broker.sh");
+        let captured = temp.path().join("captured.log");
+        write_executable_script(
+            &script,
+            &format!(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+                captured.display()
+            ),
+        );
+        env::set_var(
+            "CHOPPER_JOURNAL_BROKER_CMD",
+            format!("{} --token abc", script.display()),
+        );
+
+        super::ensure_journal_namespace_ready("u1000-me-ops").expect("broker preflight");
+
+        let captured_text = fs::read_to_string(&captured).expect("read captured args");
+        assert!(captured_text.contains("--token"), "{captured_text}");
+        assert!(captured_text.contains("abc"), "{captured_text}");
+        assert!(captured_text.contains("ensure"), "{captured_text}");
+        assert!(captured_text.contains("--namespace"), "{captured_text}");
+        assert!(captured_text.contains("u1000-me-ops"), "{captured_text}");
+        env::remove_var("CHOPPER_JOURNAL_BROKER_CMD");
+    }
+
+    #[test]
+    fn broker_preflight_surfaces_nonzero_exit() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        let script = temp.path().join("broker-fail.sh");
+        write_executable_script(&script, "#!/usr/bin/env bash\nexit 23\n");
+        env::set_var("CHOPPER_JOURNAL_BROKER_CMD", script.display().to_string());
+
+        let err = super::ensure_journal_namespace_ready("u1000-me-ops")
+            .expect_err("non-zero broker should fail");
+        assert!(err.to_string().contains("failed with status"), "{err}");
+        env::remove_var("CHOPPER_JOURNAL_BROKER_CMD");
+    }
+
+    fn write_executable_script(path: &Path, body: &str) {
+        fs::write(path, body).expect("write script");
+        let mut perms = fs::metadata(path).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).expect("set perms");
     }
 }

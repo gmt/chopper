@@ -38,6 +38,17 @@ Rhai return object containing supported keys such as `append_args`,
 Optional stderr forwarding behavior through `systemd-cat --namespace=...`
 configured via `[journal]`.
 
+## Journal broker preflight
+
+Optional preflight call enabled by `journal.ensure = true`. `chopper` invokes
+`${CHOPPER_JOURNAL_BROKER_CMD:-chopper-journal-broker} ensure --namespace <effective_namespace>`
+before starting `systemd-cat`.
+
+## User-scoped journal namespace
+
+When `journal.user_scope = true`, `chopper` transforms logical
+`journal.namespace` into `u<uid>-<sanitized-username>-<sanitized-namespace>`.
+
 ## Config root
 
 Base directory for alias discovery:

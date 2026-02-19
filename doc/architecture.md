@@ -52,6 +52,8 @@ High-level map of the runtime flow and main modules.
 
 - `src/journal.rs` / journal execution path
   - `systemd-cat --namespace=...` integration
+  - optional user-scoped namespace derivation (`u<uid>-<user>-<logical>`)
+  - optional broker preflight (`CHOPPER_JOURNAL_BROKER_CMD ... ensure --namespace`)
   - stderr forwarding path and child exit propagation
 
 - `src/env_util.rs`

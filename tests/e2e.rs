@@ -8684,6 +8684,66 @@ identifier = "journal-test"
 }
 
 #[test]
+fn journal_user_scope_derives_user_prefixed_namespace_for_systemd_cat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-user-scope.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops/ns.prod@2026"
+stderr = true
+user_scope = true
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_args = fake_bin.path().join("captured-args.log");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-user-scope"],
+        [
+            ("PATH", merged_path),
+            ("UID", "4242".to_string()),
+            ("USER", "Test User".to_string()),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured_args_text =
+        fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
+    assert!(
+        captured_args_text.contains("--namespace=u4242-test-user-ops-ns.prod-2026"),
+        "derived user-scoped namespace should be forwarded: {captured_args_text}"
+    );
+}
+
+#[test]
 fn journal_parser_trimming_uses_trimmed_namespace_and_drops_blank_identifier() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -18445,6 +18505,131 @@ stderr = false
 }
 
 #[test]
+fn journal_ensure_invokes_broker_before_systemd_cat() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-ensure.toml"),
+        r#"
+exec = "sh"
+args = ["-c", "printf 'ERR_STREAM\n' 1>&2"]
+
+[journal]
+namespace = "ops"
+stderr = true
+user_scope = true
+ensure = true
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let captured_broker_args = fake_bin.path().join("captured-broker-args.log");
+    let captured_cat_args = fake_bin.path().join("captured-cat-args.log");
+    write_executable_script(
+        &fake_bin.path().join("chopper-journal-broker"),
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+            captured_broker_args.display()
+        ),
+    );
+    write_executable_script(
+        &fake_bin.path().join("systemd-cat"),
+        &format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\ncat >/dev/null\n",
+            captured_cat_args.display()
+        ),
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-ensure"],
+        [
+            ("PATH", merged_path),
+            ("UID", "1001".to_string()),
+            ("USER", "Alice Example".to_string()),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let broker_args = fs::read_to_string(&captured_broker_args).expect("read captured broker args");
+    assert!(broker_args.contains("ensure"), "{broker_args}");
+    assert!(broker_args.contains("--namespace"), "{broker_args}");
+    assert!(
+        broker_args.contains("u1001-alice-example-ops"),
+        "{broker_args}"
+    );
+
+    let cat_args = fs::read_to_string(&captured_cat_args).expect("read captured systemd-cat args");
+    assert!(
+        cat_args.contains("--namespace=u1001-alice-example-ops"),
+        "{cat_args}"
+    );
+}
+
+#[test]
+fn journal_ensure_failure_prevents_child_side_effects() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    let side_effect = config_home.path().join("journal-ensure-side-effect");
+
+    fs::write(
+        aliases_dir.join("journal-ensure-fail.toml"),
+        format!(
+            r#"
+exec = "/bin/sh"
+args = ["-c", "touch \"$1\"", "_", "{}"]
+
+[journal]
+namespace = "ops"
+stderr = true
+ensure = true
+"#,
+            side_effect.display()
+        ),
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    write_executable_script(
+        &fake_bin.path().join("chopper-journal-broker"),
+        "#!/usr/bin/env bash\nexit 17\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-ensure-fail"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("journal namespace broker"), "{stderr}");
+    assert!(
+        !side_effect.exists(),
+        "child command should not run when journal broker ensure fails"
+    );
+}
+
+#[test]
 fn reconcile_can_replace_args_and_remove_env() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -21523,6 +21708,10 @@ fn alias_set_command_updates_args_and_journal_fields() {
             "false",
             "--journal-identifier",
             "managed-set",
+            "--journal-user-scope",
+            "true",
+            "--journal-ensure",
+            "true",
         ],
     );
     assert!(
@@ -21547,6 +21736,8 @@ fn alias_set_command_updates_args_and_journal_fields() {
         get_stdout.contains("\"namespace\": \"ops\""),
         "{get_stdout}"
     );
+    assert!(get_stdout.contains("\"user_scope\": true"), "{get_stdout}");
+    assert!(get_stdout.contains("\"ensure\": true"), "{get_stdout}");
 }
 
 #[test]

@@ -30,6 +30,10 @@ pub struct AliasJournalDoc {
     pub stderr: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+    #[serde(default)]
+    pub user_scope: bool,
+    #[serde(default)]
+    pub ensure: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -252,6 +256,8 @@ mod tests {
                 namespace: "ops".to_string(),
                 stderr: true,
                 identifier: Some("svc".to_string()),
+                user_scope: false,
+                ensure: false,
             }),
             reconcile: Some(AliasReconcileDoc {
                 script: "hooks/reconcile.rhai".to_string(),
@@ -300,6 +306,8 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
         });
         let err = doc
             .validate()

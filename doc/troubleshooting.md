@@ -48,6 +48,11 @@ Checks:
 1. Ensure `systemd-cat` exists on PATH.
 2. Ensure systemd supports `--namespace` (systemd v256+).
 3. Validate `[journal]` fields are non-blank after trimming.
+4. If `journal.ensure = true`, verify broker command:
+   - `${CHOPPER_JOURNAL_BROKER_CMD:-chopper-journal-broker}`
+   - must support `ensure --namespace <value>`
+5. If `journal.user_scope = true`, verify expected derived namespace shape:
+   - `u<uid>-<sanitized-username>-<sanitized-namespace>`
 
 ---
 
