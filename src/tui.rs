@@ -485,10 +485,10 @@ fn handle_toml_enter(state: &mut AppState) -> LoopAction {
     if fields.is_empty() {
         return LoopAction::Continue;
     }
-    let field = fields
-        .get(state.toml_cursor)
-        .copied()
-        .unwrap_or(TomlField::Exec);
+    clamp_toml_cursor(state, fields.len());
+    let Some(field) = fields.get(state.toml_cursor).copied() else {
+        return LoopAction::Continue;
+    };
     if field.is_toggle() {
         if let Err(err) = toggle_selected_alias_toml_field(state, field) {
             state.alert_message = Some(err.to_string());
@@ -635,6 +635,17 @@ fn refresh_aliases_after_delete(state: &mut AppState, list_height: usize) {
 fn invalidate_artifacts(state: &mut AppState) {
     state.artifacts.selected_alias = None;
     sync_artifacts_for_selection(state);
+}
+
+fn clamp_toml_cursor(state: &mut AppState, field_count: usize) {
+    if field_count == 0 {
+        state.toml_cursor = 0;
+        return;
+    }
+    let max_index = field_count.saturating_sub(1);
+    if state.toml_cursor > max_index {
+        state.toml_cursor = max_index;
+    }
 }
 
 fn toml_menu_fields_for_selected_alias(state: &AppState) -> anyhow::Result<Vec<TomlField>> {
@@ -1164,6 +1175,7 @@ fn sync_artifacts_for_selection(state: &mut AppState) {
         .as_deref()
         .map(collect_alias_artifacts)
         .unwrap_or_default();
+    state.toml_cursor = 0;
 }
 
 fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
@@ -2403,6 +2415,28 @@ mod tests {
     }
 
     #[test]
+    fn enter_from_inspector_clamps_out_of_range_toml_cursor() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.focus = PaneFocus::Inspector;
+        state.active_surface = ControlSurface::Toml;
+        state.inspector_mode = InspectorMode::TomlMenu;
+        state.toml_cursor = usize::MAX;
+        let action = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            10,
+        );
+        assert_eq!(action, LoopAction::Continue);
+        assert_eq!(state.toml_cursor, TomlField::all().len() - 1);
+        assert!(matches!(
+            state.prompt.as_ref().map(|prompt| prompt.kind),
+            Some(super::PromptKind::EditTomlField(
+                TomlField::BashcompRhaiFunction
+            ))
+        ));
+    }
+
+    #[test]
     fn e_key_switches_to_reconcile_and_requests_editor_launch() {
         let mut state = sample_state(LayoutKind::Split);
         state.active_surface = ControlSurface::Toml;
@@ -2439,6 +2473,15 @@ mod tests {
         );
         assert_eq!(up, LoopAction::Continue);
         assert_eq!(state.selected, initial_selected);
+        assert_eq!(state.toml_cursor, 0);
+    }
+
+    #[test]
+    fn syncing_artifacts_resets_toml_cursor_when_alias_changes() {
+        let mut state = sample_state(LayoutKind::Split);
+        state.toml_cursor = 6;
+        state.artifacts.selected_alias = Some(String::from("different-alias"));
+        super::sync_artifacts_for_selection(&mut state);
         assert_eq!(state.toml_cursor, 0);
     }
 
