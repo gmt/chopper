@@ -38,12 +38,11 @@ impl JournalBroker {
             zbus::fdo::Error::AccessDenied(format!("namespace ownership check failed: {e}"))
         })?;
 
-        let active_count =
-            policy::count_active_namespaces_for_uid(caller_uid).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("failed to count active namespaces: {e}"))
-            })?;
+        let active_count = policy::count_active_namespaces_for_uid(caller_uid).map_err(|e| {
+            zbus::fdo::Error::Failed(format!("failed to count active namespaces: {e}"))
+        })?;
 
-        if active_count >= policy::MAX_NAMESPACES_PER_UID {
+        if should_enforce_namespace_limit(active_count, systemd::is_namespace_active(&namespace)) {
             return Err(zbus::fdo::Error::LimitsExceeded(format!(
                 "UID {caller_uid} already has {active_count} active namespaces \
                  (limit: {})",
@@ -61,12 +60,14 @@ impl JournalBroker {
             zbus::fdo::Error::Failed(format!("failed to start namespace sockets: {e}"))
         })?;
 
-        eprintln!(
-            "chopper-journal-broker: ensured namespace `{namespace}` for UID {caller_uid}"
-        );
+        eprintln!("chopper-journal-broker: ensured namespace `{namespace}` for UID {caller_uid}");
 
         Ok(())
     }
+}
+
+fn should_enforce_namespace_limit(active_count: usize, namespace_is_active: bool) -> bool {
+    active_count >= policy::MAX_NAMESPACES_PER_UID && !namespace_is_active
 }
 
 /// Resolve the UID of the D-Bus caller via the bus daemon's
@@ -86,9 +87,36 @@ async fn resolve_caller_uid(
     let uid = proxy
         .get_connection_unix_user(zbus::names::BusName::Unique(sender.clone()))
         .await
-        .map_err(|e| {
-            zbus::fdo::Error::Failed(format!("failed to get caller UID: {e}"))
-        })?;
+        .map_err(|e| zbus::fdo::Error::Failed(format!("failed to get caller UID: {e}")))?;
 
     Ok(uid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn namespace_limit_enforced_for_new_namespace_at_limit() {
+        assert!(should_enforce_namespace_limit(
+            policy::MAX_NAMESPACES_PER_UID,
+            false
+        ));
+    }
+
+    #[test]
+    fn namespace_limit_not_enforced_for_existing_namespace_at_limit() {
+        assert!(!should_enforce_namespace_limit(
+            policy::MAX_NAMESPACES_PER_UID,
+            true
+        ));
+    }
+
+    #[test]
+    fn namespace_limit_not_enforced_below_limit() {
+        assert!(!should_enforce_namespace_limit(
+            policy::MAX_NAMESPACES_PER_UID - 1,
+            false
+        ));
+    }
 }
