@@ -34,6 +34,12 @@ pub struct AliasJournalDoc {
     pub user_scope: bool,
     #[serde(default)]
     pub ensure: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_use: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_interval_usec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -258,6 +264,9 @@ mod tests {
                 identifier: Some("svc".to_string()),
                 user_scope: false,
                 ensure: false,
+                max_use: None,
+                rate_limit_interval_usec: None,
+                rate_limit_burst: None,
             }),
             reconcile: Some(AliasReconcileDoc {
                 script: "hooks/reconcile.rhai".to_string(),
@@ -308,6 +317,9 @@ mod tests {
             identifier: Some("   ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
         let err = doc
             .validate()

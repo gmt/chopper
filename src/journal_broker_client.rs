@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
-use std::time::Duration;
 
 /// D-Bus well-known bus name for the journal broker.
 const BUS_NAME: &str = "com.chopperproject.JournalBroker1";
@@ -10,9 +9,6 @@ const OBJECT_PATH: &str = "/com/chopperproject/JournalBroker1";
 
 /// D-Bus interface name for the journal broker.
 const INTERFACE_NAME: &str = "com.chopperproject.JournalBroker1";
-
-/// Timeout for the D-Bus method call (socket activation may take a moment).
-const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Journal policy options passed from client alias config to the broker.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -99,6 +99,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             identifier,
             user_scope: journal.user_scope,
             ensure: journal.ensure,
+            max_use: journal.max_use.clone(),
+            rate_limit_interval_usec: journal.rate_limit_interval_usec,
+            rate_limit_burst: journal.rate_limit_burst,
         });
     }
 
@@ -409,6 +412,12 @@ struct JournalConfigInput {
     user_scope: bool,
     #[serde(default)]
     ensure: bool,
+    #[serde(default)]
+    max_use: Option<String>,
+    #[serde(default)]
+    rate_limit_interval_usec: Option<u64>,
+    #[serde(default)]
+    rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]

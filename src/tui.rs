@@ -730,6 +730,9 @@ fn default_journal_doc() -> crate::alias_doc::AliasJournalDoc {
         identifier: None,
         user_scope: false,
         ensure: false,
+        max_use: None,
+        rate_limit_interval_usec: None,
+        rate_limit_burst: None,
     }
 }
 
