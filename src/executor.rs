@@ -4,6 +4,7 @@ use crate::journal_broker_client::{self, JournalPolicyOptions};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
+use nix::unistd::geteuid;
 use std::env;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
@@ -232,13 +233,7 @@ fn derive_user_scoped_namespace(namespace: &str) -> Result<String> {
 }
 
 fn current_effective_uid() -> u32 {
-    env::var("UID")
-        .ok()
-        .and_then(|value| value.trim().parse::<u32>().ok())
-        .or_else(|| {
-            command_stdout_trimmed("id", &["-u"]).and_then(|value| value.parse::<u32>().ok())
-        })
-        .unwrap_or(0)
+    geteuid().as_raw()
 }
 
 fn current_username(uid: u32) -> String {
@@ -518,6 +513,16 @@ mod tests {
         let uid = super::current_effective_uid();
         assert_eq!(namespace, format!("u{uid}-user-name-ops-ops-ns.prod-2026"));
         env::remove_var("USER");
+    }
+
+    #[test]
+    fn effective_uid_ignores_uid_environment_variable() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let kernel_uid = super::current_effective_uid();
+
+        env::set_var("UID", "0");
+        assert_eq!(super::current_effective_uid(), kernel_uid);
+        env::remove_var("UID");
     }
 
     #[test]
