@@ -209,7 +209,7 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
                 .unwrap_or_else(|| "default".to_string()),
             stderr: true,
             identifier: None,
-            user_scope: false,
+            user_scope: true,
             ensure: false,
             max_use: None,
             rate_limit_interval_usec: None,
@@ -450,25 +450,21 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--journal-rate-limit-interval-usec" => {
-                let value = raw_args
-                    .get(idx + 1)
-                    .ok_or_else(|| anyhow!("--journal-rate-limit-interval-usec requires a value"))?;
-                journal_rate_limit_interval_usec = Some(
-                    value
-                        .parse::<u64>()
-                        .map_err(|_| anyhow!("--journal-rate-limit-interval-usec requires a positive integer"))?,
-                );
+                let value = raw_args.get(idx + 1).ok_or_else(|| {
+                    anyhow!("--journal-rate-limit-interval-usec requires a value")
+                })?;
+                journal_rate_limit_interval_usec = Some(value.parse::<u64>().map_err(|_| {
+                    anyhow!("--journal-rate-limit-interval-usec requires a positive integer")
+                })?);
                 idx += 2;
             }
             "--journal-rate-limit-burst" => {
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--journal-rate-limit-burst requires a value"))?;
-                journal_rate_limit_burst = Some(
-                    value
-                        .parse::<u32>()
-                        .map_err(|_| anyhow!("--journal-rate-limit-burst requires a positive integer"))?,
-                );
+                journal_rate_limit_burst = Some(value.parse::<u32>().map_err(|_| {
+                    anyhow!("--journal-rate-limit-burst requires a positive integer")
+                })?);
                 idx += 2;
             }
             "--journal-clear" => {
@@ -701,6 +697,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 mod tests {
     use super::{
         create_alias, duplicate_alias, load_or_seed_alias_doc, parse_mutation_args, rename_alias,
+        run_alias_action_inner,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -739,6 +736,34 @@ mod tests {
         assert_eq!(mutation.journal_identifier.as_deref(), Some("svc"));
         assert_eq!(mutation.journal_user_scope, Some(true));
         assert_eq!(mutation.journal_ensure, Some(true));
+    }
+
+    #[test]
+    fn set_journal_fields_on_alias_without_journal_defaults_user_scope_true() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        let cfg = temp.path();
+        fs::create_dir_all(cfg.join("aliases")).expect("create aliases dir");
+        fs::write(
+            cfg.join("aliases/demo.toml"),
+            "exec = \"echo\"\nargs = []\nenv = {}\nenv_remove = []\n",
+        )
+        .expect("write alias");
+        env::set_var("CHOPPER_CONFIG_DIR", cfg);
+
+        run_alias_action_inner(&[
+            "set".into(),
+            "demo".into(),
+            "--journal-ensure".into(),
+            "true".into(),
+        ])
+        .expect("set alias");
+
+        let content = fs::read_to_string(cfg.join("aliases/demo.toml")).expect("read alias");
+        assert!(content.contains("user_scope = true"), "{content}");
+        assert!(content.contains("ensure = true"), "{content}");
+
+        env::remove_var("CHOPPER_CONFIG_DIR");
     }
 
     #[test]

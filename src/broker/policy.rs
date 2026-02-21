@@ -69,13 +69,24 @@ pub fn validate_namespace_ownership(namespace: &str, caller_uid: u32) -> Result<
 /// Count how many journal namespace runtime directories exist for a given UID
 /// by scanning `/run/systemd/` for directories matching `journal.u<uid>-*`.
 pub fn count_active_namespaces_for_uid(uid: u32) -> Result<usize> {
-    let run_dir = Path::new("/run/systemd");
+    count_active_namespaces_for_uid_in_dir(uid, Path::new("/run/systemd"))
+}
+
+/// Return whether the specific namespace runtime directory currently exists.
+///
+/// This is used by the broker to keep `EnsureNamespace` idempotent when a UID
+/// has already reached the namespace cap.
+pub fn namespace_is_active(namespace: &str) -> Result<bool> {
+    namespace_is_active_in_dir(namespace, Path::new("/run/systemd"))
+}
+
+fn count_active_namespaces_for_uid_in_dir(uid: u32, run_dir: &Path) -> Result<usize> {
     if !run_dir.is_dir() {
         return Ok(0);
     }
     let prefix = format!("journal.u{uid}-");
     let count = std::fs::read_dir(run_dir)
-        .map_err(|e| anyhow!("failed to read /run/systemd: {e}"))?
+        .map_err(|e| anyhow!("failed to read {}: {e}", run_dir.display()))?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry
@@ -85,6 +96,14 @@ pub fn count_active_namespaces_for_uid(uid: u32) -> Result<usize> {
         })
         .count();
     Ok(count)
+}
+
+fn namespace_is_active_in_dir(namespace: &str, run_dir: &Path) -> Result<bool> {
+    if namespace.contains('\0') {
+        return Err(anyhow!("namespace cannot contain NUL bytes"));
+    }
+    let entry = run_dir.join(format!("journal.{namespace}"));
+    Ok(entry.exists())
 }
 
 /// Parse and clamp client-supplied options into a safe [`JournalDropInConfig`].
@@ -173,15 +192,15 @@ mod tests {
 
     #[test]
     fn ownership_validation_rejects_empty_logical_name() {
-        let err = validate_namespace_ownership("u1000-", 1000)
-            .expect_err("should reject empty suffix");
+        let err =
+            validate_namespace_ownership("u1000-", 1000).expect_err("should reject empty suffix");
         assert!(err.to_string().contains("no logical name"), "{err}");
     }
 
     #[test]
     fn ownership_validation_rejects_nul_bytes() {
-        let err = validate_namespace_ownership("u1000-alice\0ops", 1000)
-            .expect_err("should reject NUL");
+        let err =
+            validate_namespace_ownership("u1000-alice\0ops", 1000).expect_err("should reject NUL");
         assert!(err.to_string().contains("NUL"), "{err}");
     }
 
@@ -216,7 +235,10 @@ mod tests {
     fn clamp_options_clamps_rate_limit_interval() {
         let opts = HashMap::from([("rate_limit_interval_usec".into(), "100".into())]);
         let config = clamp_journal_options(&opts);
-        assert_eq!(config.rate_limit_interval_usec, MIN_RATE_LIMIT_INTERVAL_USEC);
+        assert_eq!(
+            config.rate_limit_interval_usec,
+            MIN_RATE_LIMIT_INTERVAL_USEC
+        );
     }
 
     #[test]
@@ -234,15 +256,29 @@ mod tests {
         assert_eq!(parse_and_clamp_size("256M", u64::MAX), Some("256M".into()));
         assert_eq!(parse_and_clamp_size("1G", u64::MAX), Some("1G".into()));
         assert_eq!(parse_and_clamp_size("1024K", u64::MAX), Some("1M".into()));
-        assert_eq!(
-            parse_and_clamp_size("1048576", u64::MAX),
-            Some("1M".into())
-        );
+        assert_eq!(parse_and_clamp_size("1048576", u64::MAX), Some("1M".into()));
     }
 
     #[test]
     fn parse_size_rejects_zero_and_empty() {
         assert_eq!(parse_and_clamp_size("0M", u64::MAX), None);
         assert_eq!(parse_and_clamp_size("", u64::MAX), None);
+    }
+    #[test]
+    fn namespace_is_active_matches_runtime_entry_name() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let run_dir = temp.path();
+        std::fs::create_dir(run_dir.join("journal.u1000-ops")).expect("create runtime entry");
+
+        assert!(namespace_is_active_in_dir("u1000-ops", run_dir).expect("active check"));
+        assert!(!namespace_is_active_in_dir("u1000-missing", run_dir).expect("missing check"));
+    }
+
+    #[test]
+    fn namespace_is_active_rejects_nul_bytes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = namespace_is_active_in_dir("u1000-bad\0name", temp.path())
+            .expect_err("NUL namespace should fail");
+        assert!(err.to_string().contains("NUL"), "{err}");
     }
 }

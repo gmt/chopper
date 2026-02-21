@@ -38,12 +38,15 @@ impl JournalBroker {
             zbus::fdo::Error::AccessDenied(format!("namespace ownership check failed: {e}"))
         })?;
 
-        let active_count =
-            policy::count_active_namespaces_for_uid(caller_uid).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("failed to count active namespaces: {e}"))
-            })?;
+        let active_count = policy::count_active_namespaces_for_uid(caller_uid).map_err(|e| {
+            zbus::fdo::Error::Failed(format!("failed to count active namespaces: {e}"))
+        })?;
 
-        if active_count >= policy::MAX_NAMESPACES_PER_UID {
+        let namespace_active = policy::namespace_is_active(&namespace).map_err(|e| {
+            zbus::fdo::Error::Failed(format!("failed to check namespace state: {e}"))
+        })?;
+
+        if active_count >= policy::MAX_NAMESPACES_PER_UID && !namespace_active {
             return Err(zbus::fdo::Error::LimitsExceeded(format!(
                 "UID {caller_uid} already has {active_count} active namespaces \
                  (limit: {})",
@@ -61,9 +64,7 @@ impl JournalBroker {
             zbus::fdo::Error::Failed(format!("failed to start namespace sockets: {e}"))
         })?;
 
-        eprintln!(
-            "chopper-journal-broker: ensured namespace `{namespace}` for UID {caller_uid}"
-        );
+        eprintln!("chopper-journal-broker: ensured namespace `{namespace}` for UID {caller_uid}");
 
         Ok(())
     }
@@ -86,9 +87,7 @@ async fn resolve_caller_uid(
     let uid = proxy
         .get_connection_unix_user(zbus::names::BusName::Unique(sender.clone()))
         .await
-        .map_err(|e| {
-            zbus::fdo::Error::Failed(format!("failed to get caller UID: {e}"))
-        })?;
+        .map_err(|e| zbus::fdo::Error::Failed(format!("failed to get caller UID: {e}")))?;
 
     Ok(uid)
 }
