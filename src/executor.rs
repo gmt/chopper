@@ -1,5 +1,6 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
+use crate::journal_broker_client::{self, JournalPolicyOptions};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
@@ -11,8 +12,6 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-
-const DEFAULT_JOURNAL_BROKER_CMD: &str = "chopper-journal-broker";
 
 pub fn run(invocation: Invocation) -> Result<()> {
     if let Some(journal) = invocation.journal.clone() {
@@ -30,9 +29,10 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 }
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
-    let (namespace, identifier) = normalize_journal_config_for_command(&journal)?;
+    let (namespace, identifier, policy) = normalize_journal_config_for_command(&journal)?;
     if journal.ensure {
-        ensure_journal_namespace_ready(&namespace)?;
+        journal_broker_client::ensure_namespace_via_dbus(&namespace, &policy)
+            .context("journal namespace broker preflight failed")?;
     }
 
     let mut journal_cmd = Command::new("systemd-cat");
@@ -189,7 +189,7 @@ fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
 
 fn normalize_journal_config_for_command(
     journal: &JournalConfig,
-) -> Result<(String, Option<String>)> {
+) -> Result<(String, Option<String>, JournalPolicyOptions)> {
     let logical_namespace = match journal_validation::normalize_namespace(&journal.namespace) {
         Ok(namespace) => namespace,
         Err(JournalNamespaceViolation::Empty) => {
@@ -215,7 +215,12 @@ fn normalize_journal_config_for_command(
     } else {
         logical_namespace
     };
-    Ok((namespace, identifier))
+    let policy = JournalPolicyOptions {
+        max_use: journal.max_use.clone(),
+        rate_limit_interval_usec: journal.rate_limit_interval_usec,
+        rate_limit_burst: journal.rate_limit_burst,
+    };
+    Ok((namespace, identifier, policy))
 }
 
 fn derive_user_scoped_namespace(namespace: &str) -> Result<String> {
@@ -298,44 +303,6 @@ fn sanitize_namespace_component(value: &str) -> String {
     }
 }
 
-fn ensure_journal_namespace_ready(namespace: &str) -> Result<()> {
-    let broker = env::var("CHOPPER_JOURNAL_BROKER_CMD")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_JOURNAL_BROKER_CMD.to_string());
-
-    let mut tokens = shell_words::split(&broker)
-        .with_context(|| "CHOPPER_JOURNAL_BROKER_CMD must be a valid shell-style command line")?;
-    if tokens.is_empty() {
-        return Err(anyhow!(
-            "CHOPPER_JOURNAL_BROKER_CMD did not resolve to an executable command"
-        ));
-    }
-
-    let executable = tokens.remove(0);
-    let mut broker_cmd = Command::new(&executable);
-    broker_cmd.args(tokens);
-    broker_cmd.arg("ensure");
-    broker_cmd.arg("--namespace");
-    broker_cmd.arg(namespace);
-    broker_cmd.stdin(Stdio::null());
-    broker_cmd.stdout(Stdio::null());
-    broker_cmd.stderr(Stdio::inherit());
-
-    let status = broker_cmd.status().with_context(|| {
-        format!(
-            "failed to spawn journal namespace broker `{executable}`; set CHOPPER_JOURNAL_BROKER_CMD or install `{DEFAULT_JOURNAL_BROKER_CMD}`"
-        )
-    })?;
-    if !status.success() {
-        return Err(anyhow!(
-            "journal namespace broker `{executable}` failed with status {status} while ensuring namespace `{namespace}`"
-        ));
-    }
-    Ok(())
-}
-
 fn exit_like_child(status: ExitStatus) -> Result<()> {
     if status.success() {
         return Ok(());
@@ -356,11 +323,7 @@ mod tests {
     use crate::test_support::ENV_LOCK;
     use std::collections::HashMap;
     use std::env;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::Path;
     use std::path::PathBuf;
-    use tempfile::TempDir;
 
     fn invocation() -> Invocation {
         Invocation {
@@ -466,6 +429,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -485,6 +451,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -504,6 +473,9 @@ mod tests {
             identifier: Some("   ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -523,6 +495,9 @@ mod tests {
             identifier: Some("svc\0id".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -546,52 +521,41 @@ mod tests {
     }
 
     #[test]
-    fn broker_preflight_invokes_configured_broker_command() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
-        let temp = TempDir::new().expect("tempdir");
-        let script = temp.path().join("broker.sh");
-        let captured = temp.path().join("captured.log");
-        write_executable_script(
-            &script,
-            &format!(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\n",
-                captured.display()
-            ),
-        );
-        env::set_var(
-            "CHOPPER_JOURNAL_BROKER_CMD",
-            format!("{} --token abc", script.display()),
-        );
+    fn normalize_journal_config_returns_policy_options() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: Some("128M".to_string()),
+            rate_limit_interval_usec: Some(30_000_000),
+            rate_limit_burst: Some(500),
+        };
 
-        super::ensure_journal_namespace_ready("u1000-me-ops").expect("broker preflight");
-
-        let captured_text = fs::read_to_string(&captured).expect("read captured args");
-        assert!(captured_text.contains("--token"), "{captured_text}");
-        assert!(captured_text.contains("abc"), "{captured_text}");
-        assert!(captured_text.contains("ensure"), "{captured_text}");
-        assert!(captured_text.contains("--namespace"), "{captured_text}");
-        assert!(captured_text.contains("u1000-me-ops"), "{captured_text}");
-        env::remove_var("CHOPPER_JOURNAL_BROKER_CMD");
+        let (ns, _id, policy) =
+            super::normalize_journal_config_for_command(&journal).expect("should normalize");
+        assert_eq!(ns, "ops");
+        assert_eq!(policy.max_use, Some("128M".to_string()));
+        assert_eq!(policy.rate_limit_interval_usec, Some(30_000_000));
+        assert_eq!(policy.rate_limit_burst, Some(500));
     }
 
     #[test]
-    fn broker_preflight_surfaces_nonzero_exit() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
-        let temp = TempDir::new().expect("tempdir");
-        let script = temp.path().join("broker-fail.sh");
-        write_executable_script(&script, "#!/usr/bin/env bash\nexit 23\n");
-        env::set_var("CHOPPER_JOURNAL_BROKER_CMD", script.display().to_string());
+    fn normalize_journal_config_returns_empty_policy_when_unset() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
+        };
 
-        let err = super::ensure_journal_namespace_ready("u1000-me-ops")
-            .expect_err("non-zero broker should fail");
-        assert!(err.to_string().contains("failed with status"), "{err}");
-        env::remove_var("CHOPPER_JOURNAL_BROKER_CMD");
-    }
-
-    fn write_executable_script(path: &Path, body: &str) {
-        fs::write(path, body).expect("write script");
-        let mut perms = fs::metadata(path).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).expect("set perms");
+        let (_ns, _id, policy) =
+            super::normalize_journal_config_for_command(&journal).expect("should normalize");
+        assert_eq!(policy, crate::journal_broker_client::JournalPolicyOptions::default());
     }
 }

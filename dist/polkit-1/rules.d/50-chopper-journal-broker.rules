@@ -1,0 +1,13 @@
+// chopper-journal-broker: polkit rule
+//
+// Allow any local active user to call EnsureNamespace for their own
+// u<uid>-* namespaces without password prompts.  The broker itself
+// validates UID ownership; this rule enables D-Bus activation to
+// proceed without polkit blocking.
+
+polkit.addRule(function(action, subject) {
+    if (action.id === "com.chopperproject.JournalBroker1.EnsureNamespace" &&
+        subject.active && subject.local) {
+        return polkit.Result.YES;
+    }
+});

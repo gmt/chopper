@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+        "https://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+
+<!-- chopper-journal-broker: polkit actions -->
+
+<policyconfig>
+
+        <vendor>The Chopper Project</vendor>
+        <vendor_url>https://github.com/gmt/chopper</vendor_url>
+
+        <action id="com.chopperproject.JournalBroker1.EnsureNamespace">
+                <description>Ensure a user-scoped journald namespace</description>
+                <message>Authentication is required to create or activate a journald namespace.</message>
+                <defaults>
+                        <allow_any>auth_admin_keep</allow_any>
+                        <allow_inactive>auth_admin_keep</allow_inactive>
+                        <allow_active>yes</allow_active>
+                </defaults>
+        </action>
+
+</policyconfig>

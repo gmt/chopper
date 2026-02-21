@@ -51,7 +51,6 @@ chopper --alias remove demo --mode clean
 ```bash
 CHOPPER_CONFIG_DIR=/path/to/config-root chopper <alias>
 CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias>
-CHOPPER_JOURNAL_BROKER_CMD="chopper-journal-broker" chopper <alias>
 ```
 
 ---

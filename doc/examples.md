@@ -66,14 +66,25 @@ args = ["-c", "echo ok; echo err >&2"]
 [journal]
 namespace = "ops"
 stderr = true
-user_scope = true
 ensure = true
+max_use = "256M"
+rate_limit_burst = 500
 ```
 
-Optional broker override:
+Since `user_scope` defaults to `true`, the effective namespace will be
+`u<uid>-<username>-ops`. The broker D-Bus service creates and starts the
+journald namespace automatically.
 
-```bash
-CHOPPER_JOURNAL_BROKER_CMD="/usr/local/bin/chopper-journal-broker --profile user" chopper myalias
+## 4c) Literal namespace passthrough (no user scoping)
+
+```toml
+exec = "sh"
+args = ["-c", "echo ok; echo err >&2"]
+
+[journal]
+namespace = "shared-ops"
+stderr = true
+user_scope = false
 ```
 
 ---

@@ -9,6 +9,7 @@ mod config_diagnostics;
 mod env_util;
 mod env_validation;
 mod executor;
+mod journal_broker_client;
 mod journal_validation;
 mod manifest;
 mod parser;

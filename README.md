@@ -101,8 +101,8 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"
 stderr = true
 identifier = "kpods"
-user_scope = false
-ensure = false
+ensure = true
+max_use = "128M"
 
 [reconcile]
 script = "kpods.reconcile.rhai"
@@ -162,7 +162,6 @@ chopper --alias remove demo --mode clean
 ```bash
 CHOPPER_CONFIG_DIR=/path/to/config-root chopper <alias> [args...]
 CHOPPER_CACHE_DIR=/path/to/cache-root chopper <alias> [args...]
-CHOPPER_JOURNAL_BROKER_CMD="chopper-journal-broker" chopper <alias> [args...]
 ```
 
 Whitespace wrappers are trimmed; path shape is otherwise preserved.

@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=com.chopperproject.JournalBroker1
+Exec=/usr/local/bin/chopper-journal-broker
+User=root
+SystemdService=chopper-journal-broker.service

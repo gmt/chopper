@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const CACHE_ENTRY_VERSION: u32 = 2;
+const CACHE_ENTRY_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
@@ -528,6 +528,9 @@ mod tests {
             identifier: Some(r"svc.id/worker\edge@2026".into()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
         manifest.reconcile = Some(ReconcileConfig {
             script: PathBuf::from("hooks/reconcile@v1.rhai"),
@@ -807,6 +810,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store("invalid-store-journal", &fingerprint, &invalid_manifest)
@@ -843,6 +849,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -916,6 +925,9 @@ mod tests {
             identifier: Some("   ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -956,6 +968,9 @@ mod tests {
             identifier: Some(String::new()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1423,6 +1438,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1463,6 +1481,9 @@ mod tests {
             identifier: Some(" ident ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1566,6 +1587,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1606,6 +1630,9 @@ mod tests {
             identifier: Some("ident\0log".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -2595,6 +2622,9 @@ mod tests {
             identifier: Some("   ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal");
@@ -2636,6 +2666,9 @@ mod tests {
             identifier: Some(String::new()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-empty-identifier");
@@ -2677,6 +2710,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace-blank");
@@ -2718,6 +2754,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-empty-namespace");
@@ -2759,6 +2798,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace-nul");
@@ -2800,6 +2842,9 @@ mod tests {
             identifier: None,
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace");
@@ -2841,6 +2886,9 @@ mod tests {
             identifier: Some(" id ".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-identifier");
@@ -2882,6 +2930,9 @@ mod tests {
             identifier: Some("id\0value".to_string()),
             user_scope: false,
             ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-identifier-nul");

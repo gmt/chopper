@@ -99,6 +99,9 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             identifier,
             user_scope: journal.user_scope,
             ensure: journal.ensure,
+            max_use: journal.max_use.clone(),
+            rate_limit_interval_usec: journal.rate_limit_interval_usec,
+            rate_limit_burst: journal.rate_limit_burst,
         });
     }
 
@@ -405,10 +408,16 @@ struct JournalConfigInput {
     #[serde(default = "default_true")]
     stderr: bool,
     identifier: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     user_scope: bool,
     #[serde(default)]
     ensure: bool,
+    #[serde(default)]
+    max_use: Option<String>,
+    #[serde(default)]
+    rate_limit_interval_usec: Option<u64>,
+    #[serde(default)]
+    rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,7 +493,7 @@ script = "hooks/reconcile.rhai"
             manifest.journal.as_ref().map(|j| j.namespace.as_str()),
             Some("ops")
         );
-        assert_eq!(manifest.journal.as_ref().map(|j| j.user_scope), Some(false));
+        assert_eq!(manifest.journal.as_ref().map(|j| j.user_scope), Some(true));
         assert_eq!(manifest.journal.as_ref().map(|j| j.ensure), Some(false));
         assert_eq!(
             manifest
