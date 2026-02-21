@@ -27,6 +27,7 @@ Use this directory when you need behavior details beyond quickstart usage.
 - **interactive TUI usage** → [`tui-reference.md`](tui-reference.md)
 - **conversion steps from historical non-TOML aliases** → [`migration.md`](migration.md)
 - **help diagnosing a failure** → [`troubleshooting.md`](troubleshooting.md)
+- **journal broker setup** → [`broker-setup.md`](broker-setup.md)
 - **current completion snapshot** → [`project-status.md`](project-status.md)
 - **full exact semantics** → [`operational-spec.md`](operational-spec.md)
 
@@ -92,6 +93,10 @@ Use this directory when you need behavior details beyond quickstart usage.
   - common failure modes
   - quick diagnosis checklist
   - where to look first for cache/reconcile/journal/config issues
+- [`broker-setup.md`](broker-setup.md)
+  - journal broker daemon installation and configuration
+  - D-Bus interface reference
+  - polkit and systemd unit setup
 - [`bashcomp-design.md`](bashcomp-design.md)
   - bash completion research and design rationale
   - scop/bash-completion, complete-alias, Cobra, and Nix patterns

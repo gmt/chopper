@@ -101,6 +101,8 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"
 stderr = true
 identifier = "kpods"
+ensure = true
+max_use = "128M"
 
 [reconcile]
 script = "kpods.reconcile.rhai"

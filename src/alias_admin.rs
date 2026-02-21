@@ -20,6 +20,11 @@ struct MutationInput {
     journal_namespace: Option<String>,
     journal_stderr: Option<bool>,
     journal_identifier: Option<String>,
+    journal_user_scope: Option<bool>,
+    journal_ensure: Option<bool>,
+    journal_max_use: Option<String>,
+    journal_rate_limit_interval_usec: Option<u64>,
+    journal_rate_limit_burst: Option<u32>,
     journal_clear: bool,
 }
 
@@ -32,6 +37,11 @@ impl MutationInput {
             && self.journal_namespace.is_none()
             && self.journal_stderr.is_none()
             && self.journal_identifier.is_none()
+            && self.journal_user_scope.is_none()
+            && self.journal_ensure.is_none()
+            && self.journal_max_use.is_none()
+            && self.journal_rate_limit_interval_usec.is_none()
+            && self.journal_rate_limit_burst.is_none()
             && !self.journal_clear
     }
 }
@@ -186,6 +196,11 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
     } else if mutation.journal_namespace.is_some()
         || mutation.journal_stderr.is_some()
         || mutation.journal_identifier.is_some()
+        || mutation.journal_user_scope.is_some()
+        || mutation.journal_ensure.is_some()
+        || mutation.journal_max_use.is_some()
+        || mutation.journal_rate_limit_interval_usec.is_some()
+        || mutation.journal_rate_limit_burst.is_some()
     {
         let mut journal = doc.journal.unwrap_or(AliasJournalDoc {
             namespace: mutation
@@ -194,6 +209,11 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
                 .unwrap_or_else(|| "default".to_string()),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
         if let Some(namespace) = mutation.journal_namespace {
             journal.namespace = namespace;
@@ -207,6 +227,25 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
             } else {
                 journal.identifier = Some(identifier);
             }
+        }
+        if let Some(user_scope) = mutation.journal_user_scope {
+            journal.user_scope = user_scope;
+        }
+        if let Some(ensure) = mutation.journal_ensure {
+            journal.ensure = ensure;
+        }
+        if let Some(max_use) = mutation.journal_max_use {
+            if max_use.trim().is_empty() {
+                journal.max_use = None;
+            } else {
+                journal.max_use = Some(max_use);
+            }
+        }
+        if let Some(interval) = mutation.journal_rate_limit_interval_usec {
+            journal.rate_limit_interval_usec = Some(interval);
+        }
+        if let Some(burst) = mutation.journal_rate_limit_burst {
+            journal.rate_limit_burst = Some(burst);
         }
         doc.journal = Some(journal);
     }
@@ -330,6 +369,11 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
     let mut journal_namespace = None;
     let mut journal_stderr = None;
     let mut journal_identifier = None;
+    let mut journal_user_scope = None;
+    let mut journal_ensure = None;
+    let mut journal_max_use = None;
+    let mut journal_rate_limit_interval_usec = None;
+    let mut journal_rate_limit_burst = None;
     let mut journal_clear = false;
 
     let mut idx = 0;
@@ -384,6 +428,49 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 journal_identifier = Some(value.to_string());
                 idx += 2;
             }
+            "--journal-user-scope" => {
+                let value = raw_args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--journal-user-scope requires true/false"))?;
+                journal_user_scope = Some(parse_bool_flag(value, "--journal-user-scope")?);
+                idx += 2;
+            }
+            "--journal-ensure" => {
+                let value = raw_args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--journal-ensure requires true/false"))?;
+                journal_ensure = Some(parse_bool_flag(value, "--journal-ensure")?);
+                idx += 2;
+            }
+            "--journal-max-use" => {
+                let value = raw_args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--journal-max-use requires a value"))?;
+                journal_max_use = Some(value.to_string());
+                idx += 2;
+            }
+            "--journal-rate-limit-interval-usec" => {
+                let value = raw_args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--journal-rate-limit-interval-usec requires a value"))?;
+                journal_rate_limit_interval_usec = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| anyhow!("--journal-rate-limit-interval-usec requires a positive integer"))?,
+                );
+                idx += 2;
+            }
+            "--journal-rate-limit-burst" => {
+                let value = raw_args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--journal-rate-limit-burst requires a value"))?;
+                journal_rate_limit_burst = Some(
+                    value
+                        .parse::<u32>()
+                        .map_err(|_| anyhow!("--journal-rate-limit-burst requires a positive integer"))?,
+                );
+                idx += 2;
+            }
             "--journal-clear" => {
                 journal_clear = true;
                 idx += 1;
@@ -400,6 +487,11 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
         journal_namespace,
         journal_stderr,
         journal_identifier,
+        journal_user_scope,
+        journal_ensure,
+        journal_max_use,
+        journal_rate_limit_interval_usec,
+        journal_rate_limit_burst,
         journal_clear,
     })
 }
@@ -414,6 +506,11 @@ fn build_journal_from_mutation(
     if mutation.journal_namespace.is_none()
         && mutation.journal_stderr.is_none()
         && mutation.journal_identifier.is_none()
+        && mutation.journal_user_scope.is_none()
+        && mutation.journal_ensure.is_none()
+        && mutation.journal_max_use.is_none()
+        && mutation.journal_rate_limit_interval_usec.is_none()
+        && mutation.journal_rate_limit_burst.is_none()
     {
         if allow_none {
             return Ok(None);
@@ -431,10 +528,20 @@ fn build_journal_from_mutation(
         .journal_identifier
         .clone()
         .filter(|value| !value.trim().is_empty());
+    let user_scope = mutation.journal_user_scope.unwrap_or(true);
+    let ensure = mutation.journal_ensure.unwrap_or(false);
+    let max_use = mutation.journal_max_use.clone();
+    let rate_limit_interval_usec = mutation.journal_rate_limit_interval_usec;
+    let rate_limit_burst = mutation.journal_rate_limit_burst;
     Ok(Some(AliasJournalDoc {
         namespace,
         stderr,
         identifier,
+        user_scope,
+        ensure,
+        max_use,
+        rate_limit_interval_usec,
+        rate_limit_burst,
     }))
 }
 
@@ -617,6 +724,10 @@ mod tests {
             "false".into(),
             "--journal-identifier".into(),
             "svc".into(),
+            "--journal-user-scope".into(),
+            "true".into(),
+            "--journal-ensure".into(),
+            "true".into(),
         ])
         .expect("mutation parse");
         assert_eq!(mutation.exec.as_deref(), Some("echo"));
@@ -626,6 +737,8 @@ mod tests {
         assert_eq!(mutation.journal_namespace.as_deref(), Some("ops"));
         assert_eq!(mutation.journal_stderr, Some(false));
         assert_eq!(mutation.journal_identifier.as_deref(), Some("svc"));
+        assert_eq!(mutation.journal_user_scope, Some(true));
+        assert_eq!(mutation.journal_ensure, Some(true));
     }
 
     #[test]

@@ -4,6 +4,14 @@ version = "0.3.0"
 edition = "2021"
 description = "Meta-wrapper with Rhai-powered configuration"
 
+[[bin]]
+name = "chopper"
+path = "src/main.rs"
+
+[[bin]]
+name = "chopper-journal-broker"
+path = "src/broker_main.rs"
+
 [dependencies]
 rhai = { version = "1", features = ["serde", "sync"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +32,8 @@ quick-xml = "0.39.1"
 http = "1.4.0"
 crossterm = "0.29.0"
 ratatui = { version = "0.30.0", default-features = false, features = ["crossterm"] }
+zbus = { version = "5", features = ["blocking"] }
+nix = { version = "0.29", features = ["user"] }
 
 [profile.release]
 opt-level = "z"

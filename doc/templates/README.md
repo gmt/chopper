@@ -5,7 +5,8 @@ Starter files for common setups:
 - `basic-alias.toml`
   - minimal alias with simple env injection
 - `journal-alias.toml`
-  - alias with journald namespace stderr routing
+  - alias with journald namespace stderr routing, broker preflight,
+    and policy fields (`ensure`, `max_use`)
 - `reconcile-alias.toml`
   - alias wired to Rhai reconcile script
 - `reconcile-script.rhai`

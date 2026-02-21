@@ -38,6 +38,26 @@ Rhai return object containing supported keys such as `append_args`,
 Optional stderr forwarding behavior through `systemd-cat --namespace=...`
 configured via `[journal]`.
 
+## Journal broker preflight
+
+Optional preflight call enabled by `journal.ensure = true`. `chopper` calls the
+`chopper-journal-broker` D-Bus service
+(`com.chopperproject.JournalBroker1.EnsureNamespace`) to create/start the
+journald namespace before starting `systemd-cat`. The broker validates UID
+ownership, writes drop-in configs, and starts namespace sockets.
+
+## User-scoped journal namespace
+
+When `journal.user_scope = true` (the default), `chopper` transforms logical
+`journal.namespace` into `u<uid>-<sanitized-username>-<sanitized-namespace>`.
+Set `user_scope = false` for literal namespace passthrough.
+
+## Journal policy options
+
+Optional per-alias journal policy fields (`max_use`, `rate_limit_interval_usec`,
+`rate_limit_burst`) passed to the broker via D-Bus. The broker enforces hard
+server-side limits.
+
 ## Config root
 
 Base directory for alias discovery:

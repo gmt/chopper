@@ -5,3 +5,5 @@ args = ["-c", "echo ok; echo err >&2"]
 namespace = "ops"
 stderr = true
 identifier = "example-journal-alias"
+ensure = true
+max_use = "128M"

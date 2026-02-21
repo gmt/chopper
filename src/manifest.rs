@@ -85,6 +85,13 @@ pub struct JournalConfig {
     pub namespace: String,
     pub stderr: bool,
     pub identifier: Option<String>,
+    #[serde(default)]
+    pub user_scope: bool,
+    #[serde(default)]
+    pub ensure: bool,
+    pub max_use: Option<String>,
+    pub rate_limit_interval_usec: Option<u64>,
+    pub rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

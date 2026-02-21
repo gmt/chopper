@@ -164,6 +164,11 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"                # required when [journal] is present
 stderr = true                    # optional, default true
 identifier = "kpods"             # optional (blank values are treated as unset)
+user_scope = true                # optional, default true
+ensure = false                   # optional, default false
+max_use = "128M"                 # optional, broker-side SystemMaxUse
+rate_limit_interval_usec = 30000000  # optional, broker-side rate limit
+rate_limit_burst = 1000          # optional, broker-side rate limit burst
 
 [reconcile]                      # optional
 script = "kpods.reconcile.rhai"  # required
@@ -240,15 +245,28 @@ This means reconcile `set_env` can intentionally re-introduce a key that alias
 
 When `[journal]` is configured with `stderr = true`, `chopper`:
 
+- computes effective namespace:
+  - `journal.user_scope = true` (default): derives
+    `u<uid>-<sanitized-username>-<sanitized-namespace>`
+  - `journal.user_scope = false`: uses normalized `journal.namespace` literally
+- when `journal.ensure = true`, calls the `chopper-journal-broker` D-Bus
+  service to ensure the namespace is ready:
+  - D-Bus method: `com.chopperproject.JournalBroker1.EnsureNamespace`
+  - passes namespace and policy options (`max_use`, `rate_limit_interval_usec`,
+    `rate_limit_burst`)
+  - broker validates caller UID ownership (`u<uid>-*`)
+  - broker writes journald drop-in config and starts namespace sockets
 - launches `systemd-cat --namespace=...` first
 - verifies the journal sink is alive before launching the target command
 - launches target command only after journal sink startup succeeds
 - captures target stderr
-- forwards stderr into `systemd-cat --namespace=<namespace>`
+- forwards stderr into `systemd-cat --namespace=<effective_namespace>`
 - keeps stdout attached normally
 
 If `systemd-cat` is missing or does not support `--namespace` (systemd < 256),
 execution fails with an explicit error.
+If broker preflight is enabled and the D-Bus call fails, execution aborts
+before `systemd-cat` and before child process spawn.
 
 ---
 
@@ -333,6 +351,16 @@ Key semantics:
 
 - `add` writes TOML alias configs under `aliases/<alias>.toml`.
 - `set` updates existing TOML alias configs.
+- journal mutation flags:
+  - `--journal-namespace <value>`
+  - `--journal-stderr <true|false>`
+  - `--journal-identifier <value>`
+  - `--journal-user-scope <true|false>`
+  - `--journal-ensure <true|false>`
+  - `--journal-max-use <value>` (e.g. `256M`, `1G`)
+  - `--journal-rate-limit-interval-usec <value>`
+  - `--journal-rate-limit-burst <value>`
+  - `--journal-clear`
 - `remove --mode clean` removes config + cache and attempts symlink cleanup.
 - `remove --mode dirty` removes symlink only, preserving config for reactivation.
 

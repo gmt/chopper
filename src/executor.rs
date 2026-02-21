@@ -1,8 +1,10 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
+use crate::journal_broker_client::{self, JournalPolicyOptions};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
+use std::env;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
@@ -27,7 +29,11 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 }
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
-    let (namespace, identifier) = normalize_journal_config_for_command(&journal)?;
+    let (namespace, identifier, policy) = normalize_journal_config_for_command(&journal)?;
+    if journal.ensure {
+        journal_broker_client::ensure_namespace_via_dbus(&namespace, &policy)
+            .context("journal namespace broker preflight failed")?;
+    }
 
     let mut journal_cmd = Command::new("systemd-cat");
     journal_cmd.arg(format!("--namespace={namespace}"));
@@ -183,8 +189,8 @@ fn validate_env_value_for_command(key: &str, value: &str) -> Result<()> {
 
 fn normalize_journal_config_for_command(
     journal: &JournalConfig,
-) -> Result<(String, Option<String>)> {
-    let namespace = match journal_validation::normalize_namespace(&journal.namespace) {
+) -> Result<(String, Option<String>, JournalPolicyOptions)> {
+    let logical_namespace = match journal_validation::normalize_namespace(&journal.namespace) {
         Ok(namespace) => namespace,
         Err(JournalNamespaceViolation::Empty) => {
             return Err(anyhow!("journal namespace cannot be empty"));
@@ -204,7 +210,97 @@ fn normalize_journal_config_for_command(
             return Err(anyhow!("journal identifier cannot contain NUL bytes"));
         }
     };
-    Ok((namespace, identifier))
+    let namespace = if journal.user_scope {
+        derive_user_scoped_namespace(&logical_namespace)?
+    } else {
+        logical_namespace
+    };
+    let policy = JournalPolicyOptions {
+        max_use: journal.max_use.clone(),
+        rate_limit_interval_usec: journal.rate_limit_interval_usec,
+        rate_limit_burst: journal.rate_limit_burst,
+    };
+    Ok((namespace, identifier, policy))
+}
+
+fn derive_user_scoped_namespace(namespace: &str) -> Result<String> {
+    let uid = current_effective_uid();
+    let username = current_username(uid);
+    let user_component = sanitize_namespace_component(&username);
+    let namespace_component = sanitize_namespace_component(namespace);
+    Ok(format!("u{uid}-{user_component}-{namespace_component}"))
+}
+
+fn current_effective_uid() -> u32 {
+    env::var("UID")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .or_else(|| {
+            command_stdout_trimmed("id", &["-u"]).and_then(|value| value.parse::<u32>().ok())
+        })
+        .unwrap_or(0)
+}
+
+fn current_username(uid: u32) -> String {
+    if let Ok(user) = env::var("USER") {
+        let trimmed = user.trim();
+        if !trimmed.is_empty() && !trimmed.contains('\0') {
+            return trimmed.to_string();
+        }
+    }
+    if let Some(username) = command_stdout_trimmed("id", &["-un"]) {
+        return username;
+    }
+    format!("uid{uid}")
+}
+
+fn command_stdout_trimmed(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn sanitize_namespace_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut previous_was_dash = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            previous_was_dash = false;
+            continue;
+        }
+        if ch == '.' || ch == '_' || ch == '-' {
+            out.push(ch);
+            previous_was_dash = ch == '-';
+            continue;
+        }
+        if !previous_was_dash {
+            out.push('-');
+            previous_was_dash = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "x".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn exit_like_child(status: ExitStatus) -> Result<()> {
@@ -224,7 +320,9 @@ fn exit_like_child(status: ExitStatus) -> Result<()> {
 mod tests {
     use super::command_for_invocation;
     use crate::manifest::{Invocation, JournalConfig};
+    use crate::test_support::ENV_LOCK;
     use std::collections::HashMap;
+    use std::env;
     use std::path::PathBuf;
 
     fn invocation() -> Invocation {
@@ -329,6 +427,11 @@ mod tests {
             namespace: "   ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -346,6 +449,11 @@ mod tests {
             namespace: "ops\0prod".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -363,6 +471,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -380,6 +493,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("svc\0id".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         };
 
         let err =
@@ -389,5 +507,55 @@ mod tests {
                 .contains("journal identifier cannot contain NUL bytes"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn user_scoped_namespace_derivation_prefixes_uid_and_sanitizes_components() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        env::set_var("USER", "User Name+Ops");
+        let namespace =
+            super::derive_user_scoped_namespace("ops/ns.prod@2026").expect("derive namespace");
+        let uid = super::current_effective_uid();
+        assert_eq!(namespace, format!("u{uid}-user-name-ops-ops-ns.prod-2026"));
+        env::remove_var("USER");
+    }
+
+    #[test]
+    fn normalize_journal_config_returns_policy_options() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: Some("128M".to_string()),
+            rate_limit_interval_usec: Some(30_000_000),
+            rate_limit_burst: Some(500),
+        };
+
+        let (ns, _id, policy) =
+            super::normalize_journal_config_for_command(&journal).expect("should normalize");
+        assert_eq!(ns, "ops");
+        assert_eq!(policy.max_use, Some("128M".to_string()));
+        assert_eq!(policy.rate_limit_interval_usec, Some(30_000_000));
+        assert_eq!(policy.rate_limit_burst, Some(500));
+    }
+
+    #[test]
+    fn normalize_journal_config_returns_empty_policy_when_unset() {
+        let journal = JournalConfig {
+            namespace: "ops".to_string(),
+            stderr: true,
+            identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
+        };
+
+        let (_ns, _id, policy) =
+            super::normalize_journal_config_for_command(&journal).expect("should normalize");
+        assert_eq!(policy, crate::journal_broker_client::JournalPolicyOptions::default());
     }
 }

@@ -1,0 +1,30 @@
+[Unit]
+Description=Chopper Journal Namespace Broker
+Documentation=https://github.com/gmt/chopper
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=com.chopperproject.JournalBroker1
+ExecStart=/usr/local/bin/chopper-journal-broker
+User=root
+
+# Hardening
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run/systemd
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

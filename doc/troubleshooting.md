@@ -48,6 +48,15 @@ Checks:
 1. Ensure `systemd-cat` exists on PATH.
 2. Ensure systemd supports `--namespace` (systemd v256+).
 3. Validate `[journal]` fields are non-blank after trimming.
+4. If `journal.ensure = true`, verify broker D-Bus service:
+   - Bus name: `com.chopperproject.JournalBroker1`
+   - Check: `busctl --system introspect com.chopperproject.JournalBroker1 /com/chopperproject/JournalBroker1`
+   - Ensure `chopper-journal-broker` is installed and D-Bus config is in place
+     (see `dist/` directory for installation files)
+   - Check system journal: `journalctl -u chopper-journal-broker`
+5. If `journal.user_scope = true` (default), verify expected derived namespace shape:
+   - `u<uid>-<sanitized-username>-<sanitized-namespace>`
+   - Set `user_scope = false` if you need literal namespace passthrough
 
 ---
 

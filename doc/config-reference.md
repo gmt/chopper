@@ -71,6 +71,56 @@ For full behavioral semantics and edge cases, see `operational-spec.md`.
   - blank values treated as unset
   - cannot contain NUL
 
+### `user_scope` (optional)
+
+- Type: boolean
+- Default: `true`
+- Notes:
+  - when `true`, `namespace` is treated as a logical user namespace name
+  - chopper derives effective namespace:
+    - `u<uid>-<sanitized-username>-<sanitized-namespace>`
+  - only affects the namespace passed to `systemd-cat --namespace=...`
+  - set to `false` for literal namespace passthrough
+
+### `ensure` (optional)
+
+- Type: boolean
+- Default: `false`
+- Notes:
+  - when `true`, chopper calls the `chopper-journal-broker` D-Bus service
+    before `systemd-cat`
+  - the broker ensures the journald namespace sockets are started and
+    drop-in configuration is written
+  - D-Bus bus name: `com.chopperproject.JournalBroker1`
+  - method: `EnsureNamespace(namespace, options)`
+  - broker failure aborts invocation before child process spawn
+  - requires `chopper-journal-broker` to be installed as a D-Bus system
+    service (see `dist/` for configuration files)
+
+### `max_use` (optional)
+
+- Type: string
+- Notes:
+  - journald `SystemMaxUse` value for the namespace (e.g. `"256M"`, `"1G"`)
+  - passed to broker via D-Bus; broker clamps to hard limit (512M)
+  - only effective when `ensure = true`
+
+### `rate_limit_interval_usec` (optional)
+
+- Type: integer (microseconds)
+- Notes:
+  - journald `RateLimitIntervalSec` for the namespace
+  - passed to broker via D-Bus; broker clamps to range [1000, 3600000000]
+  - only effective when `ensure = true`
+
+### `rate_limit_burst` (optional)
+
+- Type: integer
+- Notes:
+  - journald `RateLimitBurst` for the namespace
+  - passed to broker via D-Bus; broker clamps to max 10000
+  - only effective when `ensure = true`
+
 ---
 
 ## `[reconcile]` table (optional)
@@ -168,6 +218,8 @@ KUBECONFIG = "/home/me/.kube/config"
 namespace = "ops"
 stderr = true
 identifier = "kpods"
+ensure = true
+max_use = "128M"
 
 [reconcile]
 script = "kpods.reconcile.rhai"

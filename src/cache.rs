@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const CACHE_ENTRY_VERSION: u32 = 2;
+const CACHE_ENTRY_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
@@ -526,6 +526,11 @@ mod tests {
             namespace: "ops/ns.prod@2026".into(),
             stderr: true,
             identifier: Some(r"svc.id/worker\edge@2026".into()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
         manifest.reconcile = Some(ReconcileConfig {
             script: PathBuf::from("hooks/reconcile@v1.rhai"),
@@ -803,6 +808,11 @@ mod tests {
             namespace: "   ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store("invalid-store-journal", &fingerprint, &invalid_manifest)
@@ -837,6 +847,11 @@ mod tests {
             namespace: String::new(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -908,6 +923,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -946,6 +966,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some(String::new()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1411,6 +1436,11 @@ mod tests {
             namespace: " ops ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1449,6 +1479,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some(" ident ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1550,6 +1585,11 @@ mod tests {
             namespace: "ops\0prod".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -1588,6 +1628,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("ident\0log".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let err = store(
@@ -2575,6 +2620,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal");
@@ -2614,6 +2664,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some(String::new()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-empty-identifier");
@@ -2653,6 +2708,11 @@ mod tests {
             namespace: "   ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace-blank");
@@ -2692,6 +2752,11 @@ mod tests {
             namespace: String::new(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-empty-namespace");
@@ -2731,6 +2796,11 @@ mod tests {
             namespace: "ops\0prod".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace-nul");
@@ -2770,6 +2840,11 @@ mod tests {
             namespace: " ops ".to_string(),
             stderr: true,
             identifier: None,
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-namespace");
@@ -2809,6 +2884,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some(" id ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-identifier");
@@ -2848,6 +2928,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("id\0value".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
 
         let path = cache_path("unsafe-journal-identifier-nul");

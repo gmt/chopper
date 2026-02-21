@@ -30,6 +30,16 @@ pub struct AliasJournalDoc {
     pub stderr: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+    #[serde(default = "default_true")]
+    pub user_scope: bool,
+    #[serde(default)]
+    pub ensure: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_use: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_interval_usec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,6 +134,34 @@ impl AliasDoc {
                 }
                 Err(JournalIdentifierViolation::ContainsNul) => {
                     return Err(anyhow!("`journal.identifier` cannot contain NUL bytes"));
+                }
+            }
+            if let Some(max_use) = &journal.max_use {
+                match journal_validation::validate_max_use(max_use) {
+                    Ok(_) => {}
+                    Err(journal_validation::MaxUseViolation::Empty) => {
+                        return Err(anyhow!("`journal.max_use` cannot be blank when provided"));
+                    }
+                    Err(journal_validation::MaxUseViolation::ContainsNul) => {
+                        return Err(anyhow!("`journal.max_use` cannot contain NUL bytes"));
+                    }
+                    Err(journal_validation::MaxUseViolation::InvalidFormat) => {
+                        return Err(anyhow!(
+                            "`journal.max_use` must be a valid size (e.g. 256M, 1G)"
+                        ));
+                    }
+                }
+            }
+            if let Some(burst) = journal.rate_limit_burst {
+                if burst == 0 {
+                    return Err(anyhow!("`journal.rate_limit_burst` must be > 0"));
+                }
+            }
+            if let Some(interval) = journal.rate_limit_interval_usec {
+                if interval == 0 {
+                    return Err(anyhow!(
+                        "`journal.rate_limit_interval_usec` must be > 0"
+                    ));
                 }
             }
         }
@@ -252,6 +290,11 @@ mod tests {
                 namespace: "ops".to_string(),
                 stderr: true,
                 identifier: Some("svc".to_string()),
+                user_scope: false,
+                ensure: false,
+                max_use: None,
+                rate_limit_interval_usec: None,
+                rate_limit_burst: None,
             }),
             reconcile: Some(AliasReconcileDoc {
                 script: "hooks/reconcile.rhai".to_string(),
@@ -300,6 +343,11 @@ mod tests {
             namespace: "ops".to_string(),
             stderr: true,
             identifier: Some("   ".to_string()),
+            user_scope: false,
+            ensure: false,
+            max_use: None,
+            rate_limit_interval_usec: None,
+            rate_limit_burst: None,
         });
         let err = doc
             .validate()

@@ -53,6 +53,38 @@ pub fn normalize_optional_identifier_for_invocation(
     Ok(Some(identifier.to_string()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaxUseViolation {
+    Empty,
+    ContainsNul,
+    InvalidFormat,
+}
+
+/// Validate a `max_use` value (e.g. `"256M"`, `"1G"`, `"1048576"`).
+pub fn validate_max_use(value: &str) -> Result<String, MaxUseViolation> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(MaxUseViolation::Empty);
+    }
+    if trimmed.contains('\0') {
+        return Err(MaxUseViolation::ContainsNul);
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    let num_part = if let Some(n) = upper.strip_suffix('G') {
+        n
+    } else if let Some(n) = upper.strip_suffix('M') {
+        n
+    } else if let Some(n) = upper.strip_suffix('K') {
+        n
+    } else {
+        &upper
+    };
+    if num_part.trim().parse::<u64>().is_err() {
+        return Err(MaxUseViolation::InvalidFormat);
+    }
+    Ok(trimmed.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -157,5 +189,51 @@ mod tests {
         let out = normalize_namespace("\n\t ops.ns \t")
             .expect("namespace with mixed surrounding whitespace should normalize");
         assert_eq!(out, "ops.ns");
+    }
+
+    #[test]
+    fn max_use_validation_accepts_valid_sizes() {
+        assert_eq!(
+            super::validate_max_use("256M"),
+            Ok("256M".to_string())
+        );
+        assert_eq!(super::validate_max_use("1G"), Ok("1G".to_string()));
+        assert_eq!(super::validate_max_use("1024K"), Ok("1024K".to_string()));
+        assert_eq!(
+            super::validate_max_use("1048576"),
+            Ok("1048576".to_string())
+        );
+    }
+
+    #[test]
+    fn max_use_validation_trims_whitespace() {
+        assert_eq!(
+            super::validate_max_use("  256M  "),
+            Ok("256M".to_string())
+        );
+    }
+
+    #[test]
+    fn max_use_validation_rejects_empty() {
+        assert_eq!(
+            super::validate_max_use("   "),
+            Err(super::MaxUseViolation::Empty)
+        );
+    }
+
+    #[test]
+    fn max_use_validation_rejects_nul() {
+        assert_eq!(
+            super::validate_max_use("256\0M"),
+            Err(super::MaxUseViolation::ContainsNul)
+        );
+    }
+
+    #[test]
+    fn max_use_validation_rejects_invalid_format() {
+        assert_eq!(
+            super::validate_max_use("abc"),
+            Err(super::MaxUseViolation::InvalidFormat)
+        );
     }
 }

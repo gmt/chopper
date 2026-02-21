@@ -97,6 +97,11 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             namespace,
             stderr: journal.stderr,
             identifier,
+            user_scope: journal.user_scope,
+            ensure: journal.ensure,
+            max_use: journal.max_use.clone(),
+            rate_limit_interval_usec: journal.rate_limit_interval_usec,
+            rate_limit_burst: journal.rate_limit_burst,
         });
     }
 
@@ -403,6 +408,16 @@ struct JournalConfigInput {
     #[serde(default = "default_true")]
     stderr: bool,
     identifier: Option<String>,
+    #[serde(default = "default_true")]
+    user_scope: bool,
+    #[serde(default)]
+    ensure: bool,
+    #[serde(default)]
+    max_use: Option<String>,
+    #[serde(default)]
+    rate_limit_interval_usec: Option<u64>,
+    #[serde(default)]
+    rate_limit_burst: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -478,6 +493,8 @@ script = "hooks/reconcile.rhai"
             manifest.journal.as_ref().map(|j| j.namespace.as_str()),
             Some("ops")
         );
+        assert_eq!(manifest.journal.as_ref().map(|j| j.user_scope), Some(true));
+        assert_eq!(manifest.journal.as_ref().map(|j| j.ensure), Some(false));
         assert_eq!(
             manifest
                 .reconcile
@@ -494,6 +511,31 @@ script = "hooks/reconcile.rhai"
                 .script,
             temp.path().join("hooks/reconcile.rhai")
         );
+    }
+
+    #[test]
+    fn parses_toml_alias_with_dynamic_journal_scope_fields() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("svc-dynamic.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[journal]
+namespace = "ops"
+stderr = true
+user_scope = true
+ensure = true
+"#,
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse toml config");
+        let journal = manifest.journal.expect("journal config");
+        assert_eq!(journal.namespace, "ops");
+        assert!(journal.user_scope);
+        assert!(journal.ensure);
     }
 
     #[test]
