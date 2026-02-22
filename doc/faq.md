@@ -6,7 +6,7 @@ Start at the root `README.md` for quickstart and common commands.
 
 ## I just need command snippets. Where?
 
-Use [`quick-reference.md`](quick-reference.md).
+Use [`cli-reference.md`](cli-reference.md) for a full command reference, or [`examples.md`](examples.md) for copy/paste snippets.
 
 ## I want copy/paste alias examples. Where?
 
@@ -58,7 +58,7 @@ Lookup order:
 
 ## See also
 
-- [`quick-reference.md`](quick-reference.md)
+- [`cli-reference.md`](cli-reference.md)
 - [`troubleshooting.md`](troubleshooting.md)
 - [`docs index`](README.md)
 - [`root README`](../README.md)
