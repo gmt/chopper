@@ -3,7 +3,10 @@
 High-level APIs available to Rhai reconcile/completion scripts.
 
 These APIs are intent-level abstractions, not thin wrappers over platform-specific
-types.
+types; they are so called because they each present relatively simple APIs which present
+a platform-agnostic functionality accessor, with the obvious exception of the platformn
+facade which is intended to hold nonportable functionality that may be required on
+various platforms.
 
 ---
 

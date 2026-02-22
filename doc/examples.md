@@ -115,17 +115,7 @@ fn reconcile(ctx) {
 
 ---
 
-## 6) Legacy one-line alias
-
-File: `~/.config/chopper/kpods`
-
-```text
-kubectl get pods
-```
-
----
-
-## 7) One-off bypasses for debugging
+## 6) One-off bypasses for debugging
 
 Bypass cache:
 
@@ -148,7 +138,7 @@ Notes:
 
 ---
 
-## 8) Override config/cache roots
+## 7) Override config/cache roots
 
 ```bash
 CHOPPER_CONFIG_DIR=/tmp/chopper-cfg chopper myalias
@@ -157,7 +147,7 @@ CHOPPER_CACHE_DIR=/tmp/chopper-cache chopper myalias
 
 ---
 
-## 9) Alias admin CLI
+## 8) Alias admin CLI
 
 ```bash
 chopper --alias add demo --exec echo --arg hello
@@ -174,7 +164,7 @@ chopper --alias remove demo --mode dirty --symlink-path /usr/local/bin/demo
 
 ---
 
-## 10) TUI workflow
+## 9) TUI workflow
 
 ```bash
 chopper --tui
@@ -189,7 +179,7 @@ Then use:
 
 ---
 
-## 11) Rhai facade usage in reconcile script
+## 10) Rhai facade usage in reconcile script
 
 ```rhai
 fn reconcile(ctx) {

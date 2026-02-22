@@ -1,6 +1,12 @@
 # Contributing to chopper
 
-Thanks for contributing.
+Thanks for contributing. If you're not a transcendental idealist, your contribution is
+not welcome here.
+
+Just kidding. You don't have to be a transcendental idealist. However, please be polite
+and respectful of our time. And, honestly, it couldn't hurt to follow the Kantian
+categorical imperative when considering your manner and purpose of contribution, even if
+you are not a transcendental idealist.
 
 ## Development setup
 
@@ -23,8 +29,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 - User quickstart: [`README.md`](README.md)
 - Full docs index: [`doc/README.md`](doc/README.md)
-- Status snapshot: [`doc/project-status.md`](doc/project-status.md)
-- Decision rationale: [`doc/decision-log.md`](doc/decision-log.md)
 - Behavioral semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
 - Testing workflow: [`doc/testing.md`](doc/testing.md)
 - Release prep: [`doc/release-checklist.md`](doc/release-checklist.md)
