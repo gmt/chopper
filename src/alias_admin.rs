@@ -90,6 +90,9 @@ fn run_get(alias: &str) -> Result<()> {
     let config_path = crate::find_config(alias)
         .ok_or_else(|| anyhow!("alias `{alias}` not found in configuration"))?;
     let manifest = crate::parser::parse(&config_path)?;
+    for warning in crate::config_diagnostics::legacy_script_field_warnings_for_path(&config_path) {
+        eprintln!("warning: {warning}");
+    }
     for warning in crate::config_diagnostics::manifest_missing_target_warnings(&manifest) {
         eprintln!("warning: {warning}");
     }

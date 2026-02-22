@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const CACHE_ENTRY_VERSION: u32 = 3;
+const CACHE_ENTRY_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
@@ -237,6 +237,11 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
         }
         if let Some(rhai_script) = &bashcomp.rhai_script {
             validate_cached_command_path(rhai_script, "cached manifest bashcomp rhai_script path")?;
+        }
+        if bashcomp.rhai_script.is_some() != bashcomp.rhai_function.is_some() {
+            return Err(anyhow!(
+                "cached manifest bashcomp rhai_script/rhai_function presence must match"
+            ));
         }
         if let Some(rhai_function) = &bashcomp.rhai_function {
             let function = rhai_function.trim();

@@ -81,7 +81,7 @@ impl ControlSurface {
 enum LoopAction {
     Continue,
     Refresh,
-    ActivateReconcileQuick,
+    OpenPendingMethodEditor,
     Quit,
 }
 
@@ -203,11 +203,18 @@ struct PromptState {
     keep_configs: bool,
 }
 
+#[derive(Debug, Clone)]
+struct MethodChooserState {
+    field: TomlField,
+    options: Vec<String>,
+    selected: usize,
+}
+
 #[derive(Debug, Default, Clone)]
 struct AliasArtifacts {
     selected_alias: Option<String>,
     toml_path: Option<PathBuf>,
-    reconcile_script_path: Option<PathBuf>,
+    shared_rhai_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -222,6 +229,8 @@ struct AppState {
     inspector_mode: InspectorMode,
     toml_cursor: usize,
     prompt: Option<PromptState>,
+    method_chooser: Option<MethodChooserState>,
+    pending_method_editor: Option<TomlField>,
     alert_message: Option<String>,
     diagnostics: Vec<String>,
     tmux_mode: crate::tui_nvim::TmuxMode,
@@ -260,6 +269,8 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         inspector_mode: InspectorMode::Browse,
         toml_cursor: 0,
         prompt: None,
+        method_chooser: None,
+        pending_method_editor: None,
         alert_message: None,
         diagnostics: Vec::new(),
         tmux_mode: options.tmux_mode,
@@ -299,8 +310,10 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
                 refresh_aliases(&mut state)?;
                 diagnostics_rx = Some(spawn_config_scan_worker());
             }
-            LoopAction::ActivateReconcileQuick => {
-                activate_reconcile_quick(&mut state, &mut terminal)?;
+            LoopAction::OpenPendingMethodEditor => {
+                if let Some(field) = state.pending_method_editor.take() {
+                    activate_method_editor_for_field(&mut state, &mut terminal, field)?;
+                }
             }
             LoopAction::Quit => break,
         }
@@ -313,7 +326,12 @@ fn spawn_config_scan_worker() -> Receiver<Vec<String>> {
     let (tx, rx) = mpsc::channel();
     let config_root = crate::config_dir();
     std::thread::spawn(move || {
-        let warnings = crate::config_diagnostics::scan_extension_warnings(&config_root);
+        let mut warnings = crate::config_diagnostics::scan_extension_warnings(&config_root);
+        warnings.extend(crate::config_diagnostics::scan_legacy_script_field_warnings(
+            &config_root,
+        ));
+        warnings.sort();
+        warnings.dedup();
         let _ = tx.send(warnings);
     });
     rx
@@ -345,6 +363,9 @@ fn handle_event(state: &mut AppState, event: Event, list_height: usize) -> LoopA
 fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> LoopAction {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return LoopAction::Continue;
+    }
+    if state.method_chooser.is_some() {
+        return handle_method_chooser_key_event(state, key);
     }
     if state.prompt.is_some() {
         return handle_prompt_key_event(state, key, list_height);
@@ -402,32 +423,11 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
         KeyCode::Char('l') | KeyCode::Right => {
             if state.focus == PaneFocus::List {
                 state.focus = PaneFocus::Inspector;
-                if state.active_surface == ControlSurface::Toml {
-                    state.inspector_mode = InspectorMode::TomlMenu;
-                } else {
-                    state.inspector_mode = InspectorMode::Browse;
-                }
-            } else {
-                cycle_surface(state, true);
+                state.inspector_mode = InspectorMode::TomlMenu;
             }
             LoopAction::Continue
         }
-        KeyCode::Tab => {
-            cycle_surface(state, true);
-            LoopAction::Continue
-        }
-        KeyCode::BackTab => {
-            cycle_surface(state, false);
-            LoopAction::Continue
-        }
-        KeyCode::Char('1') => {
-            set_active_surface(state, ControlSurface::Toml);
-            LoopAction::Continue
-        }
-        KeyCode::Char('2') => {
-            set_active_surface(state, ControlSurface::Reconcile);
-            LoopAction::Continue
-        }
+        KeyCode::Char(' ') => open_method_chooser_for_selected_field(state),
         KeyCode::Char('+') => {
             state.prompt = Some(PromptState {
                 kind: PromptKind::NewAlias,
@@ -467,8 +467,8 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent, list_height: usize) -> 
         }
         KeyCode::Char('r') => LoopAction::Refresh,
         KeyCode::Char('e') => {
-            set_active_surface(state, ControlSurface::Reconcile);
-            LoopAction::ActivateReconcileQuick
+            state.pending_method_editor = Some(TomlField::ReconcileFunction);
+            LoopAction::OpenPendingMethodEditor
         }
         KeyCode::Enter => {
             if state.active_surface == ControlSurface::Toml {
@@ -506,6 +506,10 @@ fn handle_toml_enter(state: &mut AppState) -> LoopAction {
     let Some(field) = fields.get(state.toml_cursor).copied() else {
         return LoopAction::Continue;
     };
+    if is_method_field(field) {
+        state.pending_method_editor = Some(field);
+        return LoopAction::OpenPendingMethodEditor;
+    }
     if field.is_toggle() {
         if let Err(err) = toggle_selected_alias_toml_field(state, field) {
             state.alert_message = Some(err.to_string());
@@ -562,6 +566,113 @@ fn handle_prompt_key_event(state: &mut AppState, key: KeyEvent, list_height: usi
         }
         _ => LoopAction::Continue,
     }
+}
+
+fn handle_method_chooser_key_event(state: &mut AppState, key: KeyEvent) -> LoopAction {
+    let Some(chooser) = state.method_chooser.as_mut() else {
+        return LoopAction::Continue;
+    };
+    match key.code {
+        KeyCode::Esc => {
+            state.method_chooser = None;
+            LoopAction::Continue
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if chooser.selected > 0 {
+                chooser.selected -= 1;
+            }
+            LoopAction::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if chooser.selected + 1 < chooser.options.len() {
+                chooser.selected += 1;
+            }
+            LoopAction::Continue
+        }
+        KeyCode::Enter => {
+            let selected_method = chooser.options.get(chooser.selected).cloned();
+            let field = chooser.field;
+            state.method_chooser = None;
+            let Some(selected_method) = selected_method else {
+                return LoopAction::Continue;
+            };
+            match apply_selected_alias_method_choice(state, field, &selected_method) {
+                Ok(()) => {
+                    state.pending_method_editor = Some(field);
+                    LoopAction::OpenPendingMethodEditor
+                }
+                Err(err) => {
+                    state.alert_message = Some(err.to_string());
+                    LoopAction::Continue
+                }
+            }
+        }
+        _ => LoopAction::Continue,
+    }
+}
+
+fn open_method_chooser_for_selected_field(state: &mut AppState) -> LoopAction {
+    if state.focus != PaneFocus::Inspector
+        || state.active_surface != ControlSurface::Toml
+        || state.inspector_mode != InspectorMode::TomlMenu
+    {
+        return LoopAction::Continue;
+    }
+    let fields = match toml_menu_fields_for_selected_alias(state) {
+        Ok(fields) => fields,
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+            return LoopAction::Continue;
+        }
+    };
+    if fields.is_empty() {
+        return LoopAction::Continue;
+    }
+    clamp_toml_cursor(state, fields.len());
+    let Some(field) = fields.get(state.toml_cursor).copied() else {
+        return LoopAction::Continue;
+    };
+    if !is_method_field(field) {
+        return LoopAction::Continue;
+    }
+
+    let Some(alias) = state.aliases.get(state.selected).cloned() else {
+        return LoopAction::Continue;
+    };
+    let (doc, doc_path) = match crate::alias_admin::load_or_seed_alias_doc(&alias) {
+        Ok(data) => data,
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+            return LoopAction::Continue;
+        }
+    };
+    let rhai_path = crate::rhai_wiring::shared_rhai_path_for_alias_doc(&doc_path);
+    let mut options = match crate::rhai_wiring::read_compatible_methods(&rhai_path) {
+        Ok(methods) => methods,
+        Err(err) => {
+            state.alert_message = Some(err.to_string());
+            return LoopAction::Continue;
+        }
+    };
+    let current = configured_method_name(&doc, field);
+    if options.is_empty() {
+        options.push(default_method_name(field).to_string());
+    }
+    if let Some(current) = &current {
+        if !options.iter().any(|value| value == current) {
+            options.insert(0, current.clone());
+        }
+    }
+    let selected = current
+        .as_ref()
+        .and_then(|value| options.iter().position(|candidate| candidate == value))
+        .unwrap_or(0);
+    state.method_chooser = Some(MethodChooserState {
+        field,
+        options,
+        selected,
+    });
+    LoopAction::Continue
 }
 
 fn submit_prompt(state: &mut AppState, list_height: usize) {
@@ -726,8 +837,9 @@ fn refresh_aliases(state: &mut AppState) -> anyhow::Result<()> {
 }
 
 fn default_reconcile_doc(alias: &str) -> crate::alias_doc::AliasReconcileDoc {
+    let _ = alias;
     crate::alias_doc::AliasReconcileDoc {
-        script: format!("{alias}.reconcile.rhai"),
+        script: None,
         function: Some(String::from("reconcile")),
     }
 }
@@ -814,13 +926,13 @@ fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Strin
         TomlField::ReconcileScript => doc
             .reconcile
             .as_ref()
-            .map(|reconcile| reconcile.script.clone())
+            .and_then(|reconcile| reconcile.script.clone())
             .unwrap_or_default(),
         TomlField::ReconcileFunction => doc
             .reconcile
             .as_ref()
             .and_then(|reconcile| reconcile.function.clone())
-            .unwrap_or_else(|| String::from("reconcile")),
+            .unwrap_or_default(),
         TomlField::BashcompEnabled => doc.bashcomp.is_some().to_string(),
         TomlField::BashcompDisabled => doc
             .bashcomp
@@ -1051,7 +1163,11 @@ fn apply_toml_field_input(
                     .unwrap_or_else(|| default_reconcile_doc(alias)),
             );
             if let Some(reconcile) = doc.reconcile.as_mut() {
-                reconcile.script = input.to_string();
+                reconcile.script = if input.trim().is_empty() {
+                    None
+                } else {
+                    Some(input.to_string())
+                };
             }
         }
         TomlField::ReconcileFunction => {
@@ -1114,25 +1230,15 @@ fn split_csv(input: &str) -> Vec<String> {
         .collect()
 }
 
-fn activate_reconcile_quick(
-    state: &mut AppState,
-    terminal: &mut AppTerminal,
-) -> anyhow::Result<()> {
-    let Some(alias) = state.aliases.get(state.selected).cloned() else {
-        state.alert_message = Some(String::from("No alias selected"));
-        return Ok(());
-    };
-
-    warn_missing_targets_for_active_alias(state, &alias);
-    set_active_surface(state, ControlSurface::Reconcile);
-    execute_reconcile_action(state, terminal, &alias)?;
-    Ok(())
-}
-
 fn warn_missing_targets_for_active_alias(state: &mut AppState, alias: &str) {
     let Some(config_path) = state.artifacts.toml_path.clone() else {
         return;
     };
+    let legacy_warnings = crate::config_diagnostics::legacy_script_field_warnings_for_path(&config_path);
+    if let Some(first) = legacy_warnings.first() {
+        state.alert_message = Some(format!("warning for `{alias}`: {first}"));
+        return;
+    }
     let Ok(manifest) = crate::parser::parse(&config_path) else {
         return;
     };
@@ -1144,88 +1250,160 @@ fn warn_missing_targets_for_active_alias(state: &mut AppState, alias: &str) {
     state.alert_message = Some(format!("warning for `{alias}`: {first}"));
 }
 
-fn execute_reconcile_action(
+fn activate_method_editor_for_field(
     state: &mut AppState,
     terminal: &mut AppTerminal,
-    alias: &str,
+    field: TomlField,
 ) -> anyhow::Result<()> {
-    sync_artifacts_for_selection(state);
-    let result = if let Some(path) = state.artifacts.reconcile_script_path.clone() {
-        pause_terminal_for_subprocess(terminal, || {
-            crate::tui_nvim::open_rhai_editor_with_mode(
-                &path,
-                &crate::rhai_api_catalog::exported_api_names(),
-                state.tmux_mode,
-            )
-            .with_context(|| format!("failed to open reconcile script for alias `{alias}`"))
-        })
-    } else {
-        create_missing_reconcile_artifact(state, terminal, alias)?;
-        return Ok(());
-    };
-
-    if let Err(err) = result {
-        state.alert_message = Some(err.to_string());
+    if !is_method_field(field) {
+        state.alert_message = Some(format!("field `{}` is not a method field", field.label()));
         return Ok(());
     }
+    let Some(alias) = state.aliases.get(state.selected).cloned() else {
+        state.alert_message = Some(String::from("No alias selected"));
+        return Ok(());
+    };
+    warn_missing_targets_for_active_alias(state, &alias);
 
+    let (mut doc, doc_path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    let rhai_path = crate::rhai_wiring::shared_rhai_path_for_alias_doc(&doc_path);
+    let before_methods = crate::rhai_wiring::read_compatible_methods(&rhai_path)?;
+    let method_name = configured_method_name(&doc, field)
+        .unwrap_or_else(|| default_method_name(field).to_string());
+    set_configured_method_name(&mut doc, field, Some(method_name.clone()), &alias)?;
+    crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+
+    let method_kind = method_kind_for_field(field).expect("method field kind");
+    pause_terminal_for_subprocess(terminal, || {
+        crate::tui_nvim::open_rhai_editor_at_method_with_mode(
+            &rhai_path,
+            &method_name,
+            method_kind,
+            &crate::rhai_api_catalog::exported_api_names(),
+            state.tmux_mode,
+        )
+        .with_context(|| format!("failed to open Rhai method editor for alias `{alias}`"))
+    })?;
+
+    let after_methods = crate::rhai_wiring::read_compatible_methods(&rhai_path)?;
+    sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, &alias)?;
+    crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    invalidate_artifacts(state);
     refresh_aliases(state)?;
     Ok(())
 }
 
-fn reconcile_draft_template(alias: &str) -> String {
-    format!(
-        "// CHOPPER_DRAFT: reconcile script draft for `{alias}`\n// CHOPPER_DRAFT: write and quit to save, or :q! to abort\nfn reconcile(ctx) {{\n    #{{}}\n}}\n\nfn complete(ctx) {{\n    []\n}}\n"
-    )
-}
-
-fn resolve_script_path_from_doc_path(script: &str, doc_path: &std::path::Path) -> PathBuf {
-    let script_path = PathBuf::from(script);
-    if script_path.is_absolute() {
-        script_path
-    } else {
-        doc_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(script_path)
-    }
-}
-
-fn create_missing_reconcile_artifact(
+fn apply_selected_alias_method_choice(
     state: &mut AppState,
-    terminal: &mut AppTerminal,
+    field: TomlField,
+    method_name: &str,
+) -> anyhow::Result<()> {
+    if !is_method_field(field) {
+        anyhow::bail!("field `{}` is not a method field", field.label());
+    }
+    let Some(alias) = state.aliases.get(state.selected).cloned() else {
+        anyhow::bail!("No alias selected");
+    };
+    let (mut doc, doc_path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
+    let rhai_path = crate::rhai_wiring::shared_rhai_path_for_alias_doc(&doc_path);
+    let old_method = configured_method_name(&doc, field);
+    let method_kind = method_kind_for_field(field).expect("method field kind");
+    crate::rhai_wiring::rename_method_or_create(
+        &rhai_path,
+        old_method.as_deref(),
+        method_name,
+        method_kind,
+    )?;
+    set_configured_method_name(&mut doc, field, Some(method_name.to_string()), &alias)?;
+    crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    invalidate_artifacts(state);
+    Ok(())
+}
+
+fn sync_configured_methods_after_edit(
+    doc: &mut crate::alias_doc::AliasDoc,
+    before_methods: &[String],
+    after_methods: &[String],
     alias: &str,
 ) -> anyhow::Result<()> {
-    let (mut doc, doc_path) = crate::alias_admin::load_or_seed_alias_doc(alias)?;
-    let had_reconcile = doc.reconcile.is_some();
-    let reconcile = doc
-        .reconcile
-        .get_or_insert_with(|| default_reconcile_doc(alias));
-    let script_path = resolve_script_path_from_doc_path(&reconcile.script, &doc_path);
-    let template = reconcile_draft_template(alias);
-    let persisted = pause_terminal_for_subprocess(terminal, || {
-        crate::tui_nvim::open_rhai_draft_editor_with_mode(
-            &script_path,
-            &template,
-            &crate::rhai_api_catalog::exported_api_names(),
-            state.tmux_mode,
-        )
-        .with_context(|| format!("failed to open reconcile draft for alias `{alias}`"))
-    })?;
-
-    if persisted {
-        if !had_reconcile {
-            crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
-        }
-        refresh_aliases(state)?;
-        state.alert_message = Some(format!(
-            "created reconcile script for `{alias}` at {}",
-            script_path.display()
-        ));
-    } else {
-        state.alert_message = Some(format!("reconcile creation aborted for alias `{alias}`"));
+    for field in [TomlField::ReconcileFunction, TomlField::BashcompRhaiFunction] {
+        let configured = configured_method_name(doc, field);
+        let synced = crate::rhai_wiring::sync_method_after_edit(
+            before_methods,
+            after_methods,
+            configured.as_deref(),
+        );
+        set_configured_method_name(doc, field, synced, alias)?;
     }
     Ok(())
+}
+
+fn configured_method_name(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Option<String> {
+    let configured = match field {
+        TomlField::ReconcileFunction => doc.reconcile.as_ref().and_then(|value| value.function.clone()),
+        TomlField::BashcompRhaiFunction => {
+            doc.bashcomp.as_ref().and_then(|value| value.rhai_function.clone())
+        }
+        _ => None,
+    }?;
+    let trimmed = configured.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn set_configured_method_name(
+    doc: &mut crate::alias_doc::AliasDoc,
+    field: TomlField,
+    value: Option<String>,
+    alias: &str,
+) -> anyhow::Result<()> {
+    match field {
+        TomlField::ReconcileFunction => {
+            doc.reconcile = Some(
+                doc.reconcile
+                    .clone()
+                    .unwrap_or_else(|| default_reconcile_doc(alias)),
+            );
+            if let Some(reconcile) = doc.reconcile.as_mut() {
+                reconcile.function = value;
+            }
+            Ok(())
+        }
+        TomlField::BashcompRhaiFunction => {
+            doc.bashcomp = Some(doc.bashcomp.clone().unwrap_or_else(default_bashcomp_doc));
+            if let Some(bashcomp) = doc.bashcomp.as_mut() {
+                bashcomp.rhai_function = value;
+            }
+            Ok(())
+        }
+        _ => Err(anyhow::anyhow!(
+            "field `{}` is not a method field",
+            field.label()
+        )),
+    }
+}
+
+fn method_kind_for_field(field: TomlField) -> Option<crate::rhai_wiring::RhaiMethodKind> {
+    match field {
+        TomlField::ReconcileFunction => Some(crate::rhai_wiring::RhaiMethodKind::Reconcile),
+        TomlField::BashcompRhaiFunction => Some(crate::rhai_wiring::RhaiMethodKind::Bashcomp),
+        _ => None,
+    }
+}
+
+fn default_method_name(field: TomlField) -> &'static str {
+    match field {
+        TomlField::ReconcileFunction => "reconcile",
+        TomlField::BashcompRhaiFunction => "complete",
+        _ => "",
+    }
+}
+
+fn is_method_field(field: TomlField) -> bool {
+    matches!(field, TomlField::ReconcileFunction | TomlField::BashcompRhaiFunction)
 }
 
 fn resolve_alias_path(alias: &str) -> Option<PathBuf> {
@@ -1251,16 +1429,14 @@ fn resolve_toml_path(alias: &str) -> Option<PathBuf> {
 fn collect_alias_artifacts(alias: &str) -> AliasArtifacts {
     let resolved_config_path = resolve_alias_path(alias);
     let toml_path = resolve_toml_path(alias);
-    let reconcile_script_path = resolved_config_path
+    let shared_rhai_path = resolved_config_path
         .as_ref()
-        .and_then(|path| crate::parser::parse(path).ok())
-        .and_then(|manifest| manifest.reconcile)
-        .map(|reconcile| reconcile.script);
+        .map(|path| crate::rhai_wiring::shared_rhai_path_for_alias_doc(path));
 
     AliasArtifacts {
         selected_alias: Some(alias.to_string()),
         toml_path,
-        reconcile_script_path,
+        shared_rhai_path,
     }
 }
 
@@ -1280,7 +1456,7 @@ fn sync_artifacts_for_selection(state: &mut AppState) {
 fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
     match surface {
         ControlSurface::Toml => true,
-        ControlSurface::Reconcile => artifacts.reconcile_script_path.is_some(),
+        ControlSurface::Reconcile => artifacts.shared_rhai_path.is_some(),
     }
 }
 
@@ -1517,10 +1693,9 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
-fn banner_guidance(state: &AppState) -> String {
+fn banner_guidance(_state: &AppState) -> String {
     format!(
-        "Enter/→: inspect {} | Tab/1/2: tabs | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit",
-        state.active_surface.label()
+        "Enter/→: inspect | Space: choose method | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit",
     )
 }
 
@@ -1654,13 +1829,9 @@ fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: T
     }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
-    if chunks.len() < 3 {
+    if chunks.len() < 2 {
         return;
     }
 
@@ -1675,13 +1846,8 @@ fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: T
             .style(Style::default().fg(Color::DarkGray)),
         chunks[0],
     );
-
-    frame.render_widget(
-        Paragraph::new(surface_tabs_line(state, tab_mode)),
-        chunks[1],
-    );
-
-    render_inspector_details(frame, chunks[2], state);
+    let _ = tab_mode;
+    render_inspector_details(frame, chunks[1], state);
 }
 
 fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> {
@@ -1763,6 +1929,23 @@ fn render_inspector_details(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn surface_detail_content(state: &AppState) -> InspectorDetailContent {
+    if let Some(chooser) = &state.method_chooser {
+        let mut lines = vec![format!(
+            "method chooser ({})",
+            chooser.field.label()
+        )];
+        lines.push(String::from("Enter: select and edit | Esc: cancel"));
+        lines.push(String::new());
+        let mut cursor_line = None;
+        for (idx, option) in chooser.options.iter().enumerate() {
+            let marker = if idx == chooser.selected { ">" } else { " " };
+            if idx == chooser.selected {
+                cursor_line = Some(lines.len());
+            }
+            lines.push(format!("{marker} {option}"));
+        }
+        return InspectorDetailContent { lines, cursor_line };
+    }
     match state.active_surface {
         ControlSurface::Toml => toml_inspector_content(state),
         ControlSurface::Reconcile => InspectorDetailContent {
@@ -1973,33 +2156,14 @@ fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEn
     push_toml_entry(
         &mut entries,
         doc,
-        TomlField::ReconcileEnabled,
-        reconcile.is_some(),
-    );
-    push_toml_entry(
-        &mut entries,
-        doc,
-        TomlField::ReconcileScript,
-        reconcile.is_some(),
-    );
-    push_toml_entry(
-        &mut entries,
-        doc,
         TomlField::ReconcileFunction,
         reconcile
             .and_then(|value| value.function.as_deref())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("reconcile")
-            != "reconcile",
+            .is_some(),
     );
 
-    push_toml_entry(
-        &mut entries,
-        doc,
-        TomlField::BashcompEnabled,
-        bashcomp.is_some(),
-    );
     push_toml_entry(
         &mut entries,
         doc,
@@ -2018,16 +2182,6 @@ fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEn
         TomlField::BashcompScript,
         bashcomp
             .and_then(|value| value.script.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_some(),
-    );
-    push_toml_entry(
-        &mut entries,
-        doc,
-        TomlField::BashcompRhaiScript,
-        bashcomp
-            .and_then(|value| value.rhai_script.as_deref())
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .is_some(),
@@ -2060,9 +2214,9 @@ fn push_toml_entry(
 
 fn reconcile_preview_lines(state: &AppState) -> Vec<String> {
     let mut lines = vec![String::from("reconcile")];
-    let Some(path) = state.artifacts.reconcile_script_path.as_ref() else {
+    let Some(path) = state.artifacts.shared_rhai_path.as_ref() else {
         lines.push(String::from(
-            "file does not exist (reconcile.script is unset or missing)",
+            "file does not exist (shared <alias>.rhai file is missing)",
         ));
         return lines;
     };
@@ -2123,25 +2277,8 @@ fn render_modal_content(frame: &mut Frame, area: Rect, state: &AppState, tab_mod
         return;
     }
 
-    // Hide tab strip when height-constrained to preserve vertical space for alias list
-    if area.height < 3 {
-        render_alias_list(frame, area, state);
-        return;
-    }
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
-        .split(area);
-    if chunks.len() < 2 {
-        return;
-    }
-
-    frame.render_widget(
-        Paragraph::new(surface_tabs_line(state, tab_mode)),
-        chunks[0],
-    );
-    render_alias_list(frame, chunks[1], state);
+    let _ = tab_mode;
+    render_alias_list(frame, area, state);
 }
 
 fn ensure_selection_visible(state: &mut AppState, list_height: usize) {
@@ -2175,14 +2312,7 @@ fn content_height(height: u16, status_visible: bool, diagnostics_visible: bool) 
 fn alias_viewport_rows(layout: LayoutKind, content_rows: usize) -> usize {
     match layout {
         LayoutKind::Split => content_rows,
-        // Modal reserves one row for the tab strip, unless height-constrained.
-        LayoutKind::Modal => {
-            if content_rows < 3 {
-                content_rows
-            } else {
-                content_rows.saturating_sub(1)
-            }
-        }
+        LayoutKind::Modal => content_rows,
     }
 }
 
@@ -2328,6 +2458,8 @@ mod tests {
             inspector_mode: InspectorMode::Browse,
             toml_cursor: 0,
             prompt: None,
+            method_chooser: None,
+            pending_method_editor: None,
             alert_message: None,
             diagnostics: Vec::new(),
             tmux_mode: TmuxMode::Off,
@@ -2402,13 +2534,10 @@ mod tests {
     }
 
     #[test]
-    fn modal_alias_rows_reserve_header_and_tabs_rows() {
-        // Normal case: tab strip shown, 1 row reserved
-        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 10), 9);
-        // Height-constrained: tab strip hidden, no rows reserved
+    fn modal_alias_rows_use_full_height_without_tabs() {
+        assert_eq!(alias_viewport_rows(LayoutKind::Modal, 10), 10);
         assert_eq!(alias_viewport_rows(LayoutKind::Modal, 2), 2);
         assert_eq!(alias_viewport_rows(LayoutKind::Modal, 1), 1);
-        // Split always uses all rows
         assert_eq!(alias_viewport_rows(LayoutKind::Split, 10), 10);
     }
 
@@ -2432,13 +2561,12 @@ mod tests {
         let mut state = sample_state(LayoutKind::Modal);
         state.selected = 9;
 
-        // Modal content rows might be 5, but one line is reserved for tab chrome.
         state.aliases = (0..20).map(|idx| format!("alias-{idx}")).collect();
         state.selected = 19;
         let alias_rows = alias_viewport_rows(LayoutKind::Modal, 5);
         ensure_selection_visible(&mut state, alias_rows);
-        assert_eq!(alias_rows, 4);
-        assert_eq!(state.scroll, 16);
+        assert_eq!(alias_rows, 5);
+        assert_eq!(state.scroll, 15);
     }
 
     #[test]
@@ -2552,18 +2680,18 @@ mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             10,
         );
-        assert_eq!(action, LoopAction::Continue);
-        assert_eq!(state.toml_cursor, TomlField::all().len() - 1);
-        assert!(matches!(
-            state.prompt.as_ref().map(|prompt| prompt.kind),
-            Some(super::PromptKind::EditTomlField(
-                TomlField::BashcompRhaiFunction
-            ))
-        ));
+        assert_eq!(action, LoopAction::OpenPendingMethodEditor);
+        let visible_fields =
+            super::toml_menu_fields_for_selected_alias(&state).expect("visible toml fields");
+        assert_eq!(state.toml_cursor, visible_fields.len() - 1);
+        assert_eq!(
+            state.pending_method_editor,
+            Some(TomlField::BashcompRhaiFunction)
+        );
     }
 
     #[test]
-    fn e_key_switches_to_reconcile_and_requests_editor_launch() {
+    fn e_key_requests_reconcile_method_editor_launch() {
         let mut state = sample_state(LayoutKind::Split);
         state.active_surface = ControlSurface::Toml;
         let action = handle_key_event(
@@ -2571,8 +2699,8 @@ mod tests {
             KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
             10,
         );
-        assert_eq!(action, LoopAction::ActivateReconcileQuick);
-        assert_eq!(state.active_surface, ControlSurface::Reconcile);
+        assert_eq!(action, LoopAction::OpenPendingMethodEditor);
+        assert_eq!(state.pending_method_editor, Some(TomlField::ReconcileFunction));
     }
 
     #[test]

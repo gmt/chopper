@@ -79,7 +79,7 @@ High-level map of the runtime flow and main modules.
 - `src/completion.rs`
   - Rhai-based completion engine for `--complete` introspection
   - builds context map, calls Rhai function, returns candidate strings
-  - opt-in per-alias (requires `bashcomp.rhai_script` config)
+  - opt-in per-alias (requires `bashcomp.rhai_function`; script path is deterministic `<alias>.rhai`)
 - `src/alias_admin.rs` / `src/alias_doc.rs`
   - alias lifecycle operations (`--alias list|get|add|set|remove`)
   - mutation parsing/validation and TOML persistence for managed aliases

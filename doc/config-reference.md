@@ -125,22 +125,23 @@ For full behavioral semantics and edge cases, see `operational-spec.md`.
 
 ## `[reconcile]` table (optional)
 
-### `script` (required when table present)
+### `script` (legacy, optional)
 
 - Type: string
 - Notes:
-  - trimmed
-  - cannot be blank or NUL
-  - relative paths resolved from alias file directory
-  - cannot be `.` / `..` or end in invalid path components
+  - accepted for compatibility only
+  - ignored by runtime/TUI wiring
+  - emits a warning in diagnostics flows
 
 ### `function` (optional)
 
 - Type: string
-- Default: `"reconcile"`
 - Notes:
   - trimmed
-  - cannot be blank or NUL
+  - cannot contain NUL
+  - **primary reconcile wiring field**
+  - when set, reconcile runs from deterministic shared script `<alias>.rhai`
+  - blank/unset disables reconcile
 
 ---
 
@@ -179,20 +180,19 @@ Controls bash tab completion behavior for the alias.
 
 - Type: string
 - Notes:
-  - path to a Rhai script providing completion logic
-  - same path resolution and validation rules as `script`
-  - the script must define a function (see `rhai_function`)
-  - enables `rhai` mode for `--print-bashcomp-mode`
+  - accepted for compatibility only
+  - ignored by runtime/TUI wiring
+  - emits a warning in diagnostics flows
 
 ### `rhai_function` (optional)
 
 - Type: string
-- Default: `"complete"`
 - Notes:
-  - function name within the `rhai_script`
-  - requires `rhai_script` to be set
+  - completion function name in deterministic shared script `<alias>.rhai`
   - trimmed; blank values treated as unset
   - cannot contain NUL
+  - **primary Rhai-completion wiring field**
+  - blank/unset disables Rhai completion mode
   - receives context map, must return array of candidate strings
 
 ---
@@ -222,13 +222,11 @@ ensure = true
 max_use = "128M"
 
 [reconcile]
-script = "kpods.reconcile.rhai"
 function = "reconcile"
 
 [bashcomp]
 passthrough = true
 # or, for Rhai-based completion:
-# rhai_script = "completions/kpods.rhai"
 # rhai_function = "complete"
 ```
 

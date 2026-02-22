@@ -171,22 +171,22 @@ rate_limit_interval_usec = 30000000  # optional, broker-side rate limit
 rate_limit_burst = 1000          # optional, broker-side rate limit burst
 
 [reconcile]                      # optional
-script = "kpods.reconcile.rhai"  # required
-function = "reconcile"           # optional, default "reconcile"
+script = "kpods.reconcile.rhai"  # optional legacy field (ignored, warning only)
+function = "reconcile"           # optional; when set, enables reconcile via <alias>.rhai
 
 [bashcomp]                       # optional
 disabled = false                 # optional, default false
 passthrough = false              # optional, default false
 script = "comp/kpods.bash"       # optional custom completion script
-rhai_script = "comp/kpods.rhai"  # optional Rhai completion script
-rhai_function = "complete"       # optional, default "complete"
+rhai_script = "comp/kpods.rhai"  # optional legacy field (ignored, warning only)
+rhai_function = "complete"       # optional; when set, enables Rhai completion via <alias>.rhai
 ```
 
 ### Parsing / validation rules
 
 - Leading/trailing whitespace in string fields like `exec`,
-  `journal.namespace`, `journal.identifier`, `reconcile.script`, and
-  `reconcile.function` is trimmed.
+  `journal.namespace`, `journal.identifier`, and method fields
+  (`reconcile.function`, `bashcomp.rhai_function`) is trimmed.
 - Those string fields cannot contain NUL bytes.
 - `args` entries cannot contain NUL bytes.
 - `env_remove` entries are trimmed, deduplicated (first-seen order), and blank
@@ -296,13 +296,12 @@ trimmed; blank keys are rejected, and `remove_env` entries are deduplicated
 - `set_env` keys cannot contain `=` or NUL bytes.
 - `set_env` values cannot contain NUL bytes.
 - `remove_env` entries cannot contain `=` or NUL bytes.
-- Relative `reconcile.script` paths are resolved against the alias config
-  file's real directory (following symlinks).
-- `reconcile.script` cannot be `.` or `..`.
-- Relative forms like `./` or `.\` must include a script path segment (for
-  example `./hooks/reconcile.rhai`).
-- `reconcile.script` cannot end with a path separator (relative or absolute).
-- `reconcile.script` cannot end with `.` or `..` path components.
+- Reconcile script runtime path is deterministic:
+  `<alias>.rhai` beside the alias TOML file (real directory after symlink
+  resolution).
+- Reconcile runs only when `reconcile.function` is non-blank.
+- Legacy `reconcile.script` values are accepted for compatibility but ignored
+  for runtime wiring; diagnostics emit warnings.
 
 For extraordinary debugging scenarios, reconcile can be bypassed
 per-invocation:
@@ -399,13 +398,10 @@ Layout behavior:
 
 - Layout is content-driven. Split view (alias list + inspector/details pane) is
   preferred when both panes remain functional without unreasonable truncation.
-- If width becomes constrained, tab chrome compacts to the active-tab label.
-- If split still cannot remain functional, the UI falls back to a
-  modal/single-pane list view with a tab strip row.
-- The inspector uses tabs (`toml`, `reconcile`) that are
-  always selectable; tabs with backing data are emphasized, while empty tabs
-  remain selectable for creation flows.
-- The top banner provides concise action guidance (`Enter`, `Tab`, `e`, `r`,
+- If split cannot remain functional, the UI falls back to a modal/single-pane
+  list view.
+- The inspector is a single surface (no right-panel tabs).
+- The top banner provides concise action guidance (`Enter`, `Space`, `e`, `r`,
   `q` plus alias ops). Bottom rows are used for async config warnings and
   prompts/errors.
 - Alias overflow is represented by a vertical scrollbar.
@@ -414,13 +410,17 @@ Layout behavior:
 
 Editing behavior:
 
-- `Enter` from list focus moves into inspector focus for the active tab.
-- In `toml` tab, `Enter` opens external editor for alias TOML content (creating
-  the default alias TOML path when absent).
-- `e` is a reconcile quick action; when reconcile script is missing, the TUI can
-  open a draft creation flow.
-- Reconcile script draft files include instructional comments and only persist
-  if the user saves before exit. Aborting with `:q!` discards draft changes.
+- `Enter` from list focus moves into inspector focus.
+- TOML method rows (`reconcile.function`, `bashcomp.rhai_function`) are the
+  primary Rhai wiring controls.
+- `Space` on a method row opens a chooser of compatible handlers
+  (`fn <name>(ctx)`) from the shared `<alias>.rhai` file.
+- `Enter` on a method row opens editor at the selected/current handler; if the
+  handler is missing, TUI seeds it and jumps to it.
+- `e` is a reconcile quick action mapped to reconcile handler editing in the
+  shared `<alias>.rhai` file.
+- On editor close, TUI re-scans methods and auto-syncs method wiring
+  (auto-unwire on deletion, best-effort single-rename rewiring).
 - Alias lifecycle actions are available in TUI (`new`, `rename`, `duplicate`,
   `delete`) via prompt-driven controls. Delete prompt supports a `keep configs`
   toggle (`k`) to switch between clean removal and symlink-only removal.
@@ -472,8 +472,8 @@ command's completer handles everything.
 ### `bashcomp.script`
 
 Optional path to a custom bash completion script. Resolved relative to the
-alias config file's real directory (following symlinks), using the same path
-resolution rules as `reconcile.script`.
+alias config file's real directory (following symlinks), using the standard
+path validation rules for script fields.
 
 The script must define a function named `_chopper_bashcomp_<alias>()` (with
 non-alphanumeric characters replaced by `_`). This function is called instead
@@ -490,20 +490,13 @@ Validation rules for `bashcomp.script`:
 
 ### `bashcomp.rhai_script`
 
-Optional path to a Rhai script that provides completion logic. Resolved
-relative to the alias config file's real directory (following symlinks),
-using the same path resolution rules as `reconcile.script`.
-
-The script must define a function (default name: `complete`) that receives
-a context map and returns an array of candidate strings.
-
-Validation rules match `bashcomp.script` (NUL rejection, dot/separator
-checks, relative path segment requirement).
+Legacy compatibility field. Accepted in config files but ignored for runtime
+wiring; diagnostics emit warnings when present.
 
 ### `bashcomp.rhai_function`
 
-Optional function name within the `rhai_script`. Defaults to `"complete"`.
-Requires `rhai_script` to be set. Trimmed; blank values treated as unset.
+Optional completion handler name in deterministic shared script `<alias>.rhai`.
+Trimmed; blank values treated as unset. When set, Rhai completion mode is on.
 
 ### Completion mode precedence
 
@@ -511,7 +504,7 @@ When `--print-bashcomp-mode <alias>` is queried, the mode is determined by:
 
 1. If `bashcomp.disabled` is `true`: `disabled`
 2. If `bashcomp.script` is set: `custom`
-3. If `bashcomp.rhai_script` is set: `rhai`
+3. If `bashcomp.rhai_function` is set: `rhai`
 4. If `bashcomp.passthrough` is `true`: `passthrough`
 5. Otherwise: `normal`
 
@@ -523,7 +516,7 @@ When mode is `rhai`, the bash completion script calls:
 chopper --complete <alias> <cword> -- <words...>
 ```
 
-This loads the Rhai script from `bashcomp.rhai_script`, calls the named
+This loads the Rhai script from deterministic `<alias>.rhai`, calls the named
 function with a context map containing:
 
 - `words`: array of strings (COMP_WORDS from bash)

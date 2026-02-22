@@ -92,7 +92,28 @@ pub fn open_rhai_editor_with_mode(
     fs_err::write(&dict_path, dictionary)
         .with_context(|| format!("failed to write {}", dict_path.display()))?;
 
-    let invocation = build_editor_invocation(script_path, Some(&dict_path))?;
+    let invocation = build_editor_invocation(script_path, Some(&dict_path), None)?;
+    launch_editor(invocation, tmux_mode)
+}
+
+pub fn open_rhai_editor_at_method_with_mode(
+    script_path: &Path,
+    method_name: &str,
+    method_kind: crate::rhai_wiring::RhaiMethodKind,
+    api_names: &[&str],
+    tmux_mode: TmuxMode,
+) -> Result<()> {
+    crate::rhai_wiring::ensure_method_exists(script_path, method_name, method_kind)?;
+    let cache_dir = crate::cache::cache_dir();
+    fs_err::create_dir_all(&cache_dir)
+        .with_context(|| format!("failed to create {}", cache_dir.display()))?;
+    let dict_path = cache_dir.join("rhai-api-completion.dict");
+    let dictionary = build_completion_dictionary(api_names);
+    fs_err::write(&dict_path, dictionary)
+        .with_context(|| format!("failed to write {}", dict_path.display()))?;
+    let search_command = format!(r"/^\s*fn\s\+{}\s*(\s*ctx\s*)", method_name.trim());
+    let invocation =
+        build_editor_invocation(script_path, Some(&dict_path), Some(&search_command))?;
     launch_editor(invocation, tmux_mode)
 }
 
@@ -121,9 +142,10 @@ struct EditorInvocation {
 fn build_editor_invocation(
     path: &Path,
     completion_dict: Option<&Path>,
+    search_command: Option<&str>,
 ) -> Result<EditorInvocation> {
     if let Ok(nvim_path) = which::which("nvim") {
-        let args = if let Some(dict_path) = completion_dict {
+        let mut args = if let Some(dict_path) = completion_dict {
             let cache_dir = crate::cache::cache_dir();
             let init_path = cache_dir.join("nvim-rhai-bootstrap.vim");
             fs_err::write(&init_path, build_nvim_bootstrap(dict_path))
@@ -131,11 +153,14 @@ fn build_editor_invocation(
             vec![
                 "-u".to_string(),
                 init_path.display().to_string(),
-                path.display().to_string(),
             ]
         } else {
-            vec![path.display().to_string()]
+            Vec::new()
         };
+        if let Some(search_command) = search_command {
+            args.push(format!("+{search_command}"));
+        }
+        args.push(path.display().to_string());
         return Ok(EditorInvocation {
             program: nvim_path,
             args,
@@ -143,18 +168,22 @@ fn build_editor_invocation(
     }
 
     if let Ok(vim_path) = which::which("vim") {
-        let args = if let Some(dict_path) = completion_dict {
+        let mut args = if let Some(dict_path) = completion_dict {
             let complete_cmd = format!("set complete+=k{}", dict_path.display());
             vec![
                 "-c".to_string(),
                 "syntax on".to_string(),
                 "-c".to_string(),
                 complete_cmd,
-                path.display().to_string(),
             ]
         } else {
-            vec![path.display().to_string()]
+            Vec::new()
         };
+        if let Some(search_command) = search_command {
+            args.push("-c".to_string());
+            args.push(search_command.to_string());
+        }
+        args.push(path.display().to_string());
         return Ok(EditorInvocation {
             program: vim_path,
             args,
@@ -184,7 +213,7 @@ fn open_draft_editor_with_mode(
     fs_err::write(&draft_path, template)
         .with_context(|| format!("failed to write {}", draft_path.display()))?;
 
-    let invocation = build_editor_invocation(&draft_path, completion_dict)?;
+    let invocation = build_editor_invocation(&draft_path, completion_dict, None)?;
     let launch_result = launch_editor(invocation, tmux_mode);
     let draft_content = fs_err::read_to_string(&draft_path)
         .with_context(|| format!("failed to read {}", draft_path.display()));

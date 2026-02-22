@@ -2,6 +2,7 @@ use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{BashcompConfig, JournalConfig, Manifest, ReconcileConfig};
+use crate::rhai_wiring::shared_rhai_path_for_alias_doc;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -106,48 +107,18 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     }
 
     if let Some(reconcile) = parsed.reconcile {
-        let script = reconcile.script.trim();
-        if script.is_empty() {
-            return Err(anyhow!("field `reconcile.script` cannot be empty"));
+        if let Some(script) = reconcile.script.as_deref() {
+            validate_optional_script_value(script, "field `reconcile.script`")?;
         }
-        if script.contains('\0') {
-            return Err(anyhow!("field `reconcile.script` cannot contain NUL bytes"));
+
+        if let Some(function) =
+            normalize_optional_method_name(reconcile.function.as_deref(), "field `reconcile.function`")?
+        {
+            manifest = manifest.with_reconcile(ReconcileConfig {
+                script: shared_rhai_path_for_alias_doc(path),
+                function,
+            });
         }
-        if script == "." || script == ".." {
-            return Err(anyhow!("field `reconcile.script` cannot be `.` or `..`"));
-        }
-        if script.ends_with('/') || script.ends_with('\\') {
-            return Err(anyhow!(
-                "field `reconcile.script` cannot end with a path separator"
-            ));
-        }
-        if ends_with_dot_component(script) {
-            return Err(anyhow!(
-                "field `reconcile.script` cannot end with `.` or `..` path components"
-            ));
-        }
-        if !Path::new(script).is_absolute() && !has_meaningful_relative_segment(script) {
-            return Err(anyhow!(
-                "field `reconcile.script` must include a file path when using relative path notation"
-            ));
-        }
-        let script = resolve_script_path(&base_dir, script);
-        let function = match reconcile.function {
-            Some(f) => {
-                let function = f.trim();
-                if function.is_empty() {
-                    "reconcile".to_string()
-                } else if function.contains('\0') {
-                    return Err(anyhow!(
-                        "field `reconcile.function` cannot contain NUL bytes"
-                    ));
-                } else {
-                    function.to_string()
-                }
-            }
-            None => "reconcile".to_string(),
-        };
-        manifest = manifest.with_reconcile(ReconcileConfig { script, function });
     }
 
     if let Some(bashcomp) = parsed.bashcomp {
@@ -183,66 +154,19 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             None
         };
 
-        let rhai_script = if let Some(rhai_script_str) = bashcomp.rhai_script {
-            let rhai_script = rhai_script_str.trim();
-            if rhai_script.is_empty() {
-                None
-            } else {
-                if rhai_script.contains('\0') {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_script` cannot contain NUL bytes"
-                    ));
-                }
-                if rhai_script == "." || rhai_script == ".." {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_script` cannot be `.` or `..`"
-                    ));
-                }
-                if rhai_script.ends_with('/') || rhai_script.ends_with('\\') {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_script` cannot end with a path separator"
-                    ));
-                }
-                if ends_with_dot_component(rhai_script) {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_script` cannot end with `.` or `..` path components"
-                    ));
-                }
-                if !Path::new(rhai_script).is_absolute()
-                    && !has_meaningful_relative_segment(rhai_script)
-                {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_script` must include a file path when using relative path notation"
-                    ));
-                }
-                Some(resolve_script_path(&base_dir, rhai_script))
-            }
+        if let Some(rhai_script) = bashcomp.rhai_script.as_deref() {
+            validate_optional_script_value(rhai_script, "field `bashcomp.rhai_script`")?;
+        }
+
+        let rhai_function = normalize_optional_method_name(
+            bashcomp.rhai_function.as_deref(),
+            "field `bashcomp.rhai_function`",
+        )?;
+        let rhai_script = if rhai_function.is_some() {
+            Some(shared_rhai_path_for_alias_doc(path))
         } else {
             None
         };
-
-        let rhai_function = match bashcomp.rhai_function {
-            Some(f) => {
-                let function = f.trim();
-                if function.is_empty() {
-                    None
-                } else if function.contains('\0') {
-                    return Err(anyhow!(
-                        "field `bashcomp.rhai_function` cannot contain NUL bytes"
-                    ));
-                } else {
-                    Some(function.to_string())
-                }
-            }
-            None => None,
-        };
-
-        // Cross-field validation: rhai_function without rhai_script is invalid.
-        if rhai_function.is_some() && rhai_script.is_none() {
-            return Err(anyhow!(
-                "field `bashcomp.rhai_function` requires `bashcomp.rhai_script` to be set"
-            ));
-        }
 
         manifest.bashcomp = Some(BashcompConfig {
             disabled: bashcomp.disabled,
@@ -329,6 +253,47 @@ fn validate_arg_values(values: &[String], field: &str) -> Result<()> {
         ) {
             return Err(anyhow!("{field} entries cannot contain NUL bytes"));
         }
+    }
+    Ok(())
+}
+
+fn normalize_optional_method_name(value: Option<&str>, field: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let method = value.trim();
+    if method.is_empty() {
+        return Ok(None);
+    }
+    if method.contains('\0') {
+        return Err(anyhow!("{field} cannot contain NUL bytes"));
+    }
+    Ok(Some(method.to_string()))
+}
+
+fn validate_optional_script_value(value: &str, field: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("{field} cannot be empty"));
+    }
+    if trimmed.contains('\0') {
+        return Err(anyhow!("{field} cannot contain NUL bytes"));
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err(anyhow!("{field} cannot be `.` or `..`"));
+    }
+    if trimmed.ends_with('/') || trimmed.ends_with('\\') {
+        return Err(anyhow!("{field} cannot end with a path separator"));
+    }
+    if ends_with_dot_component(trimmed) {
+        return Err(anyhow!(
+            "{field} cannot end with `.` or `..` path components"
+        ));
+    }
+    if !Path::new(trimmed).is_absolute() && !has_meaningful_relative_segment(trimmed) {
+        return Err(anyhow!(
+            "{field} must include a file path when using relative path notation"
+        ));
     }
     Ok(())
 }
@@ -422,7 +387,8 @@ struct JournalConfigInput {
 
 #[derive(Debug, Deserialize)]
 struct ReconcileConfigInput {
-    script: String,
+    #[serde(default)]
+    script: Option<String>,
     function: Option<String>,
 }
 
@@ -481,6 +447,7 @@ identifier = "svc"
 
 [reconcile]
 script = "hooks/reconcile.rhai"
+function = "reconcile"
 "#,
         )
         .expect("write toml");
@@ -509,7 +476,7 @@ script = "hooks/reconcile.rhai"
                 .as_ref()
                 .expect("reconcile config")
                 .script,
-            temp.path().join("hooks/reconcile.rhai")
+            temp.path().join("svc.rhai")
         );
     }
 
@@ -824,7 +791,7 @@ exec = '.\'
     }
 
     #[test]
-    fn defaults_reconcile_function_when_blank() -> Result<()> {
+    fn blank_reconcile_function_disables_reconcile() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("svc.toml");
         fs::write(
@@ -839,19 +806,12 @@ function = "   "
         )?;
 
         let manifest = parse(&config)?;
-        assert_eq!(
-            manifest
-                .reconcile
-                .as_ref()
-                .map(|r| r.function.as_str())
-                .unwrap_or_default(),
-            "reconcile"
-        );
+        assert!(manifest.reconcile.is_none());
         Ok(())
     }
 
     #[test]
-    fn defaults_reconcile_function_when_mixed_whitespace_blank() -> Result<()> {
+    fn mixed_whitespace_blank_reconcile_function_disables_reconcile() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("svc.toml");
         fs::write(
@@ -866,14 +826,28 @@ function = "\n\t  \t\n"
         )?;
 
         let manifest = parse(&config)?;
-        assert_eq!(
-            manifest
-                .reconcile
-                .as_ref()
-                .map(|r| r.function.as_str())
-                .unwrap_or_default(),
-            "reconcile"
-        );
+        assert!(manifest.reconcile.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn reconcile_function_without_legacy_script_uses_deterministic_shared_script() -> Result<()> {
+        let temp = TempDir::new()?;
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[reconcile]
+function = "custom_reconcile"
+"#,
+        )?;
+
+        let manifest = parse(&config)?;
+        let reconcile = manifest.reconcile.expect("reconcile config");
+        assert_eq!(reconcile.script, temp.path().join("svc.rhai"));
+        assert_eq!(reconcile.function, "custom_reconcile");
         Ok(())
     }
 
@@ -1245,7 +1219,7 @@ function = "  custom_reconcile  "
 
         let manifest = parse(&config)?;
         let reconcile = manifest.reconcile.expect("reconcile config");
-        assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
+        assert_eq!(reconcile.script, temp.path().join("trimmed.rhai"));
         assert_eq!(reconcile.function, "custom_reconcile");
         Ok(())
     }
@@ -1267,7 +1241,7 @@ function = "\n\tcustom_reconcile\t\n"
 
         let manifest = parse(&config)?;
         let reconcile = manifest.reconcile.expect("reconcile config");
-        assert_eq!(reconcile.script, temp.path().join("hooks/reconcile.rhai"));
+        assert_eq!(reconcile.script, temp.path().join("trimmed-mixed.rhai"));
         assert_eq!(reconcile.function, "custom_reconcile");
         Ok(())
     }
@@ -1637,6 +1611,7 @@ exec = "echo"
 
 [reconcile]
 script = "hooks/reconcile.rhai"
+function = "custom_reconcile"
 "#,
         )?;
         let symlink_config = aliases_dir.join("linked.toml");
@@ -1649,7 +1624,7 @@ script = "hooks/reconcile.rhai"
                 .as_ref()
                 .expect("reconcile config")
                 .script,
-            target_dir.join("hooks/reconcile.rhai")
+            target_dir.join("linked.rhai")
         );
         Ok(())
     }
@@ -1667,6 +1642,7 @@ exec = "echo"
 
 [reconcile]
 script = "../hooks/reconcile.rhai"
+function = "custom_reconcile"
 "#,
         )?;
 
@@ -1677,7 +1653,7 @@ script = "../hooks/reconcile.rhai"
                 .as_ref()
                 .expect("reconcile config")
                 .script,
-            aliases_dir.join("../hooks/reconcile.rhai")
+            aliases_dir.join("local.rhai")
         );
         Ok(())
     }
@@ -1695,6 +1671,7 @@ exec = "echo"
 
 [reconcile]
 script = "./hooks/reconcile.rhai"
+function = "custom_reconcile"
 "#,
         )?;
 
@@ -1705,7 +1682,7 @@ script = "./hooks/reconcile.rhai"
                 .as_ref()
                 .expect("reconcile config")
                 .script,
-            aliases_dir.join("./hooks/reconcile.rhai")
+            aliases_dir.join("local.rhai")
         );
         Ok(())
     }
@@ -1723,6 +1700,7 @@ exec = "echo"
 
 [reconcile]
 script = './hooks/reconcile @v1.rhai'
+function = "custom_reconcile"
 "#,
         )?;
 
@@ -1733,7 +1711,7 @@ script = './hooks/reconcile @v1.rhai'
                 .as_ref()
                 .expect("reconcile config")
                 .script,
-            aliases_dir.join("hooks/reconcile @v1.rhai")
+            aliases_dir.join("local.rhai")
         );
         Ok(())
     }
@@ -2090,7 +2068,7 @@ script = "completions/.."
     // ------------------------------------------------------------------
 
     #[test]
-    fn parses_bashcomp_rhai_script_field() -> Result<()> {
+    fn bashcomp_rhai_script_alone_does_not_enable_rhai_completion() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("bc.toml");
         fs::write(
@@ -2105,10 +2083,7 @@ rhai_script = "completions/custom.rhai"
 
         let manifest = parse(&config)?;
         let bashcomp = manifest.bashcomp.expect("bashcomp config");
-        assert_eq!(
-            bashcomp.rhai_script,
-            Some(temp.path().join("completions/custom.rhai"))
-        );
+        assert!(bashcomp.rhai_script.is_none());
         assert!(bashcomp.rhai_function.is_none());
         Ok(())
     }
@@ -2132,14 +2107,14 @@ rhai_function = "my_completer"
         let bashcomp = manifest.bashcomp.expect("bashcomp config");
         assert_eq!(
             bashcomp.rhai_script,
-            Some(temp.path().join("completions/custom.rhai"))
+            Some(temp.path().join("bc.rhai"))
         );
         assert_eq!(bashcomp.rhai_function, Some("my_completer".to_string()));
         Ok(())
     }
 
     #[test]
-    fn bashcomp_rhai_script_blank_value_is_treated_as_none() -> Result<()> {
+    fn bashcomp_rhai_script_blank_value_fails_validation() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("bc.toml");
         fs::write(
@@ -2152,9 +2127,12 @@ rhai_script = "   "
 "#,
         )?;
 
-        let manifest = parse(&config)?;
-        let bashcomp = manifest.bashcomp.expect("bashcomp config");
-        assert!(bashcomp.rhai_script.is_none());
+        let err = parse(&config).expect_err("blank rhai_script should fail");
+        assert!(
+            err.to_string()
+                .contains("field `bashcomp.rhai_script` cannot be empty"),
+            "{err}"
+        );
         Ok(())
     }
 
@@ -2253,7 +2231,7 @@ rhai_script = "completions/"
     }
 
     #[test]
-    fn rejects_bashcomp_rhai_function_without_rhai_script() {
+    fn bashcomp_rhai_function_without_legacy_script_uses_deterministic_shared_script() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
         fs::write(
@@ -2267,9 +2245,9 @@ rhai_function = "complete"
         )
         .expect("write toml");
 
-        let err = parse(&config).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("requires `bashcomp.rhai_script` to be set"));
+        let manifest = parse(&config).expect("expected parse success");
+        let bashcomp = manifest.bashcomp.expect("bashcomp config");
+        assert_eq!(bashcomp.rhai_script, Some(temp.path().join("bad.rhai")));
+        assert_eq!(bashcomp.rhai_function, Some("complete".to_string()));
     }
 }

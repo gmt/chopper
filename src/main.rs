@@ -18,6 +18,7 @@ mod rhai_api_catalog;
 mod rhai_engine;
 mod rhai_facade;
 mod rhai_facade_validation;
+mod rhai_wiring;
 #[cfg(test)]
 mod test_support;
 mod tui;
@@ -275,7 +276,12 @@ fn run_list_aliases() {
 }
 
 fn emit_config_scan_warnings() {
-    for warning in config_diagnostics::scan_extension_warnings(&config_dir()) {
+    let cfg = config_dir();
+    let mut warnings = config_diagnostics::scan_extension_warnings(&cfg);
+    warnings.extend(config_diagnostics::scan_legacy_script_field_warnings(&cfg));
+    warnings.sort();
+    warnings.dedup();
+    for warning in warnings {
         eprintln!("warning: {warning}");
     }
 }

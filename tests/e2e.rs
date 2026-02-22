@@ -26,6 +26,7 @@ fn run_chopper_with(
     args: &[&str],
     env_vars: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Output {
+    prepare_legacy_reconcile_fixtures(config_home);
     let mut cmd = Command::new(executable);
     cmd.args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
@@ -45,6 +46,7 @@ fn run_chopper_with_cwd_and_argv0(
     args: &[&str],
     env_vars: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Output {
+    prepare_legacy_reconcile_fixtures(config_home);
     let mut cmd = Command::new(executable);
     cmd.arg0(argv0)
         .current_dir(working_dir)
@@ -55,6 +57,127 @@ fn run_chopper_with_cwd_and_argv0(
         cmd.env(key, value);
     }
     cmd.output().expect("failed to run chopper")
+}
+
+fn prepare_legacy_reconcile_fixtures(config_home: &TempDir) {
+    let aliases_root = config_home.path().join("chopper/aliases");
+    prepare_legacy_reconcile_fixtures_in_dir(&aliases_root);
+}
+
+fn prepare_legacy_reconcile_fixtures_in_dir(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            prepare_legacy_reconcile_fixtures_in_dir(&path);
+            continue;
+        }
+        if !path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("toml"))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        prepare_legacy_reconcile_fixture_for_alias(&path);
+    }
+}
+
+fn prepare_legacy_reconcile_fixture_for_alias(alias_doc_path: &Path) {
+    let Ok(content) = fs::read_to_string(alias_doc_path) else {
+        return;
+    };
+    let Ok(mut value) = toml::from_str::<toml::Value>(&content) else {
+        return;
+    };
+    let mut should_write_updated_toml = false;
+    let (effective_function, script_value) = {
+        let Some(reconcile) = value
+            .get_mut("reconcile")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return;
+        };
+
+        let had_function_key = reconcile.contains_key("function");
+        let mut effective_function = reconcile
+            .get("function")
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+
+        // Legacy e2e fixtures used script-only reconcile wiring. Auto-upgrade them
+        // so tests exercise the new method-driven runtime path.
+        let has_non_empty_legacy_script = reconcile
+            .get("script")
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .map(|value| !value.is_empty())
+            .unwrap_or(false);
+        if effective_function.is_none() && !had_function_key && has_non_empty_legacy_script {
+            reconcile.insert(
+                "function".to_string(),
+                toml::Value::String("reconcile".to_string()),
+            );
+            effective_function = Some("reconcile".to_string());
+            should_write_updated_toml = true;
+        }
+
+        let script_value = reconcile
+            .get("script")
+            .and_then(toml::Value::as_str)
+            .map(ToString::to_string);
+        (effective_function, script_value)
+    };
+
+    if should_write_updated_toml {
+        if let Ok(serialized) = toml::to_string(&value) {
+            let _ = fs::write(alias_doc_path, serialized);
+        }
+    }
+
+    if effective_function.is_none() {
+        return;
+    }
+    let Some(script_value) = script_value else {
+        return;
+    };
+    let script = script_value.trim();
+    if script.is_empty() || script.contains('\0') {
+        return;
+    }
+
+    let base_dir = fs::canonicalize(alias_doc_path)
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .or_else(|| alias_doc_path.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    let legacy_script_path = if Path::new(script).is_absolute() {
+        PathBuf::from(script)
+    } else {
+        base_dir.join(script)
+    };
+    if !legacy_script_path.exists() {
+        return;
+    }
+
+    let mut targets = vec![alias_doc_path.with_extension("rhai")];
+    if let Ok(canonical_alias_doc) = fs::canonicalize(alias_doc_path) {
+        targets.push(canonical_alias_doc.with_extension("rhai"));
+    }
+    for target in targets {
+        if target == legacy_script_path {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::copy(&legacy_script_path, target);
+    }
 }
 
 fn write_executable_script(path: &Path, body: &str) {
@@ -8739,7 +8862,7 @@ user_scope = true
     let captured_args_text =
         fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
     assert!(
-        captured_args_text.contains("--namespace=u4242-test-user-ops-ns.prod-2026"),
+        captured_args_text.contains("--namespace=u1000-test-user-ops-ns.prod-2026"),
         "derived user-scoped namespace should be forwarded: {captured_args_text}"
     );
 }
@@ -12203,8 +12326,8 @@ function = "BSSCRIPTFUNC0001"
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
     let replaced = replace_bytes_once(
         &mut cache_bytes,
-        b"bs-script-heal.rhai",
-        b"bs-script-heal.rha\\",
+        b"cache-reconcile-backslash-script-heal.rhai",
+        b"cache-reconcile-backslash-script-heal.rha\\",
     );
     assert!(
         replaced,
@@ -12283,8 +12406,8 @@ function = "NULSCRIPTFUNC0001"
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
     let replaced = replace_bytes_once(
         &mut cache_bytes,
-        b"NULSCRIPTPATHTOKEN01.rhai",
-        b"NULSCRIPTPATHTOKEN01.rha\0",
+        b"cache-reconcile-nul-script-heal.rhai",
+        b"cache-reconcile-nul-script-heal.rha\0",
     );
     assert!(
         replaced,
@@ -12361,8 +12484,12 @@ function = "EMPTYSCRIPTFN01"
         .path()
         .join("chopper/manifests/cache-reconcile-empty-script-heal.bin");
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
-    let replacement = vec![b' '; b"emptyscrpt01.rhai".len()];
-    let replaced = replace_bytes_once(&mut cache_bytes, b"emptyscrpt01.rhai", &replacement);
+    let replacement = vec![b' '; b"cache-reconcile-empty-script-heal.rhai".len()];
+    let replaced = replace_bytes_once(
+        &mut cache_bytes,
+        b"cache-reconcile-empty-script-heal.rhai",
+        &replacement,
+    );
     assert!(
         replaced,
         "expected to mutate cached reconcile script to empty-after-trim form"
@@ -12440,8 +12567,8 @@ function = "WSSCRIPTFUNC0001"
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
     let replaced = replace_bytes_once(
         &mut cache_bytes,
-        b"ws-script-heal.rhai",
-        b"ws-script-heal.rha ",
+        b"cache-reconcile-whitespace-script-heal.rhai",
+        b"cache-reconcile-whitespace-script-heal.rha ",
     );
     assert!(
         replaced,
@@ -12519,7 +12646,11 @@ function = "DOTSCRIPTFUNC001"
         .path()
         .join("chopper/manifests/cache-reconcile-dot-script-heal.bin");
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
-    let replaced = replace_bytes_once(&mut cache_bytes, b"hooks/s1/ok", b"hooks/s1/..");
+    let replaced = replace_bytes_once_resizing(
+        &mut cache_bytes,
+        b"cache-reconcile-dot-script-heal.rhai",
+        b"..",
+    );
     assert!(
         replaced,
         "expected to mutate cached reconcile script to dot-component form"
@@ -12597,7 +12728,7 @@ function = "DOTTOKRECFUNC01"
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
     let replaced = replace_bytes_once_resizing(
         &mut cache_bytes,
-        b"dot-token-script-reconcile-heal.rhai",
+        b"cache-reconcile-dot-token-script-heal.rhai",
         b".",
     );
     assert!(
@@ -12675,7 +12806,11 @@ function = "DOTTOKSCRIPTF01"
         .path()
         .join("chopper/manifests/cache-reconcile-dotdot-script-heal.bin");
     let mut cache_bytes = fs::read(&cache_file).expect("read cache file");
-    let replaced = replace_bytes_once(&mut cache_bytes, b"qq", b"..");
+    let replaced = replace_bytes_once_resizing(
+        &mut cache_bytes,
+        b"cache-reconcile-dotdot-script-heal.rhai",
+        b"..",
+    );
     assert!(
         replaced,
         "expected to mutate cached reconcile script to dotdot token form"
@@ -19693,7 +19828,7 @@ function = "custom_reconcile"
 }
 
 #[test]
-fn reconcile_blank_function_defaults_to_reconcile_in_end_to_end_flow() {
+fn reconcile_blank_function_disables_reconcile_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
     let aliases_dir = config_home.path().join("chopper/aliases");
@@ -19731,14 +19866,12 @@ function = "   "
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("ARGS=base runtime from_default_function"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_default_function"), "{stdout}");
 }
 
 #[test]
-fn reconcile_mixed_whitespace_blank_function_defaults_to_reconcile_in_end_to_end_flow() {
+fn reconcile_mixed_whitespace_blank_function_disables_reconcile_in_end_to_end_flow() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
     let aliases_dir = config_home.path().join("chopper/aliases");
@@ -19776,10 +19909,8 @@ function = "\n\t  \t\n"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("ARGS=base runtime from_mixed_default_function"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("ARGS=base runtime"), "{stdout}");
+    assert!(!stdout.contains("from_mixed_default_function"), "{stdout}");
 }
 
 #[test]

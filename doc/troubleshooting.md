@@ -118,6 +118,7 @@ Common causes:
 - NUL bytes in args/env/journal/reconcile strings
 - `=` in env keys or remove lists
 - blank-after-trim values in required fields
-- invalid `exec` or `reconcile.script` path forms (`.`, `..`, trailing separators)
+- invalid `exec` / script-path forms (`.`, `..`, trailing separators)
+- blank `reconcile.function` / `bashcomp.rhai_function` disables feature wiring
 
 Use `operational-spec.md` for full validation rules and precedence semantics.

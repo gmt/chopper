@@ -44,7 +44,8 @@ pub struct AliasJournalDoc {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AliasReconcileDoc {
-    pub script: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
 }
@@ -166,7 +167,7 @@ impl AliasDoc {
             }
         }
         if let Some(reconcile) = &self.reconcile {
-            validate_required_script_field(&reconcile.script, "`reconcile.script`")?;
+            validate_optional_script_field(reconcile.script.as_deref(), "`reconcile.script`")?;
             if let Some(function) = &reconcile.function {
                 if function.contains('\0') {
                     return Err(anyhow!("`reconcile.function` cannot contain NUL bytes"));
@@ -183,29 +184,10 @@ impl AliasDoc {
                 if function.contains('\0') {
                     return Err(anyhow!("`bashcomp.rhai_function` cannot contain NUL bytes"));
                 }
-                if !function.trim().is_empty()
-                    && !bashcomp
-                        .rhai_script
-                        .as_deref()
-                        .map(|value| !value.trim().is_empty())
-                        .unwrap_or(false)
-                {
-                    return Err(anyhow!(
-                        "`bashcomp.rhai_function` requires `bashcomp.rhai_script`"
-                    ));
-                }
             }
         }
         Ok(())
     }
-}
-
-fn validate_required_script_field(value: &str, field: &str) -> Result<()> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(anyhow!("{field} cannot be blank"));
-    }
-    validate_script_shape(trimmed, field)
 }
 
 fn validate_optional_script_field(value: Option<&str>, field: &str) -> Result<()> {
@@ -297,7 +279,7 @@ mod tests {
                 rate_limit_burst: None,
             }),
             reconcile: Some(AliasReconcileDoc {
-                script: "hooks/reconcile.rhai".to_string(),
+                script: Some("hooks/reconcile.rhai".to_string()),
                 function: Some("reconcile".to_string()),
             }),
             bashcomp: Some(AliasBashcompDoc {
@@ -356,22 +338,18 @@ mod tests {
     }
 
     #[test]
-    fn alias_doc_validation_rejects_blank_reconcile_script() {
+    fn alias_doc_validation_allows_blank_reconcile_script_for_method_wiring() {
         let mut doc = valid_doc();
         doc.reconcile = Some(AliasReconcileDoc {
-            script: "   ".to_string(),
+            script: Some("   ".to_string()),
             function: Some("reconcile".to_string()),
         });
-        let err = doc
-            .validate()
-            .expect_err("blank reconcile script should fail");
-        assert!(err
-            .to_string()
-            .contains("`reconcile.script` cannot be blank"));
+        doc.validate()
+            .expect("blank legacy reconcile script should be tolerated");
     }
 
     #[test]
-    fn alias_doc_validation_requires_rhai_script_when_function_set() {
+    fn alias_doc_validation_allows_rhai_function_without_rhai_script() {
         let mut doc = valid_doc();
         doc.bashcomp = Some(AliasBashcompDoc {
             disabled: false,
@@ -380,9 +358,7 @@ mod tests {
             rhai_script: None,
             rhai_function: Some("complete".to_string()),
         });
-        let err = doc
-            .validate()
-            .expect_err("rhai function without script should fail");
-        assert!(err.to_string().contains("requires `bashcomp.rhai_script`"));
+        doc.validate()
+            .expect("rhai function should be valid without legacy script field");
     }
 }

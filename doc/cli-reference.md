@@ -87,7 +87,8 @@ chopper --complete <alias> <cword> [--] <words...>
 Runs Rhai-based completion for the alias. `<cword>` is the 0-based index
 of the word being completed. `<words...>` is the full COMP_WORDS array.
 Prints one completion candidate per line. Exits 0 on success, 1 on error.
-Requires `bashcomp.rhai_script` to be configured for the alias.
+Requires `bashcomp.rhai_function` to be configured for the alias (script path
+is deterministic: `<alias>.rhai` beside alias TOML).
 
 ### Alias administration
 

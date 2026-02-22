@@ -18,7 +18,7 @@ various platforms.
   - process
   - web fetch
   - soap
-- **Completion profile** (`bashcomp.rhai_script` scripts):
+- **Completion profile** (when `bashcomp.rhai_function` is set in alias config):
   - platform
   - fs read-only (`fs_exists`, `fs_stat`, `fs_list`, `fs_read_text`)
   - process/web/soap are intentionally not exposed in completion hot-path.
