@@ -13,14 +13,6 @@ It is designed for:
 
 ---
 
-## Current implementation status
-
-Need a concise “what is done vs what remains” snapshot?
-
-- [`doc/project-status.md`](doc/project-status.md)
-
----
-
 ## Section map
 
 - [Install / run](#install--run)
@@ -187,35 +179,29 @@ are treated as unknown values and keep features enabled.
 
 ## Detailed documentation
 
-Use [`doc/start-here.md`](doc/start-here.md) if you're unsure where to begin.
-For full docs map, use [`doc/README.md`](doc/README.md).
+For a full docs map, see [`doc/README.md`](doc/README.md).
 
 Documentation by audience:
 
 | You are... | Start here |
 | --- | --- |
-| CLI user needing commands fast | [`doc/quick-reference.md`](doc/quick-reference.md) |
 | Operator debugging behavior | [`doc/troubleshooting.md`](doc/troubleshooting.md) |
-| User migrating legacy aliases | [`doc/migration.md`](doc/migration.md) |
 | User authoring alias files | [`doc/config-reference.md`](doc/config-reference.md) |
 | Contributor changing code | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 Fast routing:
 
-- command lookup: [`doc/quick-reference.md`](doc/quick-reference.md)
 - cli command details: [`doc/cli-reference.md`](doc/cli-reference.md)
 - Rhai facade API catalog: [`doc/rhai-facade-reference.md`](doc/rhai-facade-reference.md)
 - TUI usage: [`doc/tui-reference.md`](doc/tui-reference.md)
 - config field reference: [`doc/config-reference.md`](doc/config-reference.md)
 - copy/paste workflows: [`doc/examples.md`](doc/examples.md)
-- migration from legacy aliases: [`doc/migration.md`](doc/migration.md)
 - terminology lookup: [`doc/glossary.md`](doc/glossary.md)
 - troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
 - architecture overview: [`doc/architecture.md`](doc/architecture.md)
 - implementation decision rationale: [`doc/decision-log.md`](doc/decision-log.md)
 - local validation/testing commands: [`doc/testing.md`](doc/testing.md)
 - release prep checklist: [`doc/release-checklist.md`](doc/release-checklist.md)
-- implementation progress snapshot: [`doc/project-status.md`](doc/project-status.md)
 - complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
 
 Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
