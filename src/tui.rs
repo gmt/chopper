@@ -1267,13 +1267,14 @@ fn activate_method_editor_for_field(
 
     let (mut doc, doc_path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
     let rhai_path = crate::rhai_wiring::shared_rhai_path_for_alias_doc(&doc_path);
-    let before_methods = crate::rhai_wiring::read_compatible_methods(&rhai_path)?;
     let method_name = configured_method_name(&doc, field)
         .unwrap_or_else(|| default_method_name(field).to_string());
+    let method_kind = method_kind_for_field(field).expect("method field kind");
     set_configured_method_name(&mut doc, field, Some(method_name.clone()), &alias)?;
     crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    let before_methods =
+        seed_method_and_capture_before_methods(&rhai_path, &method_name, method_kind)?;
 
-    let method_kind = method_kind_for_field(field).expect("method field kind");
     pause_terminal_for_subprocess(terminal, || {
         crate::tui_nvim::open_rhai_editor_at_method_with_mode(
             &rhai_path,
@@ -1291,6 +1292,15 @@ fn activate_method_editor_for_field(
     invalidate_artifacts(state);
     refresh_aliases(state)?;
     Ok(())
+}
+
+fn seed_method_and_capture_before_methods(
+    rhai_path: &std::path::Path,
+    method_name: &str,
+    method_kind: crate::rhai_wiring::RhaiMethodKind,
+) -> anyhow::Result<Vec<String>> {
+    crate::rhai_wiring::ensure_method_exists(rhai_path, method_name, method_kind)?;
+    crate::rhai_wiring::read_compatible_methods(rhai_path)
 }
 
 fn apply_selected_alias_method_choice(
@@ -1328,6 +1338,9 @@ fn sync_configured_methods_after_edit(
 ) -> anyhow::Result<()> {
     for field in [TomlField::ReconcileFunction, TomlField::BashcompRhaiFunction] {
         let configured = configured_method_name(doc, field);
+        if configured.is_none() {
+            continue;
+        }
         let synced = crate::rhai_wiring::sync_method_after_edit(
             before_methods,
             after_methods,
@@ -2766,5 +2779,65 @@ mod tests {
         super::toggle_toml_field(&mut doc, TomlField::ReconcileEnabled, "demo")
             .expect("toggle off");
         assert!(doc.reconcile.is_none());
+    }
+
+    #[test]
+    fn new_rhai_file_method_rename_is_preserved_after_sync() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let rhai_path = temp.path().join("demo.rhai");
+
+        let before_methods = super::seed_method_and_capture_before_methods(
+            &rhai_path,
+            "reconcile",
+            crate::rhai_wiring::RhaiMethodKind::Reconcile,
+        )
+        .expect("seed before snapshot");
+        assert_eq!(before_methods, vec![String::from("reconcile")]);
+
+        // Simulate user renaming the seeded template method in the editor.
+        std::fs::write(&rhai_path, "fn custom_reconcile(ctx) {\n    #{}\n}\n")
+            .expect("write renamed method");
+        let after_methods =
+            crate::rhai_wiring::read_compatible_methods(&rhai_path).expect("read methods after edit");
+
+        let mut doc = crate::alias_admin::minimal_alias_doc();
+        super::set_configured_method_name(
+            &mut doc,
+            TomlField::ReconcileFunction,
+            Some(String::from("reconcile")),
+            "demo",
+        )
+        .expect("configure method");
+        super::sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, "demo")
+            .expect("sync method rename");
+        assert_eq!(
+            super::configured_method_name(&doc, TomlField::ReconcileFunction).as_deref(),
+            Some("custom_reconcile")
+        );
+        assert!(doc.bashcomp.is_none());
+    }
+
+    #[test]
+    fn sync_skips_unconfigured_method_fields() {
+        let before_methods = vec![String::from("reconcile")];
+        let after_methods = vec![String::from("custom_reconcile")];
+        let mut doc = crate::alias_admin::minimal_alias_doc();
+        super::set_configured_method_name(
+            &mut doc,
+            TomlField::ReconcileFunction,
+            Some(String::from("reconcile")),
+            "demo",
+        )
+        .expect("configure reconcile method");
+        assert!(doc.bashcomp.is_none());
+
+        super::sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, "demo")
+            .expect("sync method wiring");
+
+        assert_eq!(
+            super::configured_method_name(&doc, TomlField::ReconcileFunction).as_deref(),
+            Some("custom_reconcile")
+        );
+        assert!(doc.bashcomp.is_none());
     }
 }
