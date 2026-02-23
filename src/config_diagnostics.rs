@@ -89,97 +89,13 @@ pub(crate) fn manifest_missing_target_warnings(manifest: &Manifest) -> Vec<Strin
     warnings
 }
 
-pub(crate) fn scan_legacy_script_field_warnings(config_root: &Path) -> Vec<String> {
-    let mut warnings = Vec::new();
-    collect_legacy_script_warnings(&config_root.join("aliases"), &mut warnings);
-    collect_legacy_script_warnings(config_root, &mut warnings);
-    warnings.sort();
-    warnings.dedup();
-    warnings
-}
-
-pub(crate) fn legacy_script_field_warnings_for_path(path: &Path) -> Vec<String> {
-    let mut warnings = Vec::new();
-    append_legacy_script_warnings_for_file(path, &mut warnings);
-    warnings
-}
-
 fn path_is_explicit(path: &Path) -> bool {
     path.is_absolute() || path.components().count() > 1
 }
 
-fn collect_legacy_script_warnings(dir: &Path, warnings: &mut Vec<String>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
-        Err(err) => {
-            warnings.push(format!("could not scan {}: {err}", dir.display()));
-            return;
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(err) => {
-                warnings.push(format!("could not read entry in {}: {err}", dir.display()));
-                continue;
-            }
-        };
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let is_toml = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("toml"))
-            .unwrap_or(false);
-        if !is_toml {
-            continue;
-        }
-        append_legacy_script_warnings_for_file(&path, warnings);
-    }
-}
-
-fn append_legacy_script_warnings_for_file(path: &Path, warnings: &mut Vec<String>) {
-    let doc = match crate::alias_doc::load_alias_doc(path) {
-        Ok(doc) => doc,
-        Err(_) => return,
-    };
-    let has_legacy_reconcile_script = doc
-        .reconcile
-        .as_ref()
-        .and_then(|reconcile| reconcile.script.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some();
-    if has_legacy_reconcile_script {
-        warnings.push(format!(
-            "legacy field `reconcile.script` is ignored: {}",
-            path.display()
-        ));
-    }
-    let has_legacy_bashcomp_rhai_script = doc
-        .bashcomp
-        .as_ref()
-        .and_then(|bashcomp| bashcomp.rhai_script.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some();
-    if has_legacy_bashcomp_rhai_script {
-        warnings.push(format!(
-            "legacy field `bashcomp.rhai_script` is ignored: {}",
-            path.display()
-        ));
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        legacy_script_field_warnings_for_path, manifest_missing_target_warnings,
-        scan_extension_warnings, scan_legacy_script_field_warnings,
-    };
+    use super::{manifest_missing_target_warnings, scan_extension_warnings};
     use crate::manifest::{BashcompConfig, Manifest, ReconcileConfig};
     use std::fs;
     use std::path::PathBuf;
@@ -223,49 +139,5 @@ mod tests {
                 .all(|warning| !warning.contains("missing-binary-name")),
             "{warnings:?}"
         );
-    }
-
-    #[test]
-    fn scan_legacy_script_field_warnings_flags_ignored_fields() {
-        let temp = TempDir::new().expect("tempdir");
-        let aliases_dir = temp.path().join("aliases");
-        fs::create_dir_all(&aliases_dir).expect("create aliases dir");
-        fs::write(
-            aliases_dir.join("legacy.toml"),
-            r#"
-exec = "echo"
-[reconcile]
-script = "legacy.rhai"
-function = "reconcile"
-[bashcomp]
-rhai_script = "legacy-complete.rhai"
-rhai_function = "complete"
-"#,
-        )
-        .expect("write legacy file");
-
-        let warnings = scan_legacy_script_field_warnings(temp.path());
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-        assert!(warnings.iter().any(|w| w.contains("reconcile.script")));
-        assert!(warnings.iter().any(|w| w.contains("bashcomp.rhai_script")));
-    }
-
-    #[test]
-    fn legacy_script_field_warnings_for_path_reports_single_alias_file() {
-        let temp = TempDir::new().expect("tempdir");
-        let alias_path = temp.path().join("demo.toml");
-        fs::write(
-            &alias_path,
-            r#"
-exec = "echo"
-[reconcile]
-script = "legacy.rhai"
-function = "reconcile"
-"#,
-        )
-        .expect("write alias");
-        let warnings = legacy_script_field_warnings_for_path(&alias_path);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(warnings[0].contains("reconcile.script"));
     }
 }

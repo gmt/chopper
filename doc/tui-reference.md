@@ -6,15 +6,6 @@ The TUI is launched with:
 chopper --tui
 ```
 
-Optional tmux policy flags:
-
-```bash
-chopper --tui --tmux=auto
-chopper --tui --tmux=on
-chopper --tui --tmux=off
-chopper --tui --no-tmux
-```
-
 It requires an interactive terminal (TTY).
 
 ---
@@ -69,7 +60,7 @@ scrollbar indicates overflow.
 
 ---
 
-## Editor integration and tmux behavior
+## Editor integration
 
 Editing actions:
 
@@ -85,18 +76,8 @@ Editing actions:
   - removed configured method -> field is cleared (auto-unwire)
   - single-method rename detection rewires automatically
 
-External edit actions use `nvim` (preferred) or `vim` (fallback).
-
-`--tmux` policy:
-
-- `auto` (default):
-  - if inside tmux, open editor directly in the current pane (no split pane)
-  - if not inside tmux and no tmux server is running, open editor in a fresh tmux session
-  - if not inside tmux and a tmux server is already running, avoid creating a second session and use direct editor launch
-- `on`:
-  - require tmux; use direct launch inside tmux or a dedicated tmux session outside tmux
-- `off` / `--no-tmux`:
-  - always use direct editor launch (tmuxless)
+External edit actions use `nvim` (preferred) or `vim` (fallback), launched
+directly in the current terminal context.
 
 If neither `nvim` nor `vim` exists in `PATH`, TUI editing returns an error.
 

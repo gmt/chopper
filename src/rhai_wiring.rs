@@ -29,8 +29,8 @@ pub(crate) fn read_compatible_methods(path: &Path) -> Result<Vec<String>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let source =
-        fs_err::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let source = fs_err::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     Ok(parse_compatible_methods(&source))
 }
 
@@ -44,7 +44,11 @@ pub(crate) fn parse_compatible_methods(source: &str) -> Vec<String> {
     names.into_iter().collect()
 }
 
-pub(crate) fn ensure_method_exists(path: &Path, method_name: &str, kind: RhaiMethodKind) -> Result<()> {
+pub(crate) fn ensure_method_exists(
+    path: &Path,
+    method_name: &str,
+    kind: RhaiMethodKind,
+) -> Result<()> {
     let method_name = normalize_method_name(method_name)?;
     if let Some(parent) = path.parent() {
         fs_err::create_dir_all(parent)
@@ -55,8 +59,8 @@ pub(crate) fn ensure_method_exists(path: &Path, method_name: &str, kind: RhaiMet
             .with_context(|| format!("failed to write {}", path.display()))?;
         return Ok(());
     }
-    let source =
-        fs_err::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let source = fs_err::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let methods = parse_compatible_methods(&source);
     if methods.iter().any(|candidate| candidate == method_name) {
         return Ok(());
@@ -89,8 +93,8 @@ pub(crate) fn rename_method_or_create(
         return Ok(());
     }
 
-    let source =
-        fs_err::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let source = fs_err::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let old_name = old_name.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -188,7 +192,11 @@ fn parse_method_decl_line(line: &str) -> Option<&str> {
     }
 }
 
-fn rename_method_declaration_in_source(source: &str, old_name: &str, new_name: &str) -> Option<String> {
+fn rename_method_declaration_in_source(
+    source: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Option<String> {
     if !is_valid_method_identifier(old_name) || !is_valid_method_identifier(new_name) {
         return None;
     }
@@ -209,7 +217,8 @@ fn rename_method_declaration_in_source(source: &str, old_name: &str, new_name: &
     }
 
     let target = match_indices[0];
-    let mut rebuilt = String::with_capacity(source.len() + new_name.len().saturating_sub(old_name.len()));
+    let mut rebuilt =
+        String::with_capacity(source.len() + new_name.len().saturating_sub(old_name.len()));
     for (idx, segment) in source.split_inclusive('\n').enumerate() {
         if idx != target {
             rebuilt.push_str(segment);

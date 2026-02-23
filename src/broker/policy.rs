@@ -173,15 +173,15 @@ mod tests {
 
     #[test]
     fn ownership_validation_rejects_empty_logical_name() {
-        let err = validate_namespace_ownership("u1000-", 1000)
-            .expect_err("should reject empty suffix");
+        let err =
+            validate_namespace_ownership("u1000-", 1000).expect_err("should reject empty suffix");
         assert!(err.to_string().contains("no logical name"), "{err}");
     }
 
     #[test]
     fn ownership_validation_rejects_nul_bytes() {
-        let err = validate_namespace_ownership("u1000-alice\0ops", 1000)
-            .expect_err("should reject NUL");
+        let err =
+            validate_namespace_ownership("u1000-alice\0ops", 1000).expect_err("should reject NUL");
         assert!(err.to_string().contains("NUL"), "{err}");
     }
 
@@ -216,7 +216,10 @@ mod tests {
     fn clamp_options_clamps_rate_limit_interval() {
         let opts = HashMap::from([("rate_limit_interval_usec".into(), "100".into())]);
         let config = clamp_journal_options(&opts);
-        assert_eq!(config.rate_limit_interval_usec, MIN_RATE_LIMIT_INTERVAL_USEC);
+        assert_eq!(
+            config.rate_limit_interval_usec,
+            MIN_RATE_LIMIT_INTERVAL_USEC
+        );
     }
 
     #[test]
@@ -234,10 +237,7 @@ mod tests {
         assert_eq!(parse_and_clamp_size("256M", u64::MAX), Some("256M".into()));
         assert_eq!(parse_and_clamp_size("1G", u64::MAX), Some("1G".into()));
         assert_eq!(parse_and_clamp_size("1024K", u64::MAX), Some("1M".into()));
-        assert_eq!(
-            parse_and_clamp_size("1048576", u64::MAX),
-            Some("1M".into())
-        );
+        assert_eq!(parse_and_clamp_size("1048576", u64::MAX), Some("1M".into()));
     }
 
     #[test]

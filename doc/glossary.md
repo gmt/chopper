@@ -9,8 +9,8 @@ under `aliases/<name>.toml`.
 
 ## Direct mode
 
-Invocation form where executable name is `chopper` (or recognized wrapper
-variants like `chopper.exe`) and alias name is provided as first positional arg.
+Invocation form where executable name is `chopper` and alias name is provided
+as first positional arg.
 
 ## Symlink mode
 

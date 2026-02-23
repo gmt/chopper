@@ -81,13 +81,12 @@ High-level map of the runtime flow and main modules.
   - builds context map, calls Rhai function, returns candidate strings
   - opt-in per-alias (requires `bashcomp.rhai_function`; script path is deterministic `<alias>.rhai`)
 - `src/alias_admin.rs` / `src/alias_doc.rs`
-  - alias lifecycle operations (`--alias list|get|add|set|remove`)
+  - alias lifecycle operations (`--alias get|add|set|remove`, plus `--list-aliases`)
   - mutation parsing/validation and TOML persistence for managed aliases
 - `src/tui.rs` / `src/tui_nvim.rs`
   - alias-first interactive terminal UI (`--tui`) with event-driven key handling
   - ratatui frame rendering on a crossterm backend with content-driven split/modal fallback, compact tab chrome, and alias-list scrollbar support
-  - editor launch orchestration with tmux policy (`auto|on|off`) using direct current-pane editing inside tmux and session/tmuxless fallback outside
-  - `(n)vim` launch/bootstrap and Rhai API completion dictionary generation for Rhai editing
+  - direct `(n)vim` launch/bootstrap and Rhai API completion dictionary generation for Rhai editing
 
 - validation helpers
   - `alias_validation.rs`

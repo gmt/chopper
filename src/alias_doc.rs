@@ -160,9 +160,7 @@ impl AliasDoc {
             }
             if let Some(interval) = journal.rate_limit_interval_usec {
                 if interval == 0 {
-                    return Err(anyhow!(
-                        "`journal.rate_limit_interval_usec` must be > 0"
-                    ));
+                    return Err(anyhow!("`journal.rate_limit_interval_usec` must be > 0"));
                 }
             }
         }
@@ -208,7 +206,7 @@ fn validate_script_shape(trimmed: &str, field: &str) -> Result<()> {
     if trimmed == "." || trimmed == ".." {
         return Err(anyhow!("{field} cannot be `.` or `..`"));
     }
-    if trimmed.ends_with('/') || trimmed.ends_with('\\') {
+    if trimmed.ends_with('/') {
         return Err(anyhow!("{field} cannot end with a path separator"));
     }
     if ends_with_dot_component(trimmed) {
@@ -225,14 +223,11 @@ fn validate_script_shape(trimmed: &str, field: &str) -> Result<()> {
 }
 
 fn has_meaningful_relative_segment(value: &str) -> bool {
-    value
-        .split(['/', '\\'])
-        .any(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+    crate::path_validation::has_meaningful_relative_segment(value)
 }
 
 fn ends_with_dot_component(value: &str) -> bool {
-    let trimmed = value.trim_end_matches(['/', '\\']);
-    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
+    crate::path_validation::ends_with_dot_component(value)
 }
 
 pub fn load_alias_doc(path: &Path) -> Result<AliasDoc> {

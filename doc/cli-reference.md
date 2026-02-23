@@ -38,7 +38,7 @@ chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
-chopper --alias <list|get|add|set|remove> ...
+chopper --alias <get|add|set|remove> ...
 chopper --tui
 ```
 
@@ -93,7 +93,6 @@ is deterministic: `<alias>.rhai` beside alias TOML).
 ### Alias administration
 
 ```bash
-chopper --alias list
 chopper --alias get <alias>
 chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...]
 chopper --alias set <alias> [--exec <command>] [--arg <arg> ...] [--env KEY=VALUE ...]
@@ -104,6 +103,7 @@ Notes:
 
 - `add` creates `aliases/<alias>.toml`.
 - `set` updates TOML alias documents.
+- use `chopper --list-aliases` to enumerate aliases.
 - `add` / `set` journal flags include:
   - `--journal-namespace <value>`
   - `--journal-stderr <true|false>`

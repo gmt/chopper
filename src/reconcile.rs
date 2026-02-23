@@ -344,8 +344,7 @@ fn reconcile(_ctx) {
     ],
     append_args: [
       "$DOLLAR",
-      "brace{value}",
-      "windows\\path"
+      "brace{value}"
     ]
   }
 }
@@ -372,11 +371,7 @@ fn reconcile(_ctx) {
         );
         assert_eq!(
             patch.append_args,
-            vec![
-                "$DOLLAR".to_string(),
-                "brace{value}".to_string(),
-                r"windows\path".to_string()
-            ]
+            vec!["$DOLLAR".to_string(), "brace{value}".to_string(),]
         );
     }
 
@@ -438,8 +433,7 @@ fn reconcile(_ctx) {
       "CHOPPER_REL": "../relative/path",
       "CHOPPER_SHELL": "semi;colon&and",
       "CHOPPER_DOLLAR": "$DOLLAR",
-      " CHOPPER_BRACE ": "brace{value}",
-      "CHOPPER_WIN": "windows\\path"
+      " CHOPPER_BRACE ": "brace{value}"
     }
   }
 }
@@ -476,10 +470,6 @@ fn reconcile(_ctx) {
             patch.set_env.get("CHOPPER_BRACE"),
             Some(&"brace{value}".to_string())
         );
-        assert_eq!(
-            patch.set_env.get("CHOPPER_WIN"),
-            Some(&r"windows\path".to_string())
-        );
     }
 
     #[test]
@@ -496,8 +486,7 @@ fn reconcile(_ctx) {
     set_env: #{
       " KEY-WITH-DASH ": "dash",
       "KEY.WITH.DOT": "dot",
-      "KEY/WITH/SLASH": "slash",
-      "KEY\\WITH\\BACKSLASH": "backslash"
+      "KEY/WITH/SLASH": "slash"
     }
   }
 }
@@ -522,10 +511,6 @@ fn reconcile(_ctx) {
         assert_eq!(
             patch.set_env.get("KEY/WITH/SLASH"),
             Some(&"slash".to_string())
-        );
-        assert_eq!(
-            patch.set_env.get(r"KEY\WITH\BACKSLASH"),
-            Some(&"backslash".to_string())
         );
     }
 
@@ -805,7 +790,6 @@ fn reconcile(_ctx) {
       " KEY-WITH-DASH ",
       "KEY.WITH.DOT",
       "KEY/WITH/SLASH",
-      "KEY\\WITH\\BACKSLASH",
       "KEY/WITH/SLASH"
     ]
   }
@@ -829,7 +813,6 @@ fn reconcile(_ctx) {
                 "KEY-WITH-DASH".to_string(),
                 "KEY.WITH.DOT".to_string(),
                 "KEY/WITH/SLASH".to_string(),
-                r"KEY\WITH\BACKSLASH".to_string()
             ]
         );
     }

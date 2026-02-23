@@ -48,7 +48,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec == "." || exec == ".." {
         return Err(anyhow!("field `exec` cannot be `.` or `..`"));
     }
-    if exec.ends_with('/') || exec.ends_with('\\') {
+    if exec.ends_with('/') {
         return Err(anyhow!("field `exec` cannot end with a path separator"));
     }
     if ends_with_dot_component(exec) {
@@ -111,9 +111,10 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
             validate_optional_script_value(script, "field `reconcile.script`")?;
         }
 
-        if let Some(function) =
-            normalize_optional_method_name(reconcile.function.as_deref(), "field `reconcile.function`")?
-        {
+        if let Some(function) = normalize_optional_method_name(
+            reconcile.function.as_deref(),
+            "field `reconcile.function`",
+        )? {
             manifest = manifest.with_reconcile(ReconcileConfig {
                 script: shared_rhai_path_for_alias_doc(path),
                 function,
@@ -133,7 +134,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
                 if script == "." || script == ".." {
                     return Err(anyhow!("field `bashcomp.script` cannot be `.` or `..`"));
                 }
-                if script.ends_with('/') || script.ends_with('\\') {
+                if script.ends_with('/') {
                     return Err(anyhow!(
                         "field `bashcomp.script` cannot end with a path separator"
                     ));
@@ -282,7 +283,7 @@ fn validate_optional_script_value(value: &str, field: &str) -> Result<()> {
     if trimmed == "." || trimmed == ".." {
         return Err(anyhow!("{field} cannot be `.` or `..`"));
     }
-    if trimmed.ends_with('/') || trimmed.ends_with('\\') {
+    if trimmed.ends_with('/') {
         return Err(anyhow!("{field} cannot end with a path separator"));
     }
     if ends_with_dot_component(trimmed) {
@@ -338,19 +339,15 @@ fn looks_like_relative_exec_path(exec: &str) -> bool {
         && (exec == "."
             || exec == ".."
             || exec.contains('/')
-            || exec.contains('\\')
             || exec.contains(std::path::MAIN_SEPARATOR))
 }
 
 fn has_meaningful_relative_segment(value: &str) -> bool {
-    value
-        .split(['/', '\\'])
-        .any(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+    crate::path_validation::has_meaningful_relative_segment(value)
 }
 
 fn ends_with_dot_component(value: &str) -> bool {
-    let trimmed = value.trim_end_matches(['/', '\\']);
-    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
+    crate::path_validation::ends_with_dot_component(value)
 }
 
 #[derive(Debug, Deserialize)]
@@ -607,8 +604,7 @@ args = [
   "../relative/path",
   "semi;colon&and",
   "$DOLLAR",
-  "brace{value}",
-  'windows\path'
+  "brace{value}"
 ]
 "#,
         )
@@ -623,7 +619,6 @@ args = [
                 "semi;colon&and".to_string(),
                 "$DOLLAR".to_string(),
                 "brace{value}".to_string(),
-                r"windows\path".to_string()
             ]
         );
     }
@@ -744,42 +739,6 @@ exec = "./bin/"
             &config,
             r#"
 exec = "/usr/bin/"
-"#,
-        )
-        .expect("write toml");
-
-        let err = parse(&config).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("field `exec` cannot end with a path separator"));
-    }
-
-    #[test]
-    fn rejects_absolute_trailing_backslash_exec_field_in_toml() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config = temp.path().join("bad.toml");
-        fs::write(
-            &config,
-            r#"
-exec = '/usr/bin\'
-"#,
-        )
-        .expect("write toml");
-
-        let err = parse(&config).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("field `exec` cannot end with a path separator"));
-    }
-
-    #[test]
-    fn rejects_dot_backslash_exec_field_in_toml() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config = temp.path().join("bad.toml");
-        fs::write(
-            &config,
-            r#"
-exec = '.\'
 "#,
         )
         .expect("write toml");
@@ -1084,48 +1043,6 @@ script = "/tmp/"
     }
 
     #[test]
-    fn rejects_absolute_trailing_backslash_reconcile_script_field() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config = temp.path().join("bad.toml");
-        fs::write(
-            &config,
-            r#"
-exec = "echo"
-
-[reconcile]
-script = '/tmp\'
-"#,
-        )
-        .expect("write toml");
-
-        let err = parse(&config).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("field `reconcile.script` cannot end with a path separator"));
-    }
-
-    #[test]
-    fn rejects_dot_backslash_reconcile_script_field() {
-        let temp = TempDir::new().expect("create tempdir");
-        let config = temp.path().join("bad.toml");
-        fs::write(
-            &config,
-            r#"
-exec = "echo"
-
-[reconcile]
-script = '.\'
-"#,
-        )
-        .expect("write toml");
-
-        let err = parse(&config).expect_err("expected parse failure");
-        assert!(err
-            .to_string()
-            .contains("field `reconcile.script` cannot end with a path separator"));
-    }
-
-    #[test]
     fn trims_exec_and_journal_fields() -> Result<()> {
         let temp = TempDir::new()?;
         let config = temp.path().join("trimmed.toml");
@@ -1314,7 +1231,6 @@ env_remove = [
   " KEY-WITH-DASH ",
   "KEY.WITH.DOT",
   "KEY/WITH/SLASH",
-  'KEY\WITH\BACKSLASH',
   "KEY/WITH/SLASH"
 ]
 "#,
@@ -1327,7 +1243,6 @@ env_remove = [
                 "KEY-WITH-DASH".to_string(),
                 "KEY.WITH.DOT".to_string(),
                 "KEY/WITH/SLASH".to_string(),
-                r"KEY\WITH\BACKSLASH".to_string()
             ]
         );
         Ok(())
@@ -1348,7 +1263,6 @@ CHOPPER_REL = "../relative/path"
 CHOPPER_SHELL = "semi;colon&and"
 CHOPPER_DOLLAR = "$DOLLAR"
 " CHOPPER_BRACE " = "brace{value}"
-CHOPPER_WIN = 'windows\path'
 "#,
         )?;
 
@@ -1373,10 +1287,6 @@ CHOPPER_WIN = 'windows\path'
             manifest.env.get("CHOPPER_BRACE").map(String::as_str),
             Some("brace{value}")
         );
-        assert_eq!(
-            manifest.env.get("CHOPPER_WIN").map(String::as_str),
-            Some(r"windows\path")
-        );
         Ok(())
     }
 
@@ -1393,7 +1303,6 @@ exec = "echo"
 " KEY-WITH-DASH " = "dash"
 "KEY.WITH.DOT" = "dot"
 "KEY/WITH/SLASH" = "slash"
-"KEY\\WITH\\BACKSLASH" = "backslash"
 "#,
         )?;
 
@@ -1409,10 +1318,6 @@ exec = "echo"
         assert_eq!(
             manifest.env.get("KEY/WITH/SLASH").map(String::as_str),
             Some("slash")
-        );
-        assert_eq!(
-            manifest.env.get(r"KEY\WITH\BACKSLASH").map(String::as_str),
-            Some("backslash")
         );
         Ok(())
     }
@@ -1795,7 +1700,6 @@ exec = "../bin/runner"
         assert!(looks_like_relative_exec_path("./bin/runner"));
         assert!(looks_like_relative_exec_path("../bin/runner"));
         assert!(looks_like_relative_exec_path("bin/runner"));
-        assert!(looks_like_relative_exec_path("bin\\runner"));
 
         assert!(!looks_like_relative_exec_path("echo"));
         assert!(!looks_like_relative_exec_path("kubectl.prod"));
@@ -2105,10 +2009,7 @@ rhai_function = "my_completer"
 
         let manifest = parse(&config)?;
         let bashcomp = manifest.bashcomp.expect("bashcomp config");
-        assert_eq!(
-            bashcomp.rhai_script,
-            Some(temp.path().join("bc.rhai"))
-        );
+        assert_eq!(bashcomp.rhai_script, Some(temp.path().join("bc.rhai")));
         assert_eq!(bashcomp.rhai_function, Some("my_completer".to_string()));
         Ok(())
     }

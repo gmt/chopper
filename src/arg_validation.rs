@@ -4,7 +4,10 @@ pub enum ArgViolation {
 }
 
 pub fn validate_arg_value(value: &str) -> Result<(), ArgViolation> {
-    if value.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(value),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(ArgViolation::ContainsNul);
     }
     Ok(())

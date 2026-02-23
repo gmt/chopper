@@ -46,11 +46,7 @@ mod tests {
     #[test]
     fn reconcile_profile_exposes_full_facade_set() {
         let engine = build_engine(RhaiEngineProfile::Reconcile);
-        let expr = if cfg!(windows) {
-            "proc_run(\"cmd\", [\"/C\", \"echo hi\"], 1000)"
-        } else {
-            "proc_run(\"sh\", [\"-c\", \"echo hi\"], 1000)"
-        };
+        let expr = "proc_run(\"sh\", [\"-c\", \"echo hi\"], 1000)";
         let proc_call = engine
             .eval::<Map>(expr)
             .expect("reconcile profile should expose process APIs");

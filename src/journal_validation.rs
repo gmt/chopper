@@ -9,7 +9,10 @@ pub fn normalize_namespace(value: &str) -> Result<String, JournalNamespaceViolat
     if namespace.is_empty() {
         return Err(JournalNamespaceViolation::Empty);
     }
-    if namespace.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(namespace),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(JournalNamespaceViolation::ContainsNul);
     }
     Ok(namespace.to_string())
@@ -31,7 +34,10 @@ pub fn normalize_optional_identifier_for_config(
     if identifier.is_empty() {
         return Ok(None);
     }
-    if identifier.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(identifier),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(JournalIdentifierViolation::ContainsNul);
     }
     Ok(Some(identifier.to_string()))
@@ -66,7 +72,10 @@ pub fn validate_max_use(value: &str) -> Result<String, MaxUseViolation> {
     if trimmed.is_empty() {
         return Err(MaxUseViolation::Empty);
     }
-    if trimmed.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(trimmed),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(MaxUseViolation::ContainsNul);
     }
     let upper = trimmed.to_ascii_uppercase();
@@ -193,10 +202,7 @@ mod tests {
 
     #[test]
     fn max_use_validation_accepts_valid_sizes() {
-        assert_eq!(
-            super::validate_max_use("256M"),
-            Ok("256M".to_string())
-        );
+        assert_eq!(super::validate_max_use("256M"), Ok("256M".to_string()));
         assert_eq!(super::validate_max_use("1G"), Ok("1G".to_string()));
         assert_eq!(super::validate_max_use("1024K"), Ok("1024K".to_string()));
         assert_eq!(
@@ -207,10 +213,7 @@ mod tests {
 
     #[test]
     fn max_use_validation_trims_whitespace() {
-        assert_eq!(
-            super::validate_max_use("  256M  "),
-            Ok("256M".to_string())
-        );
+        assert_eq!(super::validate_max_use("  256M  "), Ok("256M".to_string()));
     }
 
     #[test]
