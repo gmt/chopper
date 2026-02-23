@@ -678,6 +678,20 @@ exec = "bin/.."
     }
 
     #[test]
+    fn rejects_exec_field_ending_in_dot_component_with_platform_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        let sep = std::path::MAIN_SEPARATOR;
+        let exec = format!("bin{sep}..");
+        fs::write(&config, format!("exec = '{exec}'\n")).expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot end with `.` or `..` path components"));
+    }
+
+    #[test]
     fn rejects_absolute_exec_field_ending_in_dot_component() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -1695,11 +1709,15 @@ exec = "../bin/runner"
 
     #[test]
     fn detects_path_like_relative_exec_tokens() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let with_platform_sep = format!(".{sep}bin{sep}runner");
+
         assert!(looks_like_relative_exec_path("."));
         assert!(looks_like_relative_exec_path(".."));
         assert!(looks_like_relative_exec_path("./bin/runner"));
         assert!(looks_like_relative_exec_path("../bin/runner"));
         assert!(looks_like_relative_exec_path("bin/runner"));
+        assert!(looks_like_relative_exec_path(&with_platform_sep));
 
         assert!(!looks_like_relative_exec_path("echo"));
         assert!(!looks_like_relative_exec_path("kubectl.prod"));
