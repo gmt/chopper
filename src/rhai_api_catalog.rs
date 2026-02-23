@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 pub fn exported_api_names() -> Vec<&'static str> {
     vec![
         "runtime_args",
@@ -10,7 +9,6 @@ pub fn exported_api_names() -> Vec<&'static str> {
         "current",
         "exec",
         "platform_info",
-        "platform_is_windows",
         "platform_is_unix",
         "executable_intent",
         "can_execute_without_confirmation",

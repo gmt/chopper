@@ -9,7 +9,10 @@ pub fn facade_error(message: impl Into<String>) -> Box<EvalAltResult> {
 }
 
 pub fn ensure_no_nul(field: &str, value: &str) -> RhaiResult<()> {
-    if value.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(value),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(facade_error(format!("{field} cannot contain NUL bytes")));
     }
     Ok(())

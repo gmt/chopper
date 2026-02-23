@@ -37,13 +37,8 @@ pub fn write_journal_drop_in(namespace: &str, config: &JournalDropInConfig) -> R
             .with_context(|| format!("failed to sync temp file {}", tmp.display()))?;
     }
 
-    fs::rename(&tmp, &target).with_context(|| {
-        format!(
-            "failed to rename {} -> {}",
-            tmp.display(),
-            target.display()
-        )
-    })?;
+    fs::rename(&tmp, &target)
+        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), target.display()))?;
 
     Ok(())
 }

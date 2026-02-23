@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn env_path_override_preserves_symbolic_and_windows_like_shapes() {
+    fn env_path_override_preserves_symbolic_path_shapes() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
 
         env::set_var("CHOPPER_TEST_PATH", "\n\t/tmp/chopper symbolic/@v1\t\n");
@@ -151,55 +151,16 @@ mod tests {
             Some(PathBuf::from("/tmp/chopper symbolic/@v1"))
         );
 
-        env::set_var("CHOPPER_TEST_PATH", r" C:\Users\me\AppData\Local\chopper ");
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from(r"C:\Users\me\AppData\Local\chopper"))
-        );
-
         env::set_var("CHOPPER_TEST_PATH", "./relative path/@v1");
         assert_eq!(
             env_path_override("CHOPPER_TEST_PATH"),
             Some(PathBuf::from("./relative path/@v1"))
         );
 
-        env::set_var(
-            "CHOPPER_TEST_PATH",
-            r" \\server\share\chopper symbolic\cache@v2 ",
-        );
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from(r"\\server\share\chopper symbolic\cache@v2"))
-        );
-
-        env::set_var("CHOPPER_TEST_PATH", r" ..\parent\cfg @v3 ");
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from(r"..\parent\cfg @v3"))
-        );
-
-        env::set_var("CHOPPER_TEST_PATH", r" /tmp\mixed/windows@v4 ");
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from(r"/tmp\mixed/windows@v4"))
-        );
-
         env::set_var("CHOPPER_TEST_PATH", " /tmp/chopper trailing/ ");
         assert_eq!(
             env_path_override("CHOPPER_TEST_PATH"),
             Some(PathBuf::from("/tmp/chopper trailing/"))
-        );
-
-        env::set_var("CHOPPER_TEST_PATH", " C:\\tmp\\chopper trailing\\ ");
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from("C:\\tmp\\chopper trailing\\"))
-        );
-
-        env::set_var("CHOPPER_TEST_PATH", "\r\n/tmp/chopper crlf/@v5\r\n");
-        assert_eq!(
-            env_path_override("CHOPPER_TEST_PATH"),
-            Some(PathBuf::from("/tmp/chopper crlf/@v5"))
         );
 
         env::remove_var("CHOPPER_TEST_PATH");

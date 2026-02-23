@@ -58,39 +58,16 @@ chopper --list-aliases
 chopper --print-exec <alias>
 chopper --print-bashcomp-mode <alias>
 chopper --complete <alias> <cword> [--] <words...>
-chopper --alias <list|get|add|set|remove> ...
-chopper --tui [--tmux=<auto|on|off>] [--no-tmux]
+chopper --alias <get|add|set|remove> ...
+chopper --tui
 ```
 
-A binary named `chopper.exe`, `chopper.com`, `chopper.cmd`, or `chopper.bat`
-is treated the same as `chopper` for direct invocation and built-in detection
-(including when `argv[0]` is provided as a full path with `/` or `\`
-separators). This executable-name detection is ASCII case-insensitive
-(`chopper`, `CHOPPER`, `CHOPPER.EXE`, `CHOPPER.COM`, `CHOPPER.CMD`,
-`CHOPPER.BAT`, etc.).
-
-Windows-relative launcher shapes such as `.\CHOPPER.CMD` and
-`..\CHOPPER.BAT` are also treated as direct invocation names. UNC-style
-launcher paths such as `\\server\tools\CHOPPER.COM` are treated the same way.
-Drive-letter launcher paths like `C:\tools\CHOPPER.EXE` are likewise treated
-as direct invocation names. Unix-relative launcher paths such as
-`./CHOPPER.COM` and `../CHOPPER.CMD` are also treated as direct invocation
-names.
-
-Equivalent forward-slash Windows spellings (for example
-`C:/tools/CHOPPER.CMD` and `//server/tools/CHOPPER.COM`) are recognized as
-well. Mixed-separator launcher paths (for example `C:/tools\CHOPPER.COM` and
-`\\server/tools\CHOPPER.BAT`) are recognized too. Nested relative variants
-with mixed separators (for example `./nested\CHOPPER.CMD`) are recognized as
-direct invocation names as well. Trailing path separators on launcher paths
-(for example `C:/tools/CHOPPER.CMD/`) are tolerated for direct invocation
-detection. Mixed absolute forms that combine Unix and Windows separators (for
-example `/tmp\CHOPPER.CMD`, `/tmp\CHOPPER`, or `/tmp\CHOPPER/`) are also
-recognized.
+Direct invocation detection matches `chopper` (case-insensitive). Any other
+basename is treated as symlink invocation mode.
 
 Built-ins are single-action commands. Additional positional tokens are normally
 treated as regular alias parsing input and therefore should not be provided.
-`--tui` is the exception and accepts TUI option flags only.
+`--tui` accepts no additional option flags.
 
 1. **Symlinked alias**:
 
@@ -339,7 +316,6 @@ Examples that **leave reconcile enabled**:
 `chopper` includes an alias lifecycle command family:
 
 ```bash
-chopper --alias list
 chopper --alias get <alias>
 chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...]
 chopper --alias set <alias> [--exec <command>] [--arg <arg> ...] [--env KEY=VALUE ...]
@@ -424,15 +400,6 @@ Editing behavior:
 - Alias lifecycle actions are available in TUI (`new`, `rename`, `duplicate`,
   `delete`) via prompt-driven controls. Delete prompt supports a `keep configs`
   toggle (`k`) to switch between clean removal and symlink-only removal.
-- `--tmux=auto` (default) uses tmux only when appropriate:
-  - inside tmux: launches editor directly in the current pane (no split pane)
-  - outside tmux with no running server: launches a dedicated tmux session
-  - outside tmux with an already-running server: avoids creating a second
-    session and falls back to direct (tmuxless) editor launch
-- `--tmux=on` forces tmux use and errors when tmux is unavailable; inside tmux
-  it uses direct launch in the active pane.
-- `--tmux=off` and `--no-tmux` force tmuxless editor launch.
-
 Rhai script editing remains available through the same `(n)vim` integration,
 including completion dictionary generation from exposed facade API names.
 

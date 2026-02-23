@@ -21,15 +21,11 @@ const SPLIT_MIN_HEIGHT: u16 = 3;
 type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TuiOptions {
-    pub(crate) tmux_mode: crate::tui_nvim::TmuxMode,
-}
+pub(crate) struct TuiOptions;
 
 impl Default for TuiOptions {
     fn default() -> Self {
-        Self {
-            tmux_mode: crate::tui_nvim::TmuxMode::Auto,
-        }
+        Self
     }
 }
 
@@ -233,7 +229,6 @@ struct AppState {
     pending_method_editor: Option<TomlField>,
     alert_message: Option<String>,
     diagnostics: Vec<String>,
-    tmux_mode: crate::tui_nvim::TmuxMode,
 }
 
 #[derive(Debug)]
@@ -252,7 +247,7 @@ pub fn run_tui(options: TuiOptions) -> i32 {
     }
 }
 
-fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
+fn run_tui_inner(_options: TuiOptions) -> anyhow::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         anyhow::bail!("--tui requires an interactive terminal");
     }
@@ -273,7 +268,6 @@ fn run_tui_inner(options: TuiOptions) -> anyhow::Result<()> {
         pending_method_editor: None,
         alert_message: None,
         diagnostics: Vec::new(),
-        tmux_mode: options.tmux_mode,
     };
     let mut diagnostics_rx = Some(spawn_config_scan_worker());
 
@@ -327,9 +321,6 @@ fn spawn_config_scan_worker() -> Receiver<Vec<String>> {
     let config_root = crate::config_dir();
     std::thread::spawn(move || {
         let mut warnings = crate::config_diagnostics::scan_extension_warnings(&config_root);
-        warnings.extend(crate::config_diagnostics::scan_legacy_script_field_warnings(
-            &config_root,
-        ));
         warnings.sort();
         warnings.dedup();
         let _ = tx.send(warnings);
@@ -1035,7 +1026,7 @@ fn apply_toml_field_input(
         TomlField::Env => {
             doc.env.clear();
             for entry in split_csv(input) {
-                let (key, value) = crate::alias_admin_validation::parse_env_assignment(&entry)?;
+                let (key, value) = crate::alias_admin_parse::parse_env_assignment(&entry)?;
                 doc.env.insert(key, value);
             }
         }
@@ -1050,7 +1041,7 @@ fn apply_toml_field_input(
         | TomlField::BashcompEnabled
         | TomlField::BashcompDisabled
         | TomlField::BashcompPassthrough => {
-            let bool_value = crate::alias_admin_validation::parse_bool_flag(input, field.label())?;
+            let bool_value = crate::alias_admin_parse::parse_bool_flag(input, field.label())?;
             match field {
                 TomlField::JournalEnabled => {
                     doc.journal = if bool_value {
@@ -1234,11 +1225,6 @@ fn warn_missing_targets_for_active_alias(state: &mut AppState, alias: &str) {
     let Some(config_path) = state.artifacts.toml_path.clone() else {
         return;
     };
-    let legacy_warnings = crate::config_diagnostics::legacy_script_field_warnings_for_path(&config_path);
-    if let Some(first) = legacy_warnings.first() {
-        state.alert_message = Some(format!("warning for `{alias}`: {first}"));
-        return;
-    }
     let Ok(manifest) = crate::parser::parse(&config_path) else {
         return;
     };
@@ -1276,12 +1262,11 @@ fn activate_method_editor_for_field(
         seed_method_and_capture_before_methods(&rhai_path, &method_name, method_kind)?;
 
     pause_terminal_for_subprocess(terminal, || {
-        crate::tui_nvim::open_rhai_editor_at_method_with_mode(
+        crate::tui_nvim::open_rhai_editor_at_method(
             &rhai_path,
             &method_name,
             method_kind,
             &crate::rhai_api_catalog::exported_api_names(),
-            state.tmux_mode,
         )
         .with_context(|| format!("failed to open Rhai method editor for alias `{alias}`"))
     })?;
@@ -1336,7 +1321,10 @@ fn sync_configured_methods_after_edit(
     after_methods: &[String],
     alias: &str,
 ) -> anyhow::Result<()> {
-    for field in [TomlField::ReconcileFunction, TomlField::BashcompRhaiFunction] {
+    for field in [
+        TomlField::ReconcileFunction,
+        TomlField::BashcompRhaiFunction,
+    ] {
         let configured = configured_method_name(doc, field);
         if configured.is_none() {
             continue;
@@ -1353,10 +1341,14 @@ fn sync_configured_methods_after_edit(
 
 fn configured_method_name(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Option<String> {
     let configured = match field {
-        TomlField::ReconcileFunction => doc.reconcile.as_ref().and_then(|value| value.function.clone()),
-        TomlField::BashcompRhaiFunction => {
-            doc.bashcomp.as_ref().and_then(|value| value.rhai_function.clone())
-        }
+        TomlField::ReconcileFunction => doc
+            .reconcile
+            .as_ref()
+            .and_then(|value| value.function.clone()),
+        TomlField::BashcompRhaiFunction => doc
+            .bashcomp
+            .as_ref()
+            .and_then(|value| value.rhai_function.clone()),
         _ => None,
     }?;
     let trimmed = configured.trim();
@@ -1416,7 +1408,10 @@ fn default_method_name(field: TomlField) -> &'static str {
 }
 
 fn is_method_field(field: TomlField) -> bool {
-    matches!(field, TomlField::ReconcileFunction | TomlField::BashcompRhaiFunction)
+    matches!(
+        field,
+        TomlField::ReconcileFunction | TomlField::BashcompRhaiFunction
+    )
 }
 
 fn resolve_alias_path(alias: &str) -> Option<PathBuf> {
@@ -1943,10 +1938,7 @@ fn render_inspector_details(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn surface_detail_content(state: &AppState) -> InspectorDetailContent {
     if let Some(chooser) = &state.method_chooser {
-        let mut lines = vec![format!(
-            "method chooser ({})",
-            chooser.field.label()
-        )];
+        let mut lines = vec![format!("method chooser ({})", chooser.field.label())];
         lines.push(String::from("Enter: select and edit | Esc: cancel"));
         lines.push(String::new());
         let mut cursor_line = None;
@@ -2456,7 +2448,6 @@ mod tests {
         surface_has_data, AppState, ControlSurface, InspectorMode, LayoutKind, LoopAction,
         PaneFocus, TabStripMode, TomlField,
     };
-    use crate::tui_nvim::TmuxMode;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     fn sample_state(layout: LayoutKind) -> AppState {
@@ -2475,7 +2466,6 @@ mod tests {
             pending_method_editor: None,
             alert_message: None,
             diagnostics: Vec::new(),
-            tmux_mode: TmuxMode::Off,
         }
     }
 
@@ -2713,7 +2703,10 @@ mod tests {
             10,
         );
         assert_eq!(action, LoopAction::OpenPendingMethodEditor);
-        assert_eq!(state.pending_method_editor, Some(TomlField::ReconcileFunction));
+        assert_eq!(
+            state.pending_method_editor,
+            Some(TomlField::ReconcileFunction)
+        );
     }
 
     #[test]
@@ -2797,8 +2790,8 @@ mod tests {
         // Simulate user renaming the seeded template method in the editor.
         std::fs::write(&rhai_path, "fn custom_reconcile(ctx) {\n    #{}\n}\n")
             .expect("write renamed method");
-        let after_methods =
-            crate::rhai_wiring::read_compatible_methods(&rhai_path).expect("read methods after edit");
+        let after_methods = crate::rhai_wiring::read_compatible_methods(&rhai_path)
+            .expect("read methods after edit");
 
         let mut doc = crate::alias_admin::minimal_alias_doc();
         super::set_configured_method_name(
@@ -2808,8 +2801,13 @@ mod tests {
             "demo",
         )
         .expect("configure method");
-        super::sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, "demo")
-            .expect("sync method rename");
+        super::sync_configured_methods_after_edit(
+            &mut doc,
+            &before_methods,
+            &after_methods,
+            "demo",
+        )
+        .expect("sync method rename");
         assert_eq!(
             super::configured_method_name(&doc, TomlField::ReconcileFunction).as_deref(),
             Some("custom_reconcile")
@@ -2831,8 +2829,13 @@ mod tests {
         .expect("configure reconcile method");
         assert!(doc.bashcomp.is_none());
 
-        super::sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, "demo")
-            .expect("sync method wiring");
+        super::sync_configured_methods_after_edit(
+            &mut doc,
+            &before_methods,
+            &after_methods,
+            "demo",
+        )
+        .expect("sync method wiring");
 
         assert_eq!(
             super::configured_method_name(&doc, TomlField::ReconcileFunction).as_deref(),

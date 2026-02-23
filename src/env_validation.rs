@@ -8,7 +8,10 @@ pub fn validate_env_key(key: &str) -> Result<(), EnvKeyViolation> {
     if key.contains('=') {
         return Err(EnvKeyViolation::ContainsEquals);
     }
-    if key.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(key),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(EnvKeyViolation::ContainsNul);
     }
     Ok(())
@@ -20,7 +23,10 @@ pub enum EnvValueViolation {
 }
 
 pub fn validate_env_value(value: &str) -> Result<(), EnvValueViolation> {
-    if value.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(value),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(EnvValueViolation::ContainsNul);
     }
     Ok(())

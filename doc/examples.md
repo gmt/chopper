@@ -98,10 +98,10 @@ exec = "kubectl"
 args = ["get", "pods"]
 
 [reconcile]
-script = "kpods.reconcile.rhai"
+function = "reconcile"
 ```
 
-`aliases/kpods.reconcile.rhai`:
+`aliases/kpods.rhai`:
 
 ```rhai
 fn reconcile(ctx) {
@@ -172,10 +172,12 @@ chopper --tui
 
 Then use:
 
-- `a` add alias
-- `s` set alias
-- `r` remove alias
-- `e` edit Rhai script in `(n)vim`
+- `+` add alias
+- `%` rename alias
+- `!` duplicate alias
+- `-` remove alias
+- `r` refresh alias list
+- `e` edit reconcile method in `(n)vim`
 
 ---
 

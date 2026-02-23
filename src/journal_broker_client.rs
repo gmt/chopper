@@ -26,10 +26,7 @@ impl JournalPolicyOptions {
             map.insert("max_use".to_string(), max_use.clone());
         }
         if let Some(interval) = self.rate_limit_interval_usec {
-            map.insert(
-                "rate_limit_interval_usec".to_string(),
-                interval.to_string(),
-            );
+            map.insert("rate_limit_interval_usec".to_string(), interval.to_string());
         }
         if let Some(burst) = self.rate_limit_burst {
             map.insert("rate_limit_burst".to_string(), burst.to_string());
@@ -42,10 +39,7 @@ impl JournalPolicyOptions {
 ///
 /// Connects to the system bus and invokes
 /// `com.chopperproject.JournalBroker1.EnsureNamespace(namespace, options)`.
-pub fn ensure_namespace_via_dbus(
-    namespace: &str,
-    options: &JournalPolicyOptions,
-) -> Result<()> {
+pub fn ensure_namespace_via_dbus(namespace: &str, options: &JournalPolicyOptions) -> Result<()> {
     let connection = zbus::blocking::Connection::system().with_context(|| {
         "failed to connect to system D-Bus; is dbus-daemon running? \
          The chopper-journal-broker service must be installed for journal \
@@ -66,9 +60,7 @@ pub fn ensure_namespace_via_dbus(
 
     // The method returns () on success; just check the reply is valid.
     let _: () = reply.body().deserialize().with_context(|| {
-        format!(
-            "unexpected response from journal broker for namespace `{namespace}`"
-        )
+        format!("unexpected response from journal broker for namespace `{namespace}`")
     })?;
 
     Ok(())
@@ -78,15 +70,11 @@ pub fn ensure_namespace_via_dbus(
 fn map_dbus_error(err: zbus::Error, namespace: &str) -> anyhow::Error {
     match &err {
         zbus::Error::MethodError(name, detail, _msg) => {
-            let detail_str = detail
-                .as_deref()
-                .unwrap_or("(no detail)");
+            let detail_str = detail.as_deref().unwrap_or("(no detail)");
             let name_str = name.as_str();
 
             if name_str.contains("AccessDenied") {
-                anyhow!(
-                    "journal namespace broker denied access for `{namespace}`: {detail_str}"
-                )
+                anyhow!("journal namespace broker denied access for `{namespace}`: {detail_str}")
             } else if name_str.contains("LimitsExceeded") {
                 anyhow!(
                     "journal namespace broker: namespace limit exceeded for `{namespace}`: {detail_str}"
@@ -97,9 +85,7 @@ fn map_dbus_error(err: zbus::Error, namespace: &str) -> anyhow::Error {
                 )
             }
         }
-        _ => anyhow!(
-            "D-Bus call to journal namespace broker failed for `{namespace}`: {err}"
-        ),
+        _ => anyhow!("D-Bus call to journal namespace broker failed for `{namespace}`: {err}"),
     }
 }
 

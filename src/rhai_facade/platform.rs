@@ -3,7 +3,6 @@ use rhai::{Dynamic, Engine, ImmutableString, Map};
 
 pub fn register(engine: &mut Engine) {
     engine.register_fn("platform_info", platform_info);
-    engine.register_fn("platform_is_windows", platform_is_windows);
     engine.register_fn("platform_is_unix", platform_is_unix);
     engine.register_fn("executable_intent", executable_intent);
     engine.register_fn(
@@ -34,20 +33,12 @@ fn platform_info() -> Map {
         "exe_suffix".into(),
         Dynamic::from(ImmutableString::from(std::env::consts::EXE_SUFFIX)),
     );
-    out.insert("supports_posix_mode_bits".into(), Dynamic::from(cfg!(unix)));
-    out.insert(
-        "supports_trust_confirmation_signal".into(),
-        Dynamic::from(cfg!(windows)),
-    );
+    out.insert("supports_posix_mode_bits".into(), Dynamic::from(true));
     out
 }
 
-fn platform_is_windows() -> bool {
-    cfg!(windows)
-}
-
 fn platform_is_unix() -> bool {
-    cfg!(unix)
+    true
 }
 
 fn executable_intent(path: &str) -> RhaiResult<Map> {
@@ -68,23 +59,15 @@ fn executable_intent(path: &str) -> RhaiResult<Map> {
     out.insert("is_dir".into(), Dynamic::from(is_dir));
 
     let can_without = can_execute_without_confirmation_impl(&path, metadata.as_ref());
-    let can_with = if is_file {
-        can_without || cfg!(windows)
-    } else {
-        false
-    };
     out.insert(
         "can_execute_without_confirmation".into(),
         Dynamic::from(can_without),
     );
     out.insert(
         "can_execute_with_confirmation".into(),
-        Dynamic::from(can_with),
+        Dynamic::from(can_without),
     );
-    out.insert(
-        "requires_user_confirmation".into(),
-        Dynamic::from(can_with && !can_without),
-    );
+    out.insert("requires_user_confirmation".into(), Dynamic::from(false));
     Ok(out)
 }
 
@@ -102,55 +85,19 @@ fn can_execute_without_confirmation(path: &str) -> RhaiResult<bool> {
 }
 
 fn can_execute_with_confirmation(path: &str) -> RhaiResult<bool> {
-    let path = ensure_path("path", path)?;
-    let metadata = match fs_err::metadata(&path) {
-        Ok(metadata) => Some(metadata),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(format!("failed to inspect {}: {err}", path.display()).into()),
-    };
-    let is_file = metadata.as_ref().is_some_and(|m| m.is_file());
-    Ok(if is_file {
-        can_execute_without_confirmation_impl(&path, metadata.as_ref()) || cfg!(windows)
-    } else {
-        false
-    })
+    can_execute_without_confirmation(path)
 }
 
 fn can_execute_without_confirmation_impl(
-    path: &std::path::Path,
+    _path: &std::path::Path,
     metadata: Option<&std::fs::Metadata>,
 ) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = path;
-
-        let Some(metadata) = metadata else {
-            return false;
-        };
-        if !metadata.is_file() {
-            return false;
-        }
-        metadata.permissions().mode() & 0o111 != 0
+    use std::os::unix::fs::PermissionsExt;
+    let Some(metadata) = metadata else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
     }
-
-    #[cfg(windows)]
-    {
-        let Some(metadata) = metadata else {
-            return false;
-        };
-        if !metadata.is_file() {
-            return false;
-        }
-        let ext = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase());
-        matches!(ext.as_deref(), Some("exe" | "com" | "bat" | "cmd"))
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        metadata.is_some_and(|m| m.is_file())
-    }
+    metadata.permissions().mode() & 0o111 != 0
 }

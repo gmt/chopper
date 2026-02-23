@@ -561,6 +561,9 @@ mod tests {
 
         let (_ns, _id, policy) =
             super::normalize_journal_config_for_command(&journal).expect("should normalize");
-        assert_eq!(policy, crate::journal_broker_client::JournalPolicyOptions::default());
+        assert_eq!(
+            policy,
+            crate::journal_broker_client::JournalPolicyOptions::default()
+        );
     }
 }

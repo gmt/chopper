@@ -281,7 +281,7 @@ fn validate_cached_command_path(path: &Path, field: &str) -> Result<()> {
     if value == "." || value == ".." {
         return Err(anyhow!("{field} cannot be `.` or `..`"));
     }
-    if value.ends_with('/') || value.ends_with('\\') {
+    if value.ends_with('/') {
         return Err(anyhow!("{field} cannot end with a path separator"));
     }
     if ends_with_dot_component(&value) {
@@ -293,8 +293,7 @@ fn validate_cached_command_path(path: &Path, field: &str) -> Result<()> {
 }
 
 fn ends_with_dot_component(value: &str) -> bool {
-    let trimmed = value.trim_end_matches(['/', '\\']);
-    matches!(trimmed.rsplit(['/', '\\']).next(), Some(".") | Some(".."))
+    crate::path_validation::ends_with_dot_component(value)
 }
 
 #[cfg(unix)]
@@ -513,19 +512,14 @@ mod tests {
             "semi;colon&and".to_string(),
             "$DOLLAR".to_string(),
             "brace{value}".to_string(),
-            r"windows\path".to_string(),
         ];
         manifest.env.insert("KEY-WITH-DASH".into(), "dash".into());
         manifest.env.insert("KEY.WITH.DOT".into(), "dot".into());
         manifest.env.insert("KEY/WITH/SLASH".into(), "slash".into());
-        manifest
-            .env
-            .insert(r"KEY\WITH\BACKSLASH".into(), "backslash".into());
         manifest.env_remove = vec![
             "KEY-WITH-DASH".into(),
             "KEY.WITH.DOT".into(),
             "KEY/WITH/SLASH".into(),
-            r"KEY\WITH\BACKSLASH".into(),
         ];
         manifest.journal = Some(JournalConfig {
             namespace: "ops/ns.prod@2026".into(),
@@ -1970,43 +1964,6 @@ mod tests {
     }
 
     #[test]
-    fn store_rejects_manifest_with_trailing_backslash_reconcile_script_and_skips_cache_write() {
-        let _guard = ENV_LOCK.lock().expect("lock env mutex");
-        let home = TempDir::new().expect("create tempdir");
-        env::set_var("XDG_CACHE_HOME", home.path());
-
-        let config_dir = TempDir::new().expect("create config dir");
-        let source_file = config_dir.path().join("a.toml");
-        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
-        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
-
-        let mut invalid_manifest = Manifest::simple(PathBuf::from("echo"));
-        invalid_manifest.reconcile = Some(ReconcileConfig {
-            script: PathBuf::from("hooks/reconcile\\"),
-            function: "reconcile".to_string(),
-        });
-
-        let err = store(
-            "invalid-store-reconcile-script-trailing-backslash",
-            &fingerprint,
-            &invalid_manifest,
-        )
-        .expect_err("trailing backslash reconcile script path should be rejected on store");
-        assert!(
-            err.to_string()
-                .contains("refusing to store invalid alias cache entry manifest"),
-            "{err}"
-        );
-
-        let path = cache_path("invalid-store-reconcile-script-trailing-backslash");
-        assert!(
-            !path.exists(),
-            "trailing backslash reconcile script path should not produce cache file"
-        );
-        env::remove_var("XDG_CACHE_HOME");
-    }
-
-    #[test]
     fn store_rejects_manifest_with_dotdot_exec_path_and_skips_cache_write() {
         let _guard = ENV_LOCK.lock().expect("lock env mutex");
         let home = TempDir::new().expect("create tempdir");
@@ -2138,39 +2095,6 @@ mod tests {
         assert!(
             !path.exists(),
             "trailing slash reconcile script path should not produce cache file"
-        );
-        env::remove_var("XDG_CACHE_HOME");
-    }
-
-    #[test]
-    fn store_rejects_manifest_with_trailing_backslash_exec_path_and_skips_cache_write() {
-        let _guard = ENV_LOCK.lock().expect("lock env mutex");
-        let home = TempDir::new().expect("create tempdir");
-        env::set_var("XDG_CACHE_HOME", home.path());
-
-        let config_dir = TempDir::new().expect("create config dir");
-        let source_file = config_dir.path().join("a.toml");
-        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
-        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
-
-        let invalid_manifest = Manifest::simple(PathBuf::from("echo\\"));
-
-        let err = store(
-            "invalid-store-exec-trailing-backslash",
-            &fingerprint,
-            &invalid_manifest,
-        )
-        .expect_err("trailing backslash exec path should be rejected on store");
-        assert!(
-            err.to_string()
-                .contains("refusing to store invalid alias cache entry manifest"),
-            "{err}"
-        );
-
-        let path = cache_path("invalid-store-exec-trailing-backslash");
-        assert!(
-            !path.exists(),
-            "trailing backslash exec path should not produce cache file"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
@@ -2401,40 +2325,6 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached exec path should be pruned on load"
-        );
-        env::remove_var("XDG_CACHE_HOME");
-    }
-
-    #[test]
-    fn cached_manifest_with_trailing_backslash_exec_path_is_pruned() {
-        let _guard = ENV_LOCK.lock().expect("lock env mutex");
-        let home = TempDir::new().expect("create tempdir");
-        env::set_var("XDG_CACHE_HOME", home.path());
-
-        let config_dir = TempDir::new().expect("create config dir");
-        let source_file = config_dir.path().join("a.toml");
-        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
-        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
-
-        let manifest = Manifest::simple(PathBuf::from("ech\\"));
-
-        let path = cache_path("unsafe-exec-path-backslash");
-        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
-        let entry = CacheEntry {
-            version: CACHE_ENTRY_VERSION,
-            fingerprint: fingerprint.clone(),
-            manifest,
-        };
-        fs::write(
-            &path,
-            bincode::serialize(&entry).expect("serialize cache entry"),
-        )
-        .expect("write cache file");
-
-        assert!(load("unsafe-exec-path-backslash", &fingerprint).is_none());
-        assert!(
-            !path.exists(),
-            "invalid cached backslash exec path should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }
@@ -3071,44 +2961,6 @@ mod tests {
         assert!(
             !path.exists(),
             "invalid cached reconcile script path should be pruned on load"
-        );
-        env::remove_var("XDG_CACHE_HOME");
-    }
-
-    #[test]
-    fn cached_manifest_with_trailing_backslash_reconcile_script_is_pruned() {
-        let _guard = ENV_LOCK.lock().expect("lock env mutex");
-        let home = TempDir::new().expect("create tempdir");
-        env::set_var("XDG_CACHE_HOME", home.path());
-
-        let config_dir = TempDir::new().expect("create config dir");
-        let source_file = config_dir.path().join("a.toml");
-        fs::write(&source_file, "exec = \"echo\"\n").expect("write source");
-        let fingerprint = source_fingerprint(&source_file).expect("source fingerprint");
-
-        let mut manifest = Manifest::simple(PathBuf::from("echo"));
-        manifest.reconcile = Some(ReconcileConfig {
-            script: PathBuf::from("hooks/reconcile.rha\\"),
-            function: "reconcile".to_string(),
-        });
-
-        let path = cache_path("unsafe-reconcile-script-backslash");
-        fs::create_dir_all(path.parent().expect("cache path parent")).expect("create cache dir");
-        let entry = CacheEntry {
-            version: CACHE_ENTRY_VERSION,
-            fingerprint: fingerprint.clone(),
-            manifest,
-        };
-        fs::write(
-            &path,
-            bincode::serialize(&entry).expect("serialize cache entry"),
-        )
-        .expect("write cache file");
-
-        assert!(load("unsafe-reconcile-script-backslash", &fingerprint).is_none());
-        assert!(
-            !path.exists(),
-            "invalid cached backslash reconcile script path should be pruned on load"
         );
         env::remove_var("XDG_CACHE_HOME");
     }

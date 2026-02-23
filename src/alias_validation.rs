@@ -13,7 +13,10 @@ pub fn validate_alias_identifier(alias: &str) -> Result<(), AliasViolation> {
     if alias.trim().is_empty() {
         return Err(AliasViolation::Empty);
     }
-    if alias.contains('\0') {
+    if matches!(
+        crate::string_validation::reject_nul(alias),
+        Err(crate::string_validation::StringViolation::ContainsNul)
+    ) {
         return Err(AliasViolation::ContainsNul);
     }
     if alias == "--" {

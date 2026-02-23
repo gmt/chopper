@@ -1,4 +1,4 @@
-use crate::alias_admin_validation::{parse_bool_flag, parse_env_assignment};
+use crate::alias_admin_parse::{parse_bool_flag, parse_env_assignment};
 use crate::alias_doc::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc};
 use crate::alias_validation;
 use anyhow::{anyhow, Context, Result};
@@ -58,17 +58,9 @@ pub fn run_alias_action(raw_args: &[String]) -> i32 {
 
 fn run_alias_action_inner(raw_args: &[String]) -> Result<()> {
     if raw_args.is_empty() {
-        return Err(anyhow!(
-            "usage: chopper --alias <list|get|add|set|remove> ..."
-        ));
+        return Err(anyhow!("usage: chopper --alias <get|add|set|remove> ..."));
     }
     match raw_args[0].as_str() {
-        "list" => {
-            for alias in discover_aliases()? {
-                println!("{alias}");
-            }
-            Ok(())
-        }
         "get" => {
             if raw_args.len() != 2 {
                 return Err(anyhow!("usage: chopper --alias get <alias>"));
@@ -81,7 +73,7 @@ fn run_alias_action_inner(raw_args: &[String]) -> Result<()> {
         "set" => run_add_or_set(false, &raw_args[1..]),
         "remove" => run_remove(&raw_args[1..]),
         other => Err(anyhow!(
-            "unknown alias subcommand `{other}`; expected list|get|add|set|remove"
+            "unknown alias subcommand `{other}`; expected get|add|set|remove"
         )),
     }
 }
@@ -90,9 +82,6 @@ fn run_get(alias: &str) -> Result<()> {
     let config_path = crate::find_config(alias)
         .ok_or_else(|| anyhow!("alias `{alias}` not found in configuration"))?;
     let manifest = crate::parser::parse(&config_path)?;
-    for warning in crate::config_diagnostics::legacy_script_field_warnings_for_path(&config_path) {
-        eprintln!("warning: {warning}");
-    }
     for warning in crate::config_diagnostics::manifest_missing_target_warnings(&manifest) {
         eprintln!("warning: {warning}");
     }
@@ -453,25 +442,21 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--journal-rate-limit-interval-usec" => {
-                let value = raw_args
-                    .get(idx + 1)
-                    .ok_or_else(|| anyhow!("--journal-rate-limit-interval-usec requires a value"))?;
-                journal_rate_limit_interval_usec = Some(
-                    value
-                        .parse::<u64>()
-                        .map_err(|_| anyhow!("--journal-rate-limit-interval-usec requires a positive integer"))?,
-                );
+                let value = raw_args.get(idx + 1).ok_or_else(|| {
+                    anyhow!("--journal-rate-limit-interval-usec requires a value")
+                })?;
+                journal_rate_limit_interval_usec = Some(value.parse::<u64>().map_err(|_| {
+                    anyhow!("--journal-rate-limit-interval-usec requires a positive integer")
+                })?);
                 idx += 2;
             }
             "--journal-rate-limit-burst" => {
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--journal-rate-limit-burst requires a value"))?;
-                journal_rate_limit_burst = Some(
-                    value
-                        .parse::<u32>()
-                        .map_err(|_| anyhow!("--journal-rate-limit-burst requires a positive integer"))?,
-                );
+                journal_rate_limit_burst = Some(value.parse::<u32>().map_err(|_| {
+                    anyhow!("--journal-rate-limit-burst requires a positive integer")
+                })?);
                 idx += 2;
             }
             "--journal-clear" => {
