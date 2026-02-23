@@ -48,7 +48,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     if exec == "." || exec == ".." {
         return Err(anyhow!("field `exec` cannot be `.` or `..`"));
     }
-    if exec.ends_with('/') {
+    if ends_with_path_separator(exec) {
         return Err(anyhow!("field `exec` cannot end with a path separator"));
     }
     if ends_with_dot_component(exec) {
@@ -134,7 +134,7 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
                 if script == "." || script == ".." {
                     return Err(anyhow!("field `bashcomp.script` cannot be `.` or `..`"));
                 }
-                if script.ends_with('/') {
+                if ends_with_path_separator(script) {
                     return Err(anyhow!(
                         "field `bashcomp.script` cannot end with a path separator"
                     ));
@@ -283,7 +283,7 @@ fn validate_optional_script_value(value: &str, field: &str) -> Result<()> {
     if trimmed == "." || trimmed == ".." {
         return Err(anyhow!("{field} cannot be `.` or `..`"));
     }
-    if trimmed.ends_with('/') {
+    if ends_with_path_separator(trimmed) {
         return Err(anyhow!("{field} cannot end with a path separator"));
     }
     if ends_with_dot_component(trimmed) {
@@ -297,6 +297,10 @@ fn validate_optional_script_value(value: &str, field: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn ends_with_path_separator(value: &str) -> bool {
+    value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR)
 }
 
 fn resolve_script_path(base_dir: &Path, script: &str) -> PathBuf {
@@ -728,6 +732,20 @@ exec = "./"
     }
 
     #[test]
+    fn rejects_exec_field_trailing_platform_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        let sep = std::path::MAIN_SEPARATOR;
+        let exec = format!(".{sep}");
+        fs::write(&config, format!("exec = '{exec}'\n")).expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `exec` cannot end with a path separator"));
+    }
+
+    #[test]
     fn rejects_trailing_separator_exec_field_in_toml() {
         let temp = TempDir::new().expect("create tempdir");
         let config = temp.path().join("bad.toml");
@@ -1005,6 +1023,24 @@ exec = "echo"
 [reconcile]
 script = "./"
 "#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `reconcile.script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_reconcile_script_trailing_platform_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        let sep = std::path::MAIN_SEPARATOR;
+        let script = format!(".{sep}hooks{sep}");
+        fs::write(
+            &config,
+            format!("exec = \"echo\"\n\n[reconcile]\nscript = '{script}'\n"),
         )
         .expect("write toml");
 
@@ -1955,6 +1991,24 @@ exec = "echo"
 [bashcomp]
 script = "completions/"
 "#,
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(err
+            .to_string()
+            .contains("field `bashcomp.script` cannot end with a path separator"));
+    }
+
+    #[test]
+    fn rejects_bashcomp_script_trailing_platform_separator() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("bad.toml");
+        let sep = std::path::MAIN_SEPARATOR;
+        let script = format!("completions{sep}");
+        fs::write(
+            &config,
+            format!("exec = \"echo\"\n\n[bashcomp]\nscript = '{script}'\n"),
         )
         .expect("write toml");
 
