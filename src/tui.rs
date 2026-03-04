@@ -1663,9 +1663,8 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn banner_guidance(_state: &AppState) -> String {
-    format!(
-        "Enter/→: inspect | Space: choose method | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit",
-    )
+    "Enter/→: inspect | Space: choose method | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit"
+        .to_string()
 }
 
 fn render_content(frame: &mut Frame, area: Rect, state: &AppState, layout_plan: LayoutPlan) {
