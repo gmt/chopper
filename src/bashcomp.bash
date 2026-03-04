@@ -303,7 +303,7 @@ _chopper_complete_direct() {
     # chopper --alias <subcommand> <alias>  →  complete alias names
     if (( COMP_CWORD == 3 )) && [[ "$flag" == "--alias" ]]; then
         local sub="${COMP_WORDS[2]}"
-        if [[ "$sub" == "get" || "$sub" == "set" || "$sub" == "remove" ]]; then
+        if [[ "$sub" == "get" || "$sub" == "add" || "$sub" == "set" || "$sub" == "remove" ]]; then
             local aliases
             aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
             COMPREPLY=($(compgen -W "$aliases" -- "$cur"))
