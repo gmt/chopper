@@ -285,7 +285,7 @@ _chopper_complete_direct() {
 
     if (( COMP_CWORD == 1 )); then
         # First arg: complete built-in flags or alias names.
-        local builtins="--help --version --print-config-dir --print-cache-dir --bashcomp --list-aliases --print-exec --print-bashcomp-mode --complete"
+        local builtins="-h --help -V --version --print-config-dir --print-cache-dir --bashcomp --list-aliases --print-exec --print-bashcomp-mode --complete --alias --tui"
         local aliases
         aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
         COMPREPLY=($(compgen -W "$builtins $aliases" -- "$cur"))
@@ -293,6 +293,30 @@ _chopper_complete_direct() {
     fi
 
     local flag="${COMP_WORDS[1]}"
+
+    # chopper --alias <subcommand>  →  complete subcommand names (or --help)
+    if (( COMP_CWORD == 2 )) && [[ "$flag" == "--alias" ]]; then
+        COMPREPLY=($(compgen -W "get add set remove --help" -- "$cur"))
+        return 0
+    fi
+
+    # chopper --alias <subcommand> <alias>  →  complete alias names
+    if (( COMP_CWORD == 3 )) && [[ "$flag" == "--alias" ]]; then
+        local sub="${COMP_WORDS[2]}"
+        if [[ "$sub" == "get" || "$sub" == "set" || "$sub" == "remove" ]]; then
+            local aliases
+            aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
+            COMPREPLY=($(compgen -W "$aliases" -- "$cur"))
+            return 0
+        fi
+    fi
+
+    # chopper --help <next>  →  offer --alias as the meaningful follow-on
+    if (( COMP_CWORD == 2 )) && [[ "$flag" == "--help" || "$flag" == "-h" ]]; then
+        COMPREPLY=($(compgen -W "--alias" -- "$cur"))
+        return 0
+    fi
+
     if (( COMP_CWORD == 2 )) && [[ "$flag" == "--print-exec" || "$flag" == "--print-bashcomp-mode" || "$flag" == "--complete" ]]; then
         # Second arg for these flags: complete alias names.
         local aliases

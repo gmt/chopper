@@ -58,10 +58,24 @@ pub fn run_alias_action(raw_args: &[String]) -> i32 {
 
 fn run_alias_action_inner(raw_args: &[String]) -> Result<()> {
     if raw_args.is_empty() {
-        return Err(anyhow!("usage: chopper --alias <get|add|set|remove> ..."));
+        print_alias_help();
+        return Ok(());
     }
     match raw_args[0].as_str() {
+        "-h" | "--help" | "help" => {
+            // chopper --alias --help  or  chopper --alias help
+            // Subcommand-specific help: chopper --alias help get
+            if let Some(sub) = raw_args.get(1) {
+                print_alias_subcommand_help(sub)?;
+            } else {
+                print_alias_help();
+            }
+            Ok(())
+        }
         "get" => {
+            if raw_args.get(1).map(String::as_str) == Some("--help") {
+                return print_alias_subcommand_help("get");
+            }
             if raw_args.len() != 2 {
                 return Err(anyhow!("usage: chopper --alias get <alias>"));
             }
@@ -69,13 +83,164 @@ fn run_alias_action_inner(raw_args: &[String]) -> Result<()> {
             validate_alias(alias)?;
             run_get(alias)
         }
-        "add" => run_add_or_set(true, &raw_args[1..]),
-        "set" => run_add_or_set(false, &raw_args[1..]),
-        "remove" => run_remove(&raw_args[1..]),
+        "add" => {
+            if raw_args.get(1).map(String::as_str) == Some("--help") {
+                return print_alias_subcommand_help("add");
+            }
+            run_add_or_set(true, &raw_args[1..])
+        }
+        "set" => {
+            if raw_args.get(1).map(String::as_str) == Some("--help") {
+                return print_alias_subcommand_help("set");
+            }
+            run_add_or_set(false, &raw_args[1..])
+        }
+        "remove" => {
+            if raw_args.get(1).map(String::as_str) == Some("--help") {
+                return print_alias_subcommand_help("remove");
+            }
+            run_remove(&raw_args[1..])
+        }
         other => Err(anyhow!(
-            "unknown alias subcommand `{other}`; expected get|add|set|remove"
+            "unknown alias subcommand `{other}`; expected get|add|set|remove\n\
+             Run `chopper --alias --help` for usage."
         )),
     }
+}
+
+fn print_alias_help() {
+    println!("Manage chopper alias configurations.");
+    println!();
+    println!("Usage:");
+    println!("  chopper --alias <subcommand> [options]");
+    println!();
+    println!("Subcommands:");
+    println!("  get <alias>");
+    println!("      Print the configuration for an alias as JSON.");
+    println!();
+    println!("  add <alias> --exec <command> [options]");
+    println!("      Create a new alias. Fails if the alias already exists.");
+    println!("      Requires --exec.");
+    println!();
+    println!("  set <alias> [options]");
+    println!("      Update fields on an existing alias. At least one option required.");
+    println!();
+    println!("  remove <alias> [--mode clean|dirty] [--symlink-path <path>]");
+    println!("      Remove an alias config and its symlink.");
+    println!("      --mode clean (default): remove config file and symlink");
+    println!("      --mode dirty: remove symlink only, keep config file");
+    println!();
+    println!("Options for add/set:");
+    println!("  --exec <command>           Command to execute");
+    println!("  --arg <value>              Append a fixed argument (repeatable)");
+    println!("  --env KEY=VALUE            Set an environment variable (repeatable)");
+    println!("  --env-remove KEY           Unset an environment variable (repeatable)");
+    println!("  --journal-namespace <ns>   systemd journal namespace (enables journaling)");
+    println!("  --journal-stderr true|false  Capture stderr to journal (default: true)");
+    println!("  --journal-identifier <id>  Journal syslog identifier override");
+    println!("  --journal-user-scope true|false  Use user-scope journal (default: false)");
+    println!("  --journal-ensure true|false  Fail if journald is unavailable (default: false)");
+    println!("  --journal-max-use <size>   Maximum journal disk space (e.g. 500M)");
+    println!("  --journal-rate-limit-interval-usec <usec>  Rate-limit window (microseconds)");
+    println!("  --journal-rate-limit-burst <n>             Max messages per window");
+    println!("  --journal-clear            Remove all journal settings from alias");
+    println!();
+    println!("Examples:");
+    println!("  chopper --alias add mygrep --exec grep --arg -n");
+    println!("  chopper --alias set mygrep --env GREP_COLORS=auto");
+    println!("  chopper --alias get mygrep");
+    println!("  chopper --alias remove mygrep");
+    println!();
+    println!("Run `chopper --alias <subcommand> --help` for subcommand-specific details.");
+}
+
+fn print_alias_subcommand_help(sub: &str) -> Result<()> {
+    match sub {
+        "get" => {
+            println!("Usage: chopper --alias get <alias>");
+            println!();
+            println!("Print the full configuration for an alias as formatted JSON.");
+            println!("Includes exec, args, env, env_remove, journal, reconcile, and bashcomp fields.");
+            println!();
+            println!("Example:");
+            println!("  chopper --alias get mygrep");
+        }
+        "add" => {
+            println!("Usage: chopper --alias add <alias> --exec <command> [options]");
+            println!();
+            println!("Create a new alias TOML config. Fails if the alias already exists.");
+            println!("Use `set` to modify an existing alias.");
+            println!();
+            println!("Required:");
+            println!("  --exec <command>           Command to execute");
+            println!();
+            println!("Options:");
+            println!("  --arg <value>              Append a fixed argument (repeatable)");
+            println!("  --env KEY=VALUE            Set an environment variable (repeatable)");
+            println!("  --env-remove KEY           Unset an environment variable at runtime (repeatable)");
+            println!("  --journal-namespace <ns>   Enable systemd journaling under this namespace");
+            println!("  --journal-stderr true|false  Capture stderr to journal (default: true)");
+            println!("  --journal-identifier <id>  Override the syslog identifier in journal entries");
+            println!("  --journal-user-scope true|false  Use user-scope journal unit (default: false)");
+            println!("  --journal-ensure true|false  Hard-fail if journald is unavailable (default: false)");
+            println!("  --journal-max-use <size>   Max journal disk usage for this alias (e.g. 500M)");
+            println!("  --journal-rate-limit-interval-usec <usec>  Rate-limit window length");
+            println!("  --journal-rate-limit-burst <n>             Max log messages per window");
+            println!();
+            println!("Examples:");
+            println!("  chopper --alias add mygrep --exec grep --arg -n");
+            println!("  chopper --alias add syslog-svc --exec /usr/bin/myapp \\");
+            println!("      --journal-namespace default --journal-stderr true");
+        }
+        "set" => {
+            println!("Usage: chopper --alias set <alias> [options]");
+            println!();
+            println!("Update one or more fields on an existing alias. At least one option is required.");
+            println!("Use `add` to create a new alias.");
+            println!();
+            println!("Options:");
+            println!("  --exec <command>           Replace the exec command");
+            println!("  --arg <value>              Replace fixed args with this set (repeatable)");
+            println!("  --env KEY=VALUE            Add or update an environment variable (repeatable)");
+            println!("  --env-remove KEY           Add a key to the runtime env-remove list (repeatable)");
+            println!("  --journal-namespace <ns>   Set/update the journal namespace");
+            println!("  --journal-stderr true|false  Update stderr capture setting");
+            println!("  --journal-identifier <id>  Update the syslog identifier (empty string clears it)");
+            println!("  --journal-user-scope true|false  Update user-scope journal setting");
+            println!("  --journal-ensure true|false  Update journald availability enforcement");
+            println!("  --journal-max-use <size>   Update max journal disk usage (empty string clears it)");
+            println!("  --journal-rate-limit-interval-usec <usec>  Update rate-limit window");
+            println!("  --journal-rate-limit-burst <n>             Update rate-limit burst count");
+            println!("  --journal-clear            Remove all journal settings from the alias");
+            println!();
+            println!("Examples:");
+            println!("  chopper --alias set mygrep --exec rg");
+            println!("  chopper --alias set mygrep --env GREP_COLORS=always --env-remove OLD_VAR");
+            println!("  chopper --alias set mygrep --journal-clear");
+        }
+        "remove" => {
+            println!("Usage: chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]");
+            println!();
+            println!("Remove an alias and/or its symlink.");
+            println!();
+            println!("Options:");
+            println!("  --mode clean (default)  Remove both the config file and the symlink");
+            println!("  --mode dirty            Remove only the symlink; keep the config file");
+            println!("  --symlink-path <path>   Explicit symlink path to remove (overrides PATH lookup)");
+            println!();
+            println!("Examples:");
+            println!("  chopper --alias remove mygrep");
+            println!("  chopper --alias remove mygrep --mode dirty");
+            println!("  chopper --alias remove mygrep --symlink-path ~/.local/bin/mygrep");
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown alias subcommand `{other}`; expected get|add|set|remove\n\
+                 Run `chopper --alias --help` for usage."
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn run_get(alias: &str) -> Result<()> {
@@ -681,8 +846,25 @@ fn discover_aliases_in_dir(dir: &Path, aliases: &mut BTreeSet<String>) -> Result
 }
 
 fn validate_alias(alias: &str) -> Result<()> {
-    alias_validation::validate_alias_identifier(alias)
-        .map_err(|_| anyhow!("invalid alias identifier `{alias}`"))
+    use crate::alias_validation::AliasViolation;
+    alias_validation::validate_alias_identifier(alias).map_err(|v| match v {
+        AliasViolation::Empty => anyhow!("alias name cannot be empty"),
+        AliasViolation::ContainsNul => anyhow!("alias name cannot contain NUL bytes"),
+        AliasViolation::IsSeparator => anyhow!(
+            "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
+        ),
+        AliasViolation::StartsWithDash => anyhow!(
+            "alias name cannot start with `-`; choose a non-flag alias name"
+        ),
+        AliasViolation::ContainsWhitespace => {
+            anyhow!("alias name cannot contain whitespace")
+        }
+        AliasViolation::IsDotToken => anyhow!("alias name cannot be `.` or `..`"),
+        AliasViolation::ContainsPathSeparator => anyhow!(
+            "alias name cannot contain path separators; \
+             use symlink mode or command PATH resolution instead"
+        ),
+    })
 }
 
 #[cfg(test)]

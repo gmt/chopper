@@ -112,6 +112,11 @@ fn detect_builtin_action(args: &[String]) -> Option<BuiltinAction> {
         }
     }
 
+    // chopper --help --alias  →  alias help
+    if (flag == "-h" || flag == "--help") && args.get(2).map(String::as_str) == Some("--alias") {
+        return Some(BuiltinAction::Alias(vec!["--help".to_string()]));
+    }
+
     // Three-argument builtins (chopper <flag> <alias>)
     if args.len() == 3 {
         let alias = args[2].clone();
@@ -155,7 +160,8 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --print-bashcomp-mode <alias> Print bashcomp mode for alias");
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
-            println!("  --alias <subcommand> [...]   Alias lifecycle management");
+            println!("  --alias <subcommand> [...]   Alias lifecycle management
+  --help --alias               Show alias subcommand help");
             println!("  --tui                        Open interactive terminal UI");
             println!();
             println!("Environment overrides:");
