@@ -83,6 +83,10 @@ High-level map of the runtime flow and main modules.
 - `src/alias_admin.rs` / `src/alias_doc.rs`
   - alias lifecycle operations (`--alias get|add|set|remove`, plus `--list-aliases`)
   - mutation parsing/validation and TOML persistence for managed aliases
+- `src/wrapper_sync.rs`
+  - wrapper symlink path selection (`$HOME/bin` vs `$HOME/.local/bin`)
+  - wrapper create/remove helpers used by CLI and TUI alias lifecycle actions
+  - wrapper health diagnostics (missing, out-of-PATH, shadowed-by-earlier-PATH-entry)
 - `src/tui.rs` / `src/tui_nvim.rs`
   - alias-first interactive terminal UI (`--tui`) with event-driven key handling
   - ratatui frame rendering on a crossterm backend with content-driven split/modal fallback, compact tab chrome, and alias-list scrollbar support

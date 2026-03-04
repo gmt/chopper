@@ -27,10 +27,13 @@ fn run_chopper_with(
     env_vars: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Output {
     prepare_reconcile_script_fixtures(config_home);
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
     let mut cmd = Command::new(executable);
     cmd.args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
-        .env("XDG_CACHE_HOME", cache_home.path());
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("HOME", &home_dir);
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
@@ -47,12 +50,15 @@ fn run_chopper_with_cwd_and_argv0(
     env_vars: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Output {
     prepare_reconcile_script_fixtures(config_home);
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
     let mut cmd = Command::new(executable);
     cmd.arg0(argv0)
         .current_dir(working_dir)
         .args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
-        .env("XDG_CACHE_HOME", cache_home.path());
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("HOME", &home_dir);
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
@@ -81,6 +87,8 @@ fn run_direct_bash_completion(
     symlink(chopper_bin(), bin_dir.join("chopper")).expect("symlink chopper into harness bin dir");
 
     let path_value = std::env::var("PATH").unwrap_or_default();
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
     let output = Command::new("bash")
         .arg("-lc")
         .arg("source \"$1\"; shift; COMP_WORDS=(\"$@\"); COMP_CWORD=\"$CHOPPER_TEST_CWORD\"; COMP_LINE=\"${COMP_WORDS[*]}\"; COMP_POINT=${#COMP_LINE}; _chopper_complete_direct; printf '%s\\n' \"${COMPREPLY[@]}\"")
@@ -90,6 +98,7 @@ fn run_direct_bash_completion(
         .env("CHOPPER_TEST_CWORD", cword.to_string())
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
+        .env("HOME", &home_dir)
         .env("PATH", format!("{}:{path_value}", bin_dir.display()))
         .output()
         .expect("failed to execute completion harness");
@@ -13216,12 +13225,8 @@ fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
     fs::write(aliases_dir.join("foo-alias.toml"), "exec = \"echo\"\n").expect("write foo-alias");
     fs::write(aliases_dir.join("foo-beta.toml"), "exec = \"echo\"\n").expect("write foo-beta");
 
-    let subcommands = run_direct_bash_completion(
-        &config_home,
-        &cache_home,
-        &["chopper", "--alias", "g"],
-        2,
-    );
+    let subcommands =
+        run_direct_bash_completion(&config_home, &cache_home, &["chopper", "--alias", "g"], 2);
     assert_eq!(subcommands, vec!["get"]);
 
     let get_alias = run_direct_bash_completion(
@@ -13279,6 +13284,14 @@ fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
     );
     assert_eq!(bool_value, vec!["true"]);
 
+    let set_no_wrapper = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "set", "foo-alias", "--n"],
+        4,
+    );
+    assert_eq!(set_no_wrapper, vec!["--no-wrapper-sync"]);
+
     let remove_mode = run_direct_bash_completion(
         &config_home,
         &cache_home,
@@ -13286,6 +13299,14 @@ fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
         5,
     );
     assert_eq!(remove_mode, vec!["dirty"]);
+
+    let remove_flags = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "remove", "foo-alias", "--n"],
+        4,
+    );
+    assert_eq!(remove_flags, vec!["--no-wrapper-sync"]);
 }
 
 #[test]
@@ -13582,6 +13603,207 @@ fn alias_add_command_creates_runnable_alias() {
 }
 
 #[test]
+fn alias_add_creates_wrapper_in_first_candidate_directory_on_path() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let home_bin = home_dir.join("bin");
+    let local_bin = home_dir.join(".local/bin");
+    fs::create_dir_all(&home_bin).expect("create home bin");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!(
+        "{}:{}:{}",
+        local_bin.display(),
+        home_bin.display(),
+        system_path
+    );
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "wrapped",
+            "--exec",
+            "echo",
+            "--arg",
+            "wrapped-ok",
+        ],
+        [("PATH", path_value.clone())],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let wrapper_path = local_bin.join("wrapped");
+    let metadata = fs::symlink_metadata(&wrapper_path).expect("wrapper metadata");
+    assert!(
+        metadata.file_type().is_symlink(),
+        "expected symlink wrapper"
+    );
+
+    let run = run_chopper_with(
+        wrapper_path,
+        &config_home,
+        &cache_home,
+        &[],
+        [("PATH", path_value)],
+    );
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("wrapped-ok"), "{stdout}");
+}
+
+#[test]
+fn alias_add_no_wrapper_sync_skips_wrapper_creation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let local_bin = home_dir.join(".local/bin");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", local_bin.display(), system_path);
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "nowrap",
+            "--exec",
+            "echo",
+            "--no-wrapper-sync",
+        ],
+        [("PATH", path_value)],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    assert!(
+        !local_bin.join("nowrap").exists(),
+        "--no-wrapper-sync should skip wrapper creation"
+    );
+}
+
+#[test]
+fn alias_set_warns_when_wrapper_is_missing() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let local_bin = home_dir.join(".local/bin");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", local_bin.display(), system_path);
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "warnmissing",
+            "--exec",
+            "echo",
+            "--no-wrapper-sync",
+        ],
+        [("PATH", path_value.clone())],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let set = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "set", "warnmissing", "--arg", "after-update"],
+        [("PATH", path_value)],
+    );
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&set.stderr);
+    assert!(
+        stderr.contains("no wrapper symlink found"),
+        "expected missing-wrapper warning, got: {stderr}"
+    );
+}
+
+#[test]
+fn alias_get_warns_when_wrapper_is_shadowed_in_path() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let local_bin = home_dir.join(".local/bin");
+    let shadow_dir = config_home.path().join("shadow");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+    fs::create_dir_all(&shadow_dir).expect("create shadow dir");
+
+    let shadow_target = shadow_dir.join("warnshadow");
+    write_executable_script(&shadow_target, "#!/bin/sh\necho shadow-target\n");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!(
+        "{}:{}:{}",
+        shadow_dir.display(),
+        local_bin.display(),
+        system_path
+    );
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "warnshadow", "--exec", "echo"],
+        [("PATH", path_value.clone())],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let get = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "get", "warnshadow"],
+        [("PATH", path_value)],
+    );
+    assert!(
+        get.status.success(),
+        "{}",
+        String::from_utf8_lossy(&get.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&get.stderr);
+    assert!(
+        stderr.contains("shadowed by"),
+        "expected shadow warning, got: {stderr}"
+    );
+}
+
+#[test]
 fn alias_list_command_reports_managed_aliases() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -13855,6 +14077,140 @@ fn alias_remove_dirty_only_removes_symlink_and_can_reactivate() {
         String::from_utf8_lossy(&run_after.stdout).contains("dirty-mode"),
         "{}",
         String::from_utf8_lossy(&run_after.stdout)
+    );
+}
+
+#[test]
+fn alias_remove_clean_removes_auto_managed_wrapper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let local_bin = home_dir.join(".local/bin");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", local_bin.display(), system_path);
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "autoclean", "--exec", "echo"],
+        [("PATH", path_value.clone())],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let wrapper_path = local_bin.join("autoclean");
+    assert!(wrapper_path.exists(), "wrapper should exist before remove");
+
+    let remove = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "remove", "autoclean", "--mode", "clean"],
+        [("PATH", path_value)],
+    );
+    assert!(
+        remove.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    assert!(
+        !wrapper_path.exists(),
+        "clean remove should remove auto-managed wrapper"
+    );
+}
+
+#[test]
+fn alias_remove_clean_no_wrapper_sync_preserves_existing_wrapper() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let home_dir = config_home.path().join("home");
+    let local_bin = home_dir.join(".local/bin");
+    fs::create_dir_all(&local_bin).expect("create local bin");
+
+    let system_path = std::env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", local_bin.display(), system_path);
+
+    let add = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "noautoclean", "--exec", "echo"],
+        [("PATH", path_value.clone())],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let wrapper_path = local_bin.join("noautoclean");
+    assert!(wrapper_path.exists(), "wrapper should exist before remove");
+
+    let remove = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "remove",
+            "noautoclean",
+            "--mode",
+            "clean",
+            "--no-wrapper-sync",
+        ],
+        [("PATH", path_value)],
+    );
+    assert!(
+        remove.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    assert!(
+        wrapper_path.exists(),
+        "--no-wrapper-sync should preserve wrapper during clean remove"
+    );
+}
+
+#[test]
+fn alias_remove_dirty_rejects_no_wrapper_sync_flag() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "add", "dirtynowrap", "--exec", "echo"],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let remove = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "remove",
+            "dirtynowrap",
+            "--mode",
+            "dirty",
+            "--no-wrapper-sync",
+        ],
+    );
+    assert!(
+        !remove.status.success(),
+        "dirty remove should reject --no-wrapper-sync"
+    );
+    let stderr = String::from_utf8_lossy(&remove.stderr);
+    assert!(
+        stderr.contains("cannot be combined"),
+        "unexpected stderr: {stderr}"
     );
 }
 

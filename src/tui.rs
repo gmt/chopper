@@ -676,12 +676,16 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
             if input.is_empty() {
                 Err(anyhow::anyhow!("new alias name cannot be blank"))
             } else {
-                crate::alias_admin::create_alias(&input).map(|_| {
+                (|| -> anyhow::Result<()> {
+                    crate::alias_admin::create_alias(&input)?;
+                    let warnings = crate::wrapper_sync::ensure_wrapper(&input)?;
+                    emit_wrapper_warnings_to_alert(state, &input, warnings);
                     refresh_aliases_and_select(state, &input, list_height);
                     state.active_surface = ControlSurface::Toml;
                     state.focus = PaneFocus::Inspector;
                     state.inspector_mode = InspectorMode::TomlMenu;
-                })
+                    Ok(())
+                })()
             }
         }
         PromptKind::RenameAlias => {
@@ -691,9 +695,16 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
             if input.is_empty() {
                 Err(anyhow::anyhow!("rename target alias cannot be blank"))
             } else {
-                crate::alias_admin::rename_alias(&source_alias, &input).map(|_| {
+                (|| -> anyhow::Result<()> {
+                    crate::alias_admin::rename_alias(&source_alias, &input)?;
+                    if let Err(err) = crate::wrapper_sync::remove_wrapper(&source_alias, None) {
+                        state.alert_message = Some(format!("warning for `{source_alias}`: {err}"));
+                    }
+                    let warnings = crate::wrapper_sync::ensure_wrapper(&input)?;
+                    emit_wrapper_warnings_to_alert(state, &input, warnings);
                     refresh_aliases_and_select(state, &input, list_height);
-                })
+                    Ok(())
+                })()
             }
         }
         PromptKind::DuplicateAlias => {
@@ -703,9 +714,13 @@ fn submit_prompt(state: &mut AppState, list_height: usize) {
             if input.is_empty() {
                 Err(anyhow::anyhow!("duplicate target alias cannot be blank"))
             } else {
-                crate::alias_admin::duplicate_alias(&source_alias, &input).map(|_| {
+                (|| -> anyhow::Result<()> {
+                    crate::alias_admin::duplicate_alias(&source_alias, &input)?;
+                    let warnings = crate::wrapper_sync::ensure_wrapper(&input)?;
+                    emit_wrapper_warnings_to_alert(state, &input, warnings);
                     refresh_aliases_and_select(state, &input, list_height);
-                })
+                    Ok(())
+                })()
             }
         }
         PromptKind::DeleteAlias => {
@@ -794,6 +809,7 @@ fn toggle_selected_alias_toml_field(state: &mut AppState, field: TomlField) -> a
     let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
     toggle_toml_field(&mut doc, field, &alias)?;
     crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    emit_first_wrapper_warning(state, &alias);
     invalidate_artifacts(state);
     Ok(())
 }
@@ -811,6 +827,7 @@ fn apply_selected_alias_toml_field_input(
     let (mut doc, path) = crate::alias_admin::load_or_seed_alias_doc(&alias)?;
     apply_toml_field_input(&mut doc, field, input, &alias)?;
     crate::alias_admin::save_alias_doc_at(&path, &doc)?;
+    emit_first_wrapper_warning(state, &alias);
     invalidate_artifacts(state);
     Ok(())
 }
@@ -1258,6 +1275,7 @@ fn activate_method_editor_for_field(
     let method_kind = method_kind_for_field(field).expect("method field kind");
     set_configured_method_name(&mut doc, field, Some(method_name.clone()), &alias)?;
     crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    emit_first_wrapper_warning(state, &alias);
     let before_methods =
         seed_method_and_capture_before_methods(&rhai_path, &method_name, method_kind)?;
 
@@ -1274,6 +1292,7 @@ fn activate_method_editor_for_field(
     let after_methods = crate::rhai_wiring::read_compatible_methods(&rhai_path)?;
     sync_configured_methods_after_edit(&mut doc, &before_methods, &after_methods, &alias)?;
     crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    emit_first_wrapper_warning(state, &alias);
     invalidate_artifacts(state);
     refresh_aliases(state)?;
     Ok(())
@@ -1311,8 +1330,24 @@ fn apply_selected_alias_method_choice(
     )?;
     set_configured_method_name(&mut doc, field, Some(method_name.to_string()), &alias)?;
     crate::alias_admin::save_alias_doc_at(&doc_path, &doc)?;
+    emit_first_wrapper_warning(state, &alias);
     invalidate_artifacts(state);
     Ok(())
+}
+
+fn emit_wrapper_warnings_to_alert(state: &mut AppState, alias: &str, warnings: Vec<String>) {
+    let first = warnings.first().map(String::as_str).unwrap_or("");
+    if !first.is_empty() {
+        state.alert_message = Some(format!("warning for `{alias}`: {first}"));
+    }
+}
+
+fn emit_first_wrapper_warning(state: &mut AppState, alias: &str) {
+    emit_wrapper_warnings_to_alert(
+        state,
+        alias,
+        crate::wrapper_sync::wrapper_health_warnings(alias),
+    );
 }
 
 fn sync_configured_methods_after_edit(
@@ -1653,7 +1688,10 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
         Paragraph::new(Line::from(vec![
             Span::styled("chopper", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("  "),
-            Span::raw(truncate_line(guidance, area.width.saturating_sub(9) as usize)),
+            Span::raw(truncate_line(
+                guidance,
+                area.width.saturating_sub(9) as usize,
+            )),
         ])),
         area,
     );

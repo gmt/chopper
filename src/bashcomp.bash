@@ -330,7 +330,7 @@ _chopper_complete_alias_admin_mutation() {
             ;;
     esac
 
-    local opts="--exec --arg --env --env-remove --journal-namespace --journal-stderr --journal-identifier --journal-user-scope --journal-ensure --journal-max-use --journal-rate-limit-interval-usec --journal-rate-limit-burst --journal-clear"
+    local opts="--exec --arg --env --env-remove --journal-namespace --journal-stderr --journal-identifier --journal-user-scope --journal-ensure --journal-max-use --journal-rate-limit-interval-usec --journal-rate-limit-burst --journal-clear --no-wrapper-sync"
     COMPREPLY=($(compgen -W "$opts" -- "$cur"))
 }
 
@@ -352,7 +352,7 @@ _chopper_complete_alias_admin_remove() {
             ;;
     esac
 
-    COMPREPLY=($(compgen -W "--mode --symlink-path" -- "$cur"))
+    COMPREPLY=($(compgen -W "--mode --symlink-path --no-wrapper-sync" -- "$cur"))
 }
 
 _chopper_complete_alias_admin() {

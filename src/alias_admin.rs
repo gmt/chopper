@@ -26,6 +26,7 @@ struct MutationInput {
     journal_rate_limit_interval_usec: Option<u64>,
     journal_rate_limit_burst: Option<u32>,
     journal_clear: bool,
+    no_wrapper_sync: bool,
 }
 
 impl MutationInput {
@@ -121,11 +122,12 @@ fn print_alias_help() {
     println!("  add <alias> --exec <command> [options]");
     println!("      Create a new alias. Fails if the alias already exists.");
     println!("      Requires --exec.");
+    println!("      By default, creates/updates a wrapper symlink in ~/bin or ~/.local/bin.");
     println!();
     println!("  set <alias> [options]");
     println!("      Update fields on an existing alias. At least one option required.");
     println!();
-    println!("  remove <alias> [--mode clean|dirty] [--symlink-path <path>]");
+    println!("  remove <alias> [--mode clean|dirty] [--symlink-path <path>] [--no-wrapper-sync]");
     println!("      Remove an alias config and its symlink.");
     println!("      --mode clean (default): remove config file and symlink");
     println!("      --mode dirty: remove symlink only, keep config file");
@@ -144,6 +146,7 @@ fn print_alias_help() {
     println!("  --journal-rate-limit-interval-usec <usec>  Rate-limit window (microseconds)");
     println!("  --journal-rate-limit-burst <n>             Max messages per window");
     println!("  --journal-clear            Remove all journal settings from alias");
+    println!("  --no-wrapper-sync          Skip automatic wrapper create/remove");
     println!();
     println!("Examples:");
     println!("  chopper --alias add mygrep --exec grep --arg -n");
@@ -160,7 +163,9 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!("Usage: chopper --alias get <alias>");
             println!();
             println!("Print the full configuration for an alias as formatted JSON.");
-            println!("Includes exec, args, env, env_remove, journal, reconcile, and bashcomp fields.");
+            println!(
+                "Includes exec, args, env, env_remove, journal, reconcile, and bashcomp fields."
+            );
             println!();
             println!("Example:");
             println!("  chopper --alias get mygrep");
@@ -170,6 +175,7 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!();
             println!("Create a new alias TOML config. Fails if the alias already exists.");
             println!("Use `set` to modify an existing alias.");
+            println!("By default, writes/refreshes a wrapper symlink in ~/bin or ~/.local/bin.");
             println!();
             println!("Required:");
             println!("  --exec <command>           Command to execute");
@@ -180,12 +186,19 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!("  --env-remove KEY           Unset an environment variable at runtime (repeatable)");
             println!("  --journal-namespace <ns>   Enable systemd journaling under this namespace");
             println!("  --journal-stderr true|false  Capture stderr to journal (default: true)");
-            println!("  --journal-identifier <id>  Override the syslog identifier in journal entries");
-            println!("  --journal-user-scope true|false  Use user-scope journal unit (default: false)");
+            println!(
+                "  --journal-identifier <id>  Override the syslog identifier in journal entries"
+            );
+            println!(
+                "  --journal-user-scope true|false  Use user-scope journal unit (default: false)"
+            );
             println!("  --journal-ensure true|false  Hard-fail if journald is unavailable (default: false)");
-            println!("  --journal-max-use <size>   Max journal disk usage for this alias (e.g. 500M)");
+            println!(
+                "  --journal-max-use <size>   Max journal disk usage for this alias (e.g. 500M)"
+            );
             println!("  --journal-rate-limit-interval-usec <usec>  Rate-limit window length");
             println!("  --journal-rate-limit-burst <n>             Max log messages per window");
+            println!("  --no-wrapper-sync          Skip automatic wrapper symlink creation");
             println!();
             println!("Examples:");
             println!("  chopper --alias add mygrep --exec grep --arg -n");
@@ -195,13 +208,17 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
         "set" => {
             println!("Usage: chopper --alias set <alias> [options]");
             println!();
-            println!("Update one or more fields on an existing alias. At least one option is required.");
+            println!(
+                "Update one or more fields on an existing alias. At least one option is required."
+            );
             println!("Use `add` to create a new alias.");
             println!();
             println!("Options:");
             println!("  --exec <command>           Replace the exec command");
             println!("  --arg <value>              Replace fixed args with this set (repeatable)");
-            println!("  --env KEY=VALUE            Add or update an environment variable (repeatable)");
+            println!(
+                "  --env KEY=VALUE            Add or update an environment variable (repeatable)"
+            );
             println!("  --env-remove KEY           Add a key to the runtime env-remove list (repeatable)");
             println!("  --journal-namespace <ns>   Set/update the journal namespace");
             println!("  --journal-stderr true|false  Update stderr capture setting");
@@ -219,14 +236,17 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!("  chopper --alias set mygrep --journal-clear");
         }
         "remove" => {
-            println!("Usage: chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]");
+            println!("Usage: chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>] [--no-wrapper-sync]");
             println!();
             println!("Remove an alias and/or its symlink.");
             println!();
             println!("Options:");
             println!("  --mode clean (default)  Remove both the config file and the symlink");
             println!("  --mode dirty            Remove only the symlink; keep the config file");
-            println!("  --symlink-path <path>   Explicit symlink path to remove (overrides PATH lookup)");
+            println!(
+                "  --symlink-path <path>   Explicit symlink path to remove (overrides PATH lookup)"
+            );
+            println!("  --no-wrapper-sync       Skip automatic wrapper symlink removal");
             println!();
             println!("Examples:");
             println!("  chopper --alias remove mygrep");
@@ -265,6 +285,7 @@ fn run_get(alias: &str) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&output).context("failed to serialize alias output")?
     );
+    emit_wrapper_warnings(alias);
     Ok(())
 }
 
@@ -319,6 +340,10 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
             bashcomp: None,
         };
         save_alias_doc(&target_path, &doc)?;
+        if !mutation.no_wrapper_sync {
+            emit_warnings(crate::wrapper_sync::ensure_wrapper(alias)?);
+        }
+        emit_wrapper_warnings(alias);
         println!("added alias `{alias}` at {}", target_path.display());
         return Ok(());
     }
@@ -408,6 +433,7 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
     }
 
     save_alias_doc(&existing_path, &doc)?;
+    emit_wrapper_warnings(alias);
     println!("updated alias `{alias}` at {}", existing_path.display());
     Ok(())
 }
@@ -415,7 +441,7 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
 fn run_remove(raw_args: &[String]) -> Result<()> {
     if raw_args.is_empty() {
         return Err(anyhow!(
-            "usage: chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]"
+            "usage: chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>] [--no-wrapper-sync]"
         ));
     }
     let alias = &raw_args[0];
@@ -423,6 +449,7 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
 
     let mut mode = RemoveMode::Clean;
     let mut symlink_path: Option<PathBuf> = None;
+    let mut no_wrapper_sync = false;
     let mut idx = 1;
     while idx < raw_args.len() {
         match raw_args[idx].as_str() {
@@ -448,11 +475,20 @@ fn run_remove(raw_args: &[String]) -> Result<()> {
                 symlink_path = Some(PathBuf::from(value));
                 idx += 2;
             }
+            "--no-wrapper-sync" => {
+                no_wrapper_sync = true;
+                idx += 1;
+            }
             other => return Err(anyhow!("unknown remove option `{other}`")),
         }
     }
+    if mode == RemoveMode::Dirty && no_wrapper_sync {
+        return Err(anyhow!(
+            "--mode dirty cannot be combined with --no-wrapper-sync"
+        ));
+    }
 
-    remove_alias_with_mode(alias, mode, symlink_path)?;
+    remove_alias_with_mode(alias, mode, symlink_path, no_wrapper_sync)?;
     println!("removed alias `{alias}` ({mode:?})");
     Ok(())
 }
@@ -464,18 +500,16 @@ pub(crate) fn remove_alias_for_tui(alias: &str, keep_configs: bool) -> Result<()
     } else {
         RemoveMode::Clean
     };
-    remove_alias_with_mode(alias, mode, None)
+    remove_alias_with_mode(alias, mode, None, false)
 }
 
 fn remove_alias_with_mode(
     alias: &str,
     mode: RemoveMode,
     symlink_path: Option<PathBuf>,
+    no_wrapper_sync: bool,
 ) -> Result<()> {
     let mut removed_any = false;
-    let symlink_candidate = symlink_path
-        .or_else(|| which::which(alias).ok())
-        .filter(|path| path.exists());
 
     match mode {
         RemoveMode::Clean => {
@@ -486,36 +520,38 @@ fn remove_alias_with_mode(
                 removed_any = true;
             }
             crate::cache::prune_alias(alias);
-            if let Some(path) = symlink_candidate {
-                if path.is_symlink() {
-                    fs_err::remove_file(&path)
-                        .with_context(|| format!("failed to remove symlink {}", path.display()))?;
+            if !no_wrapper_sync {
+                if crate::wrapper_sync::remove_wrapper(alias, symlink_path)? {
                     removed_any = true;
                 }
             }
         }
         RemoveMode::Dirty => {
-            let Some(path) = symlink_candidate else {
-                return Err(anyhow!(
-                    "keep-configs delete requires a discoverable symlink; pass --symlink-path <path>"
-                ));
-            };
-            if !path.is_symlink() {
-                return Err(anyhow!(
-                    "keep-configs delete only removes symlinks; `{}` is not a symlink",
-                    path.display()
-                ));
+            if crate::wrapper_sync::remove_wrapper(alias, symlink_path)? {
+                removed_any = true;
             }
-            fs_err::remove_file(&path)
-                .with_context(|| format!("failed to remove symlink {}", path.display()))?;
-            removed_any = true;
         }
     }
 
     if !removed_any {
+        if mode == RemoveMode::Dirty {
+            return Err(anyhow!(
+                "keep-configs delete requires an existing wrapper symlink; pass --symlink-path <path> if needed"
+            ));
+        }
         return Err(anyhow!("nothing was removed for alias `{alias}`"));
     }
     Ok(())
+}
+
+fn emit_warnings(warnings: Vec<String>) {
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
+}
+
+fn emit_wrapper_warnings(alias: &str) {
+    emit_warnings(crate::wrapper_sync::wrapper_health_warnings(alias));
 }
 
 fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
@@ -532,6 +568,7 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
     let mut journal_rate_limit_interval_usec = None;
     let mut journal_rate_limit_burst = None;
     let mut journal_clear = false;
+    let mut no_wrapper_sync = false;
 
     let mut idx = 0;
     while idx < raw_args.len() {
@@ -628,6 +665,10 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 journal_clear = true;
                 idx += 1;
             }
+            "--no-wrapper-sync" => {
+                no_wrapper_sync = true;
+                idx += 1;
+            }
             other => return Err(anyhow!("unknown option `{other}`")),
         }
     }
@@ -646,6 +687,7 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
         journal_rate_limit_interval_usec,
         journal_rate_limit_burst,
         journal_clear,
+        no_wrapper_sync,
     })
 }
 
@@ -850,12 +892,12 @@ fn validate_alias(alias: &str) -> Result<()> {
     alias_validation::validate_alias_identifier(alias).map_err(|v| match v {
         AliasViolation::Empty => anyhow!("alias name cannot be empty"),
         AliasViolation::ContainsNul => anyhow!("alias name cannot contain NUL bytes"),
-        AliasViolation::IsSeparator => anyhow!(
-            "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
-        ),
-        AliasViolation::StartsWithDash => anyhow!(
-            "alias name cannot start with `-`; choose a non-flag alias name"
-        ),
+        AliasViolation::IsSeparator => {
+            anyhow!("alias name cannot be `--`; expected `chopper <alias> -- [args...]`")
+        }
+        AliasViolation::StartsWithDash => {
+            anyhow!("alias name cannot start with `-`; choose a non-flag alias name")
+        }
         AliasViolation::ContainsWhitespace => {
             anyhow!("alias name cannot contain whitespace")
         }
@@ -898,6 +940,7 @@ mod tests {
             "true".into(),
             "--journal-ensure".into(),
             "true".into(),
+            "--no-wrapper-sync".into(),
         ])
         .expect("mutation parse");
         assert_eq!(mutation.exec.as_deref(), Some("echo"));
@@ -909,6 +952,7 @@ mod tests {
         assert_eq!(mutation.journal_identifier.as_deref(), Some("svc"));
         assert_eq!(mutation.journal_user_scope, Some(true));
         assert_eq!(mutation.journal_ensure, Some(true));
+        assert!(mutation.no_wrapper_sync);
     }
 
     #[test]

@@ -25,6 +25,7 @@ mod string_validation;
 mod test_support;
 mod tui;
 mod tui_nvim;
+mod wrapper_sync;
 
 use anyhow::{anyhow, Result};
 use std::env;
@@ -160,8 +161,10 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("  --print-bashcomp-mode <alias> Print bashcomp mode for alias");
             println!("  --complete <alias> <cword> [--] <words...>");
             println!("                               Run Rhai completion for alias");
-            println!("  --alias <subcommand> [...]   Alias lifecycle management
-  --help --alias               Show alias subcommand help");
+            println!(
+                "  --alias <subcommand> [...]   Alias lifecycle management
+  --help --alias               Show alias subcommand help"
+            );
             println!("  --tui                        Open interactive terminal UI");
             println!();
             println!("Environment overrides:");

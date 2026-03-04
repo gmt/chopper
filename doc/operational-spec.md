@@ -317,14 +317,15 @@ Examples that **leave reconcile enabled**:
 
 ```bash
 chopper --alias get <alias>
-chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...]
+chopper --alias add <alias> --exec <command> [--arg <arg> ...] [--env KEY=VALUE ...] [--no-wrapper-sync]
 chopper --alias set <alias> [--exec <command>] [--arg <arg> ...] [--env KEY=VALUE ...]
-chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]
+chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>] [--no-wrapper-sync]
 ```
 
 Key semantics:
 
 - `add` writes TOML alias configs under `aliases/<alias>.toml`.
+- `add` also creates/refreshes an alias wrapper symlink by default.
 - `set` updates existing TOML alias configs.
 - journal mutation flags:
   - `--journal-namespace <value>`
@@ -338,6 +339,15 @@ Key semantics:
   - `--journal-clear`
 - `remove --mode clean` removes config + cache and attempts symlink cleanup.
 - `remove --mode dirty` removes symlink only, preserving config for reactivation.
+- wrapper path selection for auto create/remove:
+  - candidate dirs are `$HOME/bin` and `$HOME/.local/bin`
+  - if either candidate appears in `$PATH`, the first candidate in `$PATH` wins
+  - otherwise, `$HOME/.local/bin` is selected
+  - selected wrapper dir is auto-created when missing
+- `--no-wrapper-sync` disables automatic wrapper create/remove in that command.
+- alias manipulations on existing aliases (`get`, `set`, TUI edit flows) emit
+  warnings when wrappers are missing, wrapper dirs are not in `$PATH`, or the
+  wrapper is shadowed by an earlier `$PATH` entry.
 
 ---
 
