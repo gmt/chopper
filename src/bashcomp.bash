@@ -9,10 +9,8 @@
 # to delegate completion to the underlying command's native completer. Queries
 # chopper introspection builtins for alias state and caches results per-session.
 
-# Guard: only define once per shell session.
-if declare -F _chopper_complete &>/dev/null; then
-    return 0 2>/dev/null || true
-fi
+# Always reload on source so function bodies match the currently running
+# chopper binary with minimal bash-side state.
 
 # ---------------------------------------------------------------------------
 # Session cache
@@ -280,6 +278,155 @@ _chopper_project_shims() {
 # ---------------------------------------------------------------------------
 # Register completions for chopper itself (direct invocation mode)
 # ---------------------------------------------------------------------------
+_chopper_complete_alias_admin_mutation() {
+    local cur="${COMP_WORDS[$COMP_CWORD]}"
+    local prev=""
+    if (( COMP_CWORD > 0 )); then
+        prev="${COMP_WORDS[$((COMP_CWORD - 1))]}"
+    fi
+
+    case "$prev" in
+        --exec)
+            COMPREPLY=($(compgen -c -- "$cur"))
+            return 0
+            ;;
+        --arg|--journal-identifier)
+            COMPREPLY=($(compgen -o default -- "$cur"))
+            return 0
+            ;;
+        --env-remove)
+            COMPREPLY=($(compgen -v -- "$cur"))
+            return 0
+            ;;
+        --env)
+            COMPREPLY=()
+            if [[ "$cur" != *=* ]]; then
+                local key
+                while IFS= read -r key; do
+                    COMPREPLY+=("${key}=")
+                done < <(compgen -v -- "$cur")
+            fi
+            return 0
+            ;;
+        --journal-namespace)
+            COMPREPLY=($(compgen -W "default" -- "$cur"))
+            return 0
+            ;;
+        --journal-stderr|--journal-user-scope|--journal-ensure)
+            COMPREPLY=($(compgen -W "true false" -- "$cur"))
+            return 0
+            ;;
+        --journal-max-use)
+            COMPREPLY=($(compgen -W "64M 128M 256M 512M 1G" -- "$cur"))
+            return 0
+            ;;
+        --journal-rate-limit-interval-usec)
+            COMPREPLY=($(compgen -W "1000000 30000000 60000000" -- "$cur"))
+            return 0
+            ;;
+        --journal-rate-limit-burst)
+            COMPREPLY=($(compgen -W "100 500 1000" -- "$cur"))
+            return 0
+            ;;
+    esac
+
+    local opts="--exec --arg --env --env-remove --journal-namespace --journal-stderr --journal-identifier --journal-user-scope --journal-ensure --journal-max-use --journal-rate-limit-interval-usec --journal-rate-limit-burst --journal-clear"
+    COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+}
+
+_chopper_complete_alias_admin_remove() {
+    local cur="${COMP_WORDS[$COMP_CWORD]}"
+    local prev=""
+    if (( COMP_CWORD > 0 )); then
+        prev="${COMP_WORDS[$((COMP_CWORD - 1))]}"
+    fi
+
+    case "$prev" in
+        --mode)
+            COMPREPLY=($(compgen -W "clean dirty" -- "$cur"))
+            return 0
+            ;;
+        --symlink-path)
+            COMPREPLY=($(compgen -f -- "$cur"))
+            return 0
+            ;;
+    esac
+
+    COMPREPLY=($(compgen -W "--mode --symlink-path" -- "$cur"))
+}
+
+_chopper_complete_alias_admin() {
+    local cur="${COMP_WORDS[$COMP_CWORD]}"
+    local sub="${COMP_WORDS[2]}"
+
+    if (( COMP_CWORD == 2 )); then
+        COMPREPLY=($(compgen -W "get add set remove help --help" -- "$cur"))
+        return 0
+    fi
+
+    if (( COMP_CWORD == 3 )); then
+        case "$sub" in
+            get|remove)
+                local aliases
+                aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
+                COMPREPLY=($(compgen -W "$aliases --help" -- "$cur"))
+                return 0
+                ;;
+            set)
+                if [[ "$cur" == -* ]]; then
+                    _chopper_complete_alias_admin_mutation
+                    return 0
+                fi
+                local aliases
+                aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
+                COMPREPLY=($(compgen -W "$aliases --help" -- "$cur"))
+                return 0
+                ;;
+            add)
+                if [[ "$cur" == -* ]]; then
+                    _chopper_complete_alias_admin_mutation
+                    return 0
+                fi
+                COMPREPLY=($(compgen -W "--help" -- "$cur"))
+                return 0
+                ;;
+            help|--help)
+                COMPREPLY=($(compgen -W "get add set remove" -- "$cur"))
+                return 0
+                ;;
+            *)
+                COMPREPLY=()
+                return 0
+                ;;
+        esac
+    fi
+
+    case "$sub" in
+        get|help|--help)
+            COMPREPLY=()
+            return 0
+            ;;
+        add|set)
+            if [[ "${COMP_WORDS[3]}" == "--help" ]]; then
+                COMPREPLY=()
+                return 0
+            fi
+            _chopper_complete_alias_admin_mutation
+            return 0
+            ;;
+        remove)
+            if [[ "${COMP_WORDS[3]}" == "--help" ]]; then
+                COMPREPLY=()
+                return 0
+            fi
+            _chopper_complete_alias_admin_remove
+            return 0
+            ;;
+    esac
+
+    COMPREPLY=()
+}
+
 _chopper_complete_direct() {
     local cur="${COMP_WORDS[$COMP_CWORD]}"
 
@@ -294,21 +441,10 @@ _chopper_complete_direct() {
 
     local flag="${COMP_WORDS[1]}"
 
-    # chopper --alias <subcommand>  →  complete subcommand names (or --help)
-    if (( COMP_CWORD == 2 )) && [[ "$flag" == "--alias" ]]; then
-        COMPREPLY=($(compgen -W "get add set remove --help" -- "$cur"))
+    # chopper --alias ...  →  complete alias-admin subcommands, options, and values.
+    if [[ "$flag" == "--alias" ]]; then
+        _chopper_complete_alias_admin
         return 0
-    fi
-
-    # chopper --alias <subcommand> <alias>  →  complete alias names
-    if (( COMP_CWORD == 3 )) && [[ "$flag" == "--alias" ]]; then
-        local sub="${COMP_WORDS[2]}"
-        if [[ "$sub" == "get" || "$sub" == "add" || "$sub" == "set" || "$sub" == "remove" ]]; then
-            local aliases
-            aliases=$(chopper --list-aliases 2>/dev/null) || aliases=""
-            COMPREPLY=($(compgen -W "$aliases" -- "$cur"))
-            return 0
-        fi
     fi
 
     # chopper --help <next>  →  offer --alias as the meaningful follow-on
@@ -326,7 +462,7 @@ _chopper_complete_direct() {
     fi
 
     # For `chopper <alias> [args...]`, delegate to the alias's completion.
-    if (( COMP_CWORD >= 2 )); then
+    if (( COMP_CWORD >= 2 )) && [[ "$flag" != -* ]]; then
         local alias_name="${COMP_WORDS[1]}"
         # Temporarily rewrite as if the alias was invoked directly.
         local _chopper_orig_words=("${COMP_WORDS[@]}")
@@ -349,6 +485,8 @@ _chopper_complete_direct() {
         COMP_POINT="$_chopper_orig_point"
         return 0
     fi
+
+    COMPREPLY=()
 }
 
 # ---------------------------------------------------------------------------

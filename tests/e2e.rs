@@ -59,6 +59,53 @@ fn run_chopper_with_cwd_and_argv0(
     cmd.output().expect("failed to run chopper")
 }
 
+fn run_direct_bash_completion(
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    words: &[&str],
+    cword: usize,
+) -> Vec<String> {
+    let bashcomp_output = run_chopper(config_home, cache_home, &["--bashcomp"]);
+    assert!(
+        bashcomp_output.status.success(),
+        "failed to emit bashcomp script: {}",
+        String::from_utf8_lossy(&bashcomp_output.stderr)
+    );
+
+    let temp = TempDir::new().expect("create completion harness temp dir");
+    let script_path = temp.path().join("bashcomp.bash");
+    fs::write(&script_path, &bashcomp_output.stdout).expect("write bashcomp script");
+
+    let bin_dir = temp.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("create completion harness bin dir");
+    symlink(chopper_bin(), bin_dir.join("chopper")).expect("symlink chopper into harness bin dir");
+
+    let path_value = std::env::var("PATH").unwrap_or_default();
+    let output = Command::new("bash")
+        .arg("-lc")
+        .arg("source \"$1\"; shift; COMP_WORDS=(\"$@\"); COMP_CWORD=\"$CHOPPER_TEST_CWORD\"; COMP_LINE=\"${COMP_WORDS[*]}\"; COMP_POINT=${#COMP_LINE}; _chopper_complete_direct; printf '%s\\n' \"${COMPREPLY[@]}\"")
+        .arg("bash")
+        .arg(&script_path)
+        .args(words)
+        .env("CHOPPER_TEST_CWORD", cword.to_string())
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("PATH", format!("{}:{path_value}", bin_dir.display()))
+        .output()
+        .expect("failed to execute completion harness");
+    assert!(
+        output.status.success(),
+        "completion harness failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.to_string())
+        .collect()
+}
+
 fn prepare_reconcile_script_fixtures(config_home: &TempDir) {
     let aliases_root = config_home.path().join("chopper/aliases");
     prepare_reconcile_script_fixtures_in_dir(&aliases_root);
@@ -13157,6 +13204,88 @@ fn bashcomp_flag_emits_valid_bash_script() {
         "bashcomp output is not valid bash: {}",
         String::from_utf8_lossy(&bash_check.stderr)
     );
+}
+
+#[test]
+fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(aliases_dir.join("foo-alias.toml"), "exec = \"echo\"\n").expect("write foo-alias");
+    fs::write(aliases_dir.join("foo-beta.toml"), "exec = \"echo\"\n").expect("write foo-beta");
+
+    let subcommands = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "g"],
+        2,
+    );
+    assert_eq!(subcommands, vec!["get"]);
+
+    let get_alias = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "get", "foo-a"],
+        3,
+    );
+    assert_eq!(get_alias, vec!["foo-alias"]);
+
+    let set_flags_without_alias = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "set", "--j"],
+        3,
+    );
+    assert!(
+        set_flags_without_alias
+            .iter()
+            .any(|value| value == "--journal-stderr"),
+        "{set_flags_without_alias:?}"
+    );
+
+    let set_flags = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "set", "foo-alias", "--j"],
+        4,
+    );
+    assert!(
+        set_flags.iter().any(|value| value == "--journal-namespace"),
+        "{set_flags:?}"
+    );
+    assert!(
+        set_flags.iter().any(|value| value == "--journal-stderr"),
+        "{set_flags:?}"
+    );
+    assert!(
+        set_flags.iter().any(|value| value == "--journal-clear"),
+        "{set_flags:?}"
+    );
+
+    let bool_value = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &[
+            "chopper",
+            "--alias",
+            "set",
+            "foo-alias",
+            "--journal-stderr",
+            "t",
+        ],
+        5,
+    );
+    assert_eq!(bool_value, vec!["true"]);
+
+    let remove_mode = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "remove", "foo-alias", "--mode", "d"],
+        5,
+    );
+    assert_eq!(remove_mode, vec!["dirty"]);
 }
 
 #[test]
