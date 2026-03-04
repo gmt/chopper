@@ -1461,45 +1461,6 @@ fn sync_artifacts_for_selection(state: &mut AppState) {
     state.toml_cursor = 0;
 }
 
-fn surface_has_data(artifacts: &AliasArtifacts, surface: ControlSurface) -> bool {
-    match surface {
-        ControlSurface::Toml => true,
-        ControlSurface::Reconcile => artifacts.shared_rhai_path.is_some(),
-    }
-}
-
-fn set_active_surface(state: &mut AppState, surface: ControlSurface) {
-    state.active_surface = surface;
-    state.inspector_mode = if surface == ControlSurface::Toml {
-        InspectorMode::TomlMenu
-    } else {
-        InspectorMode::Browse
-    };
-    if state.layout == LayoutKind::Modal {
-        state.focus = PaneFocus::Inspector;
-    }
-}
-
-fn cycle_surface(state: &mut AppState, forward: bool) {
-    let all = ControlSurface::all();
-    let Some(mut idx) = all.iter().position(|value| *value == state.active_surface) else {
-        state.active_surface = ControlSurface::Toml;
-        state.inspector_mode = InspectorMode::TomlMenu;
-        return;
-    };
-    idx = if forward {
-        (idx + 1) % all.len()
-    } else {
-        (idx + all.len() - 1) % all.len()
-    };
-    state.active_surface = all[idx];
-    state.inspector_mode = if state.active_surface == ControlSurface::Toml {
-        InspectorMode::TomlMenu
-    } else {
-        InspectorMode::Browse
-    };
-}
-
 fn pause_terminal_for_subprocess<T, F>(terminal: &mut AppTerminal, run: F) -> anyhow::Result<T>
 where
     F: FnOnce() -> anyhow::Result<T>,
@@ -1856,42 +1817,6 @@ fn render_inspector(frame: &mut Frame, area: Rect, state: &AppState, tab_mode: T
     );
     let _ = tab_mode;
     render_inspector_details(frame, chunks[1], state);
-}
-
-fn surface_tabs_line(state: &AppState, tab_mode: TabStripMode) -> Line<'static> {
-    if tab_mode == TabStripMode::Compact {
-        return Line::from(Span::styled(
-            state.active_surface.label(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let mut spans = Vec::new();
-    for surface in ControlSurface::all() {
-        let has_data = surface_has_data(&state.artifacts, surface);
-        let active = state.active_surface == surface;
-        let label = if active {
-            format!("[{}]", surface.label())
-        } else {
-            format!(" {} ", surface.label())
-        };
-        let style = if active {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-        } else if has_data {
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-        spans.push(Span::styled(label, style));
-        spans.push(Span::raw(" "));
-    }
-    Line::from(spans)
 }
 
 fn render_inspector_details(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -2443,10 +2368,9 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        alias_viewport_rows, compute_layout, content_height, cycle_surface,
-        ensure_selection_visible, handle_key_event, inspector_scroll_position, set_active_surface,
-        surface_has_data, AppState, ControlSurface, InspectorMode, LayoutKind, LoopAction,
-        PaneFocus, TabStripMode, TomlField,
+        alias_viewport_rows, compute_layout, content_height, ensure_selection_visible,
+        handle_key_event, inspector_scroll_position, AppState, ControlSurface, InspectorMode,
+        LayoutKind, LoopAction, PaneFocus, TabStripMode, TomlField,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -2573,13 +2497,6 @@ mod tests {
     }
 
     #[test]
-    fn control_surfaces_report_data_presence() {
-        let artifacts = super::AliasArtifacts::default();
-        assert!(surface_has_data(&artifacts, ControlSurface::Toml));
-        assert!(!surface_has_data(&artifacts, ControlSurface::Reconcile));
-    }
-
-    #[test]
     fn release_key_events_are_ignored() {
         let mut state = sample_state(LayoutKind::Split);
         let key = KeyEvent {
@@ -2605,22 +2522,6 @@ mod tests {
         let modal_action = handle_key_event(&mut modal, key, 10);
         assert_eq!(modal_action, LoopAction::Continue);
         assert_eq!(modal.focus, PaneFocus::Inspector);
-    }
-
-    #[test]
-    fn selecting_missing_surface_is_allowed() {
-        let mut state = sample_state(LayoutKind::Split);
-        set_active_surface(&mut state, ControlSurface::Reconcile);
-        assert_eq!(state.active_surface, ControlSurface::Reconcile);
-    }
-
-    #[test]
-    fn surface_cycle_visits_all_surfaces_even_without_data() {
-        let mut state = sample_state(LayoutKind::Split);
-        cycle_surface(&mut state, true);
-        assert_eq!(state.active_surface, ControlSurface::Reconcile);
-        cycle_surface(&mut state, true);
-        assert_eq!(state.active_surface, ControlSurface::Toml);
     }
 
     #[test]
