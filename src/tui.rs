@@ -1653,18 +1653,14 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
         Paragraph::new(Line::from(vec![
             Span::styled("chopper", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("  "),
-            Span::raw(truncate_line(
-                &guidance,
-                area.width.saturating_sub(9) as usize,
-            )),
+            Span::raw(truncate_line(guidance, area.width.saturating_sub(9) as usize)),
         ])),
         area,
     );
 }
 
-fn banner_guidance(_state: &AppState) -> String {
+fn banner_guidance(_state: &AppState) -> &'static str {
     "Enter/→: inspect | Space: choose method | +/%/!/-: alias ops | e: edit reconcile | r: refresh | q: quit"
-        .to_string()
 }
 
 fn render_content(frame: &mut Frame, area: Rect, state: &AppState, layout_plan: LayoutPlan) {
