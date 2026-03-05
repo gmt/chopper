@@ -23,7 +23,7 @@ impl JournalBroker {
     ///   - `rate_limit_burst`: integer as decimal string
     ///
     /// The broker validates ownership, enforces hard policy limits, writes a
-    /// journald drop-in config, and starts the namespace socket units.
+    /// journald drop-in config, and starts the namespace journald service.
     async fn ensure_namespace(
         &self,
         #[zbus(header)] header: zbus::message::Header<'_>,
@@ -56,8 +56,8 @@ impl JournalBroker {
             zbus::fdo::Error::Failed(format!("failed to write drop-in config: {e}"))
         })?;
 
-        systemd::start_namespace_sockets(&namespace).map_err(|e| {
-            zbus::fdo::Error::Failed(format!("failed to start namespace sockets: {e}"))
+        systemd::start_namespace_service(&namespace).map_err(|e| {
+            zbus::fdo::Error::Failed(format!("failed to start namespace journald service: {e}"))
         })?;
 
         eprintln!("chopper-journal-broker: ensured namespace `{namespace}` for UID {caller_uid}");

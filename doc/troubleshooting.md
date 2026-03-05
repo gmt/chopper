@@ -122,3 +122,21 @@ Common causes:
 - blank `reconcile.function` / `bashcomp.rhai_function` disables feature wiring
 
 Use `operational-spec.md` for full validation rules and precedence semantics.
+
+---
+
+## 8) Recursion guard failures
+
+Symptoms:
+
+- `recursion guard` error when launching an alias
+
+Checks:
+
+1. Inspect alias `exec`; avoid pointing it at a wrapper symlink that resolves to
+   the running `chopper` binary under the same alias name.
+2. Prefer setting `exec` to the real target program path (for example
+   `/usr/bin/ghostty`) instead of a chopper wrapper name.
+3. If `exec` is a bare command name, ensure PATH contains a non-wrapper target
+   later in lookup order; chopper skips self-referential wrapper hits but still
+   errors if all candidates resolve back to itself.

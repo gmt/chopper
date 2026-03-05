@@ -334,7 +334,7 @@ fn resolve_exec_path(base_dir: &Path, exec: &str) -> PathBuf {
         return base_dir.join(exec_path);
     }
 
-    which::which(exec).unwrap_or_else(|_| exec.into())
+    crate::exec_resolution::resolve_command_path(exec)
 }
 
 fn looks_like_relative_exec_path(exec: &str) -> bool {

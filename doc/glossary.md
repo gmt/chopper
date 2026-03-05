@@ -44,7 +44,7 @@ Optional preflight call enabled by `journal.ensure = true`. `chopper` calls the
 `chopper-journal-broker` D-Bus service
 (`com.chopperproject.JournalBroker1.EnsureNamespace`) to create/start the
 journald namespace before starting `systemd-cat`. The broker validates UID
-ownership, writes drop-in configs, and starts namespace sockets.
+ownership, writes drop-in configs, and starts the namespace journald service.
 
 ## User-scoped journal namespace
 

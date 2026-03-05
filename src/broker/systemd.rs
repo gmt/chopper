@@ -43,25 +43,26 @@ pub fn write_journal_drop_in(namespace: &str, config: &JournalDropInConfig) -> R
     Ok(())
 }
 
-/// Start the journald namespace socket units for a given namespace.
+/// Start the journald namespace service for a given namespace.
 ///
-/// Runs `systemctl start systemd-journald@{namespace}.socket
-/// systemd-journald-varlink@{namespace}.socket`.
-pub fn start_namespace_sockets(namespace: &str) -> Result<()> {
-    let socket_unit = format!("systemd-journald@{namespace}.socket");
-    let varlink_unit = format!("systemd-journald-varlink@{namespace}.socket");
+/// Runs `systemctl start systemd-journald@{namespace}.service`.
+///
+/// The service unit itself requires the namespace socket units, so this brings
+/// up both the listener sockets and the journald worker process.
+pub fn start_namespace_service(namespace: &str) -> Result<()> {
+    let service_unit = format!("systemd-journald@{namespace}.service");
 
     let status = Command::new("systemctl")
-        .args(["start", &socket_unit, &varlink_unit])
+        .args(["start", &service_unit])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .status()
-        .with_context(|| format!("failed to run systemctl start for {socket_unit}"))?;
+        .with_context(|| format!("failed to run systemctl start for {service_unit}"))?;
 
     if !status.success() {
         return Err(anyhow!(
-            "systemctl start failed for namespace `{namespace}` (status {status})"
+            "systemctl start failed for namespace service `{namespace}` (status {status})"
         ));
     }
 

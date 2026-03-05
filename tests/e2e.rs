@@ -2,7 +2,9 @@ use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn chopper_bin() -> PathBuf {
@@ -38,6 +40,47 @@ fn run_chopper_with(
         cmd.env(key, value);
     }
     cmd.output().expect("failed to run chopper")
+}
+
+fn run_chopper_with_timeout(
+    executable: PathBuf,
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    args: &[&str],
+    timeout: Duration,
+    env_vars: impl IntoIterator<Item = (&'static str, String)>,
+) -> Output {
+    prepare_reconcile_script_fixtures(config_home);
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
+    let mut cmd = Command::new(executable);
+    cmd.args(args)
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("HOME", &home_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let mut child = cmd.spawn().expect("failed to run chopper");
+    let start = Instant::now();
+    loop {
+        if child.try_wait().expect("failed to poll child").is_some() {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("timed out waiting for chopper process (possible recursion loop)");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    child
+        .wait_with_output()
+        .expect("failed to collect chopper output")
 }
 
 fn run_chopper_with_cwd_and_argv0(
@@ -1592,6 +1635,77 @@ args = ["symlink-mode"]
 }
 
 #[test]
+fn self_targeting_wrapper_alias_uses_next_non_self_path_candidate() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(aliases_dir.join("ghostty.toml"), "exec = \"ghostty\"\n").expect("write alias");
+
+    let wrapper_dir = config_home.path().join("wrapper-bin");
+    let real_dir = config_home.path().join("real-bin");
+    fs::create_dir_all(&wrapper_dir).expect("create wrapper dir");
+    fs::create_dir_all(&real_dir).expect("create real dir");
+    let wrapper = wrapper_dir.join("ghostty");
+    let real = real_dir.join("ghostty");
+    symlink(chopper_bin(), &wrapper).expect("create ghostty wrapper symlink");
+    write_executable_script(
+        &real,
+        "#!/usr/bin/env bash\nprintf 'REAL_GHOSTTY %s\\n' \"$*\"\n",
+    );
+
+    let path_value = format!(
+        "{}:{}:{}",
+        wrapper_dir.display(),
+        real_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_chopper_with_timeout(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["ghostty"],
+        Duration::from_secs(2),
+        [("PATH", path_value)],
+    );
+    assert!(
+        output.status.success(),
+        "command failed unexpectedly: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REAL_GHOSTTY"), "{stdout}");
+}
+
+#[test]
+fn self_targeting_wrapper_alias_without_alternate_still_fails_fast() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(aliases_dir.join("ghostty.toml"), "exec = \"ghostty\"\n").expect("write alias");
+
+    let wrapper_dir = config_home.path().join("wrapper-bin");
+    fs::create_dir_all(&wrapper_dir).expect("create wrapper dir");
+    let wrapper = wrapper_dir.join("ghostty");
+    symlink(chopper_bin(), &wrapper).expect("create ghostty wrapper symlink");
+
+    let output = run_chopper_with_timeout(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["ghostty"],
+        Duration::from_secs(2),
+        [("PATH", wrapper_dir.display().to_string())],
+    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("recursion guard"), "{stderr}");
+}
+
+#[test]
 fn symlink_invocation_rejects_dash_prefixed_alias_name() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -2041,6 +2155,44 @@ fn missing_alias_config_falls_back_to_path_command_resolution() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PATH_FALLBACK=runtime"), "{stdout}");
+}
+
+#[test]
+fn missing_alias_config_skips_self_wrapper_and_uses_next_path_hit() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let wrapper_dir = TempDir::new().expect("create wrapper dir");
+    let real_dir = TempDir::new().expect("create real dir");
+    symlink(chopper_bin(), wrapper_dir.path().join("fallbackcmd"))
+        .expect("create self-wrapper candidate");
+    write_executable_script(
+        &real_dir.path().join("fallbackcmd"),
+        "#!/usr/bin/env bash\nprintf 'PATH_SKIP_SELF=%s\\n' \"$*\"\n",
+    );
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!(
+        "{}:{}:{existing_path}",
+        wrapper_dir.path().display(),
+        real_dir.path().display()
+    );
+    let output = run_chopper_with_timeout(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["fallbackcmd", "runtime"],
+        Duration::from_secs(2),
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PATH_SKIP_SELF=runtime"), "{stdout}");
 }
 
 #[test]
@@ -11049,7 +11201,7 @@ stderr = true
     assert!(stdout.contains("OUT_STREAM"), "{stdout}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("journal namespace requires systemd-cat --namespace support"),
+        stderr.contains("journal namespace sink may be unavailable"),
         "{stderr}"
     );
 }
@@ -11139,6 +11291,80 @@ stderr = true
     assert!(
         !side_effect.exists(),
         "child command should not run when systemd-cat exits immediately"
+    );
+}
+
+#[test]
+fn journal_sink_startup_retries_transient_failures_then_runs_child() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("journal-retry.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'OUT_OK\n'; printf 'ERR_OK\n' 1>&2"]
+
+[journal]
+namespace = "ops-e2e"
+stderr = true
+"#,
+    )
+    .expect("write alias config");
+
+    let fake_bin = TempDir::new().expect("create fake-bin dir");
+    let attempt_file = fake_bin.path().join("systemd-cat-attempt-count");
+    let script_path = fake_bin.path().join("systemd-cat");
+    write_executable_script(
+        &script_path,
+        &format!(
+            r#"#!/usr/bin/env bash
+attempt_file="{}"
+count=0
+if [[ -f "$attempt_file" ]]; then
+  count="$(cat "$attempt_file")"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$attempt_file"
+if [[ "$count" -lt 3 ]]; then
+  echo "Failed to create stream fd: Connection refused" >&2
+  exit 1
+fi
+cat >/dev/null
+exit 0
+"#,
+            attempt_file.display()
+        ),
+    );
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+
+    let output = run_chopper_with(
+        chopper_bin(),
+        &config_home,
+        &cache_home,
+        &["journal-retry"],
+        [("PATH", merged_path)],
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed unexpectedly: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("OUT_OK"), "{stdout}");
+
+    let attempts = fs::read_to_string(&attempt_file)
+        .expect("read attempt count")
+        .trim()
+        .parse::<u32>()
+        .expect("parse attempt count");
+    assert!(
+        attempts >= 3,
+        "expected retries before success; attempts={attempts}"
     );
 }
 

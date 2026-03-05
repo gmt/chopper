@@ -83,6 +83,12 @@ Built-in flags such as `--help`, `-h`, `--version`, and `-V` are treated as
 normal passthrough arguments in symlink mode, including print-path flags such
 as `--print-config-dir` and `--print-cache-dir`.
 
+For non-path-like `exec` values (PATH lookup mode), `chopper` skips PATH hits
+that resolve to the currently running `chopper` binary (for example a wrapper
+named `ghostty` that symlinks back to `chopper`) and continues to the next PATH
+candidate. If every PATH candidate resolves back to the current `chopper`
+binary, invocation fails fast with a recursion-guard error.
+
 Alias names in direct mode are logical identifiers (not filesystem paths), so
 path separators, whitespace, NUL bytes, and dash-prefixed tokens are rejected.
 The same alias-identifier validation rules are applied in symlink mode.
@@ -232,7 +238,7 @@ When `[journal]` is configured with `stderr = true`, `chopper`:
   - passes namespace and policy options (`max_use`, `rate_limit_interval_usec`,
     `rate_limit_burst`)
   - broker validates caller UID ownership (`u<uid>-*`)
-  - broker writes journald drop-in config and starts namespace sockets
+  - broker writes journald drop-in config and starts namespace journald service
 - launches `systemd-cat --namespace=...` first
 - verifies the journal sink is alive before launching the target command
 - launches target command only after journal sink startup succeeds

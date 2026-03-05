@@ -6,11 +6,13 @@ use crate::manifest::{Invocation, JournalConfig};
 use anyhow::{anyhow, Context, Result};
 use nix::unistd::geteuid;
 use std::env;
+use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, ExitStatus, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -31,34 +33,15 @@ fn run_direct(invocation: Invocation) -> Result<()> {
 
 fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()> {
     let (namespace, identifier, policy) = normalize_journal_config_for_command(&journal)?;
+    let mut child_cmd = command_for_invocation(&invocation)?;
+    child_cmd.stderr(Stdio::piped());
+
     if journal.ensure {
         journal_broker_client::ensure_namespace_via_dbus(&namespace, &policy)
             .context("journal namespace broker preflight failed")?;
     }
-
-    let mut journal_cmd = Command::new("systemd-cat");
-    journal_cmd.arg(format!("--namespace={namespace}"));
-    if let Some(identifier) = identifier {
-        journal_cmd.arg(format!("--identifier={identifier}"));
-    }
-    journal_cmd.stdin(Stdio::piped());
-    journal_cmd.stdout(Stdio::null());
-    journal_cmd.stderr(Stdio::inherit());
-
-    let mut journal_child = journal_cmd.spawn().with_context(|| {
-        "failed to spawn systemd-cat; is systemd installed and --namespace supported (v256+)?"
-    })?;
-    let mut journal_stdin = journal_child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("failed to open systemd-cat stdin"))?;
-    if let Err(err) = ensure_journal_sink_startup(&mut journal_child) {
-        drop(journal_stdin);
-        return Err(err);
-    }
-
-    let mut child_cmd = command_for_invocation(&invocation)?;
-    child_cmd.stderr(Stdio::piped());
+    let (mut journal_child, mut journal_stdin) =
+        start_journal_sink_with_retry(&namespace, identifier.as_deref())?;
 
     let mut child = match child_cmd.spawn() {
         Ok(child) => child,
@@ -103,9 +86,63 @@ fn run_with_journal(invocation: Invocation, journal: JournalConfig) -> Result<()
     exit_like_child(child_status)
 }
 
+fn start_journal_sink_with_retry(
+    namespace: &str,
+    identifier: Option<&str>,
+) -> Result<(Child, ChildStdin)> {
+    const START_ATTEMPTS: usize = 12;
+    const RETRY_DELAY: Duration = Duration::from_millis(50);
+
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=START_ATTEMPTS {
+        match spawn_journal_sink(namespace, identifier) {
+            Ok(sink) => return Ok(sink),
+            Err(err) => {
+                last_error = Some(err);
+                if attempt < START_ATTEMPTS {
+                    thread::sleep(RETRY_DELAY);
+                }
+            }
+        }
+    }
+
+    Err(last_error.expect("retry loop should set last_error")).with_context(|| {
+        format!("failed to initialize systemd-cat journal sink after {START_ATTEMPTS} attempts")
+    })
+}
+
+fn spawn_journal_sink(namespace: &str, identifier: Option<&str>) -> Result<(Child, ChildStdin)> {
+    let mut journal_cmd = Command::new("systemd-cat");
+    journal_cmd.arg(format!("--namespace={namespace}"));
+    if let Some(identifier) = identifier {
+        journal_cmd.arg(format!("--identifier={identifier}"));
+    }
+    journal_cmd.stdin(Stdio::piped());
+    journal_cmd.stdout(Stdio::null());
+    journal_cmd.stderr(Stdio::inherit());
+
+    let mut journal_child = journal_cmd
+        .spawn()
+        .with_context(|| "failed to spawn systemd-cat; ensure it is installed and on PATH")?;
+    let journal_stdin = journal_child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("failed to open systemd-cat stdin"))?;
+
+    if let Err(err) = ensure_journal_sink_startup(&mut journal_child) {
+        drop(journal_stdin);
+        let _ = journal_child.wait();
+        return Err(err);
+    }
+
+    Ok((journal_child, journal_stdin))
+}
+
 fn journal_status_error(status: ExitStatus) -> anyhow::Error {
     anyhow!(
-        "systemd-cat failed with status {status}; journal namespace requires systemd-cat --namespace support"
+        "systemd-cat failed with status {status}; journal namespace sink may be unavailable \
+         (for example namespace socket/service not ready) or --namespace may be unsupported \
+         on this host"
     )
 }
 
@@ -120,7 +157,9 @@ fn ensure_journal_sink_startup(journal_child: &mut std::process::Child) -> Resul
             .context("failed checking initial systemd-cat status")?
         {
             return Err(anyhow!(
-                "systemd-cat exited before child spawn with status {status}; journal namespace requires systemd-cat --namespace support"
+                "systemd-cat exited before child spawn with status {status}; journal namespace \
+                 sink was not ready (for example namespace socket/service race) or --namespace \
+                 may be unsupported on this host"
             ));
         }
         thread::sleep(POLL_INTERVAL);
@@ -130,6 +169,7 @@ fn ensure_journal_sink_startup(journal_child: &mut std::process::Child) -> Resul
 
 fn command_for_invocation(invocation: &Invocation) -> Result<Command> {
     validate_exec_path_for_command(invocation)?;
+    validate_no_recursive_self_exec(invocation)?;
     validate_args_for_command(invocation)?;
 
     let mut cmd = Command::new(&invocation.exec);
@@ -153,6 +193,46 @@ fn validate_exec_path_for_command(invocation: &Invocation) -> Result<()> {
         return Err(anyhow!("execution path cannot contain NUL bytes"));
     }
     Ok(())
+}
+
+fn validate_no_recursive_self_exec(invocation: &Invocation) -> Result<()> {
+    // Allow explicit `exec = "chopper"` patterns for advanced workflows.
+    if is_direct_chopper_name_path(&invocation.exec) {
+        return Ok(());
+    }
+
+    let current_exe = match env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return Ok(()),
+    };
+    let current_identity = executable_identity(&current_exe);
+    let invocation_identity = executable_identity(&invocation.exec);
+
+    if current_identity == invocation_identity {
+        return Err(anyhow!(
+            "execution path `{}` resolves to the running chopper binary \
+             (recursion guard); set `exec` to the real target binary path \
+             instead of an alias wrapper",
+            invocation.exec.display()
+        ));
+    }
+    Ok(())
+}
+
+fn executable_identity(path: &Path) -> PathBuf {
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        which::which(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    fs::canonicalize(&candidate).unwrap_or(candidate)
+}
+
+fn is_direct_chopper_name_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("chopper"))
+        .unwrap_or(false)
 }
 
 fn validate_args_for_command(invocation: &Invocation) -> Result<()> {
@@ -318,7 +398,9 @@ mod tests {
     use crate::test_support::ENV_LOCK;
     use std::collections::HashMap;
     use std::env;
+    use std::os::unix::fs::symlink;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn invocation() -> Invocation {
         Invocation {
@@ -414,6 +496,33 @@ mod tests {
                 .contains("execution path cannot contain NUL bytes"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn command_builder_rejects_exec_path_resolving_to_running_binary_wrapper() {
+        let current = env::current_exe().expect("resolve current executable");
+        let temp = TempDir::new().expect("create temp dir");
+        let wrapper = temp.path().join("ghostty");
+        symlink(&current, &wrapper).expect("create wrapper symlink");
+
+        let mut invocation = invocation();
+        invocation.exec = wrapper;
+
+        let err = command_for_invocation(&invocation).expect_err("expected recursion guard");
+        assert!(err.to_string().contains("recursion guard"), "{err}");
+    }
+
+    #[test]
+    fn command_builder_allows_explicit_chopper_exec_name() {
+        let current = env::current_exe().expect("resolve current executable");
+        let temp = TempDir::new().expect("create temp dir");
+        let direct_name = temp.path().join("chopper");
+        symlink(&current, &direct_name).expect("create chopper symlink");
+
+        let mut invocation = invocation();
+        invocation.exec = direct_name;
+
+        command_for_invocation(&invocation).expect("explicit chopper exec should be allowed");
     }
 
     #[test]

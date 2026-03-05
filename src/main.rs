@@ -8,6 +8,7 @@ mod completion;
 mod config_diagnostics;
 mod env_util;
 mod env_validation;
+mod exec_resolution;
 mod executor;
 mod journal_broker_client;
 mod journal_validation;
@@ -64,9 +65,7 @@ fn main() -> Result<()> {
     let manifest = match config_path {
         Some(path) => load_manifest(&invocation.alias, &path)?,
         None => {
-            let exe = which::which(&invocation.alias)
-                .unwrap_or_else(|_| PathBuf::from(&invocation.alias));
-            manifest::Manifest::simple(exe)
+            manifest::Manifest::simple(exec_resolution::resolve_command_path(&invocation.alias))
         }
     };
 
@@ -290,10 +289,11 @@ fn run_print_exec(alias: &str) -> i32 {
         },
         None => {
             // No config; try PATH lookup like normal execution
-            match which::which(alias) {
-                Ok(exe) => manifest::Manifest::simple(exe),
-                Err(_) => return 1,
+            let resolved = exec_resolution::resolve_command_path(alias);
+            if resolved == PathBuf::from(alias) {
+                return 1;
             }
+            manifest::Manifest::simple(resolved)
         }
     };
     println!("{}", manifest.exec.display());

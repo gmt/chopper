@@ -11,52 +11,85 @@ before starting `systemd-cat`. The broker:
 1. Validates the caller's UID owns the requested namespace (`u<uid>-*`)
 2. Writes a journald drop-in config at
    `/run/systemd/journald@<namespace>.conf.d/chopper.conf`
-3. Starts `systemd-journald@<namespace>.socket` and the varlink socket
+3. Starts `systemd-journald@<namespace>.service` (which owns the namespace sockets)
 4. Enforces anti-abuse limits (max 16 namespaces per UID, storage caps)
 
 ## Installation
 
-### 1. Install the binary
+Preferred (one-shot, from repo root):
 
 ```bash
-cargo install --path . --bin chopper-journal-broker
-# or: cp target/release/chopper-journal-broker /usr/local/bin/
+scripts/install-journal-broker.sh --cleanup-user-install
 ```
 
-### 2. Install D-Bus configuration
+What this does:
+
+1. Removes any prior `~/.cargo/bin/chopper-journal-broker` copy.
+2. Builds `chopper-journal-broker`.
+3. Installs the binary and service policy files.
+4. Reloads systemd + D-Bus.
+5. Enables and starts `chopper-journal-broker`.
+
+Useful variants:
 
 ```bash
-cp dist/dbus-1/system.d/com.chopperproject.JournalBroker1.conf \
+# Install runtime broker at /usr/bin/chopper-journal-broker
+scripts/install-journal-broker.sh --prefix /usr
+
+# Stage files under /tmp/chopper-pkgroot for packaging (no systemctl calls)
+scripts/install-journal-broker.sh --prefix /usr --destdir /tmp/chopper-pkgroot --no-sudo
+```
+
+Manual path:
+
+### 1. Remove prior user-local install (optional)
+
+```bash
+rm -f ~/.cargo/bin/chopper-journal-broker
+cargo uninstall --bin chopper-journal-broker || true
+```
+
+### 2. Install the binary
+
+```bash
+cargo build --release --bin chopper-journal-broker
+sudo install -m 0755 target/release/chopper-journal-broker /usr/local/bin/chopper-journal-broker
+```
+
+### 3. Install D-Bus configuration
+
+```bash
+sudo cp dist/dbus-1/system.d/com.chopperproject.JournalBroker1.conf \
    /usr/share/dbus-1/system.d/
 
-cp dist/dbus-1/system-services/com.chopperproject.JournalBroker1.service \
+sudo cp dist/dbus-1/system-services/com.chopperproject.JournalBroker1.service \
    /usr/share/dbus-1/system-services/
 ```
 
-### 3. Install polkit policy
+### 4. Install polkit policy
 
 ```bash
-cp dist/polkit-1/actions/com.chopperproject.JournalBroker1.policy \
+sudo cp dist/polkit-1/actions/com.chopperproject.JournalBroker1.policy \
    /usr/share/polkit-1/actions/
 
-cp dist/polkit-1/rules.d/50-chopper-journal-broker.rules \
+sudo cp dist/polkit-1/rules.d/50-chopper-journal-broker.rules \
    /usr/share/polkit-1/rules.d/
 ```
 
-### 4. Install systemd unit
+### 5. Install systemd unit
 
 ```bash
-cp dist/systemd/chopper-journal-broker.service \
+sudo cp dist/systemd/chopper-journal-broker.service \
    /etc/systemd/system/
 
-systemctl daemon-reload
-systemctl enable --now chopper-journal-broker
+sudo systemctl daemon-reload
+sudo systemctl enable --now chopper-journal-broker
 ```
 
-### 5. Reload D-Bus
+### 6. Reload D-Bus
 
 ```bash
-systemctl reload dbus
+sudo systemctl reload dbus
 ```
 
 ## Verification
@@ -83,6 +116,12 @@ EOF
 
 chopper test-broker
 ```
+
+Expected:
+
+1. `test` prints in terminal.
+2. Command exits normally.
+3. `systemctl status chopper-journal-broker` remains active.
 
 ## D-Bus Interface
 
@@ -120,6 +159,14 @@ EnsureNamespace(namespace: String, options: Dict<String,String>) -> ()
 | Min RateLimitIntervalSec | 1ms | Minimum rate limit interval |
 
 ## Troubleshooting
+
+- Quick first checks:
+
+```bash
+which systemd-cat
+systemctl status chopper-journal-broker
+journalctl -u chopper-journal-broker -n 100 --no-pager
+```
 
 - **D-Bus connection refused:** Ensure `dbus-daemon` is running and the bus
   policy file is installed at `/usr/share/dbus-1/system.d/`.
