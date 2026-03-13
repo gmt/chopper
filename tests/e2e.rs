@@ -158,6 +158,171 @@ fn run_direct_bash_completion(
         .collect()
 }
 
+fn run_alias_bash_completion_with_timeout(
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    words: &[&str],
+    cword: usize,
+    source_count: usize,
+    timeout: Duration,
+    env_vars: impl IntoIterator<Item = (&'static str, String)>,
+) -> Vec<String> {
+    let bashcomp_output = run_chopper(config_home, cache_home, &["--bashcomp"]);
+    assert!(
+        bashcomp_output.status.success(),
+        "failed to emit bashcomp script: {}",
+        String::from_utf8_lossy(&bashcomp_output.stderr)
+    );
+
+    let temp = TempDir::new().expect("create alias completion harness temp dir");
+    let script_path = temp.path().join("bashcomp.bash");
+    fs::write(&script_path, &bashcomp_output.stdout).expect("write bashcomp script");
+
+    let bin_dir = temp.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("create alias completion harness bin dir");
+    symlink(chopper_bin(), bin_dir.join("chopper"))
+        .expect("symlink chopper into alias completion harness bin dir");
+
+    let path_value = std::env::var("PATH").unwrap_or_default();
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
+
+    let mut cmd = Command::new("bash");
+    cmd.arg("-lc")
+        .arg("for ((i = 0; i < CHOPPER_SOURCE_COUNT; i++)); do source \"$1\"; done; shift; COMP_WORDS=(\"$@\"); COMP_CWORD=\"$CHOPPER_TEST_CWORD\"; COMP_LINE=\"${COMP_WORDS[*]}\"; COMP_POINT=${#COMP_LINE}; _chopper_complete; printf '%s\\n' \"${COMPREPLY[@]}\"")
+        .arg("bash")
+        .arg(&script_path)
+        .args(words)
+        .env("CHOPPER_TEST_CWORD", cword.to_string())
+        .env("CHOPPER_SOURCE_COUNT", source_count.to_string())
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("HOME", &home_dir)
+        .env("PATH", format!("{}:{path_value}", bin_dir.display()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .expect("failed to execute alias completion harness");
+    let start = Instant::now();
+    loop {
+        if child.try_wait().expect("failed to poll alias completion harness").is_some() {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("timed out waiting for alias completion harness (possible recursion loop)");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to collect alias completion harness output");
+    assert!(
+        output.status.success(),
+        "alias completion harness failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.to_string())
+        .collect()
+}
+
+fn write_same_basename_completion_fixture(
+    config_home: &TempDir,
+    fixture_root: &TempDir,
+) -> (PathBuf, PathBuf) {
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target_dir = fixture_root.path().join("bin");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    let target_path = target_dir.join("demo");
+    fs::write(&target_path, "#!/bin/sh\nexit 0\n").expect("write target command");
+    let mut perms = fs::metadata(&target_path)
+        .expect("stat target command")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&target_path, perms).expect("chmod target command");
+
+    fs::write(
+        aliases_dir.join("demo.toml"),
+        format!("exec = \"{}\"\n", target_path.display()),
+    )
+    .expect("write demo alias");
+
+    let home_completion_dir = config_home
+        .path()
+        .join("home/.local/share/bash-completion/completions");
+    fs::create_dir_all(&home_completion_dir).expect("create home completion dir");
+
+    let xdg_data_dir = fixture_root.path().join("share");
+    let real_completion_path = xdg_data_dir.join("bash-completion/completions/demo");
+    fs::create_dir_all(real_completion_path.parent().expect("completion parent"))
+        .expect("create real completion dir");
+    fs::write(
+        &real_completion_path,
+        "_demo_complete() { COMPREPLY=(demo-result); }\ncomplete -F _demo_complete demo\n",
+    )
+    .expect("write real completion file");
+
+    (home_completion_dir, xdg_data_dir)
+}
+
+fn write_null_sanitizing_completion_fixture(
+    config_home: &TempDir,
+    fixture_root: &TempDir,
+) -> PathBuf {
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target_dir = fixture_root.path().join("bin");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    let target_path = target_dir.join("demo-null");
+    fs::write(
+        &target_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--complete-list\" ]; then printf 'demo-one demo-two\\0'; fi\n",
+    )
+    .expect("write target command");
+    let mut perms = fs::metadata(&target_path)
+        .expect("stat target command")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&target_path, perms).expect("chmod target command");
+
+    fs::write(
+        aliases_dir.join("demo-null.toml"),
+        format!("exec = \"{}\"\n", target_path.display()),
+    )
+    .expect("write demo-null alias");
+
+    let home_completion_dir = config_home
+        .path()
+        .join("home/.local/share/bash-completion/completions");
+    fs::create_dir_all(&home_completion_dir).expect("create home completion dir");
+
+    let xdg_data_dir = fixture_root.path().join("share-null");
+    let real_completion_path = xdg_data_dir.join("bash-completion/completions/demo-null");
+    fs::create_dir_all(real_completion_path.parent().expect("completion parent"))
+        .expect("create real completion dir");
+    fs::write(
+        &real_completion_path,
+        "_demo_null_complete() { local cur prev words cword; _init_completion || return; COMPREPLY=($(compgen -W \"$(demo-null --complete-list)\" -- \"$cur\")); }\ncomplete -F _demo_null_complete demo-null\n",
+    )
+    .expect("write real completion file");
+
+    xdg_data_dir
+}
+
 fn prepare_reconcile_script_fixtures(config_home: &TempDir) {
     let aliases_root = config_home.path().join("chopper/aliases");
     prepare_reconcile_script_fixtures_in_dir(&aliases_root);
@@ -13533,6 +13698,153 @@ fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
         4,
     );
     assert_eq!(remove_flags, vec!["--no-wrapper-sync"]);
+}
+
+#[test]
+fn alias_bashcomp_same_basename_recovers_underlying_completer_without_recursing() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+    let (home_completion_dir, xdg_data_dir) =
+        write_same_basename_completion_fixture(&config_home, &fixture_root);
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo", "d"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(completions, vec!["demo-result"]);
+
+    let projected_shim = home_completion_dir.join("demo");
+    let shim_text = fs::read_to_string(&projected_shim).expect("read projected shim");
+    assert!(
+        shim_text.contains("complete -F _chopper_complete -o bashdefault -o default demo"),
+        "{shim_text}"
+    );
+}
+
+#[test]
+fn alias_bashcomp_same_basename_stays_flat_after_repeated_sourcing() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+    let (_home_completion_dir, xdg_data_dir) =
+        write_same_basename_completion_fixture(&config_home, &fixture_root);
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo", "d"],
+        1,
+        3,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(completions, vec!["demo-result"]);
+
+    let bashcomp_output = run_chopper(&config_home, &cache_home, &["--bashcomp"]);
+    assert!(
+        bashcomp_output.status.success(),
+        "failed to emit bashcomp script: {}",
+        String::from_utf8_lossy(&bashcomp_output.stderr)
+    );
+
+    let harness_root = TempDir::new().expect("create repeated sourcing harness root");
+    let script_path = harness_root.path().join("bashcomp.bash");
+    fs::write(&script_path, &bashcomp_output.stdout).expect("write bashcomp script");
+
+    let bin_dir = harness_root.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("create repeated sourcing harness bin dir");
+    symlink(chopper_bin(), bin_dir.join("chopper"))
+        .expect("symlink chopper into repeated sourcing harness bin dir");
+
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
+    let path_value = std::env::var("PATH").unwrap_or_default();
+    let output = Command::new("bash")
+        .arg("-lc")
+        .arg("for ((i = 0; i < 3; i++)); do source \"$1\"; done; complete -p demo")
+        .arg("bash")
+        .arg(&script_path)
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("XDG_DATA_DIRS", xdg_data_dir.display().to_string())
+        .env("HOME", &home_dir)
+        .env("PATH", format!("{}:{path_value}", bin_dir.display()))
+        .output()
+        .expect("run repeated sourcing compspec inspection");
+    assert!(
+        output.status.success(),
+        "repeated sourcing compspec inspection failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "complete -o bashdefault -o default -F _chopper_complete demo"
+    );
+}
+
+#[test]
+fn alias_bashcomp_sanitizes_null_bytes_from_underlying_completion_shellouts() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+    let xdg_data_dir = write_null_sanitizing_completion_fixture(&config_home, &fixture_root);
+
+    let bashcomp_output = run_chopper(&config_home, &cache_home, &["--bashcomp"]);
+    assert!(
+        bashcomp_output.status.success(),
+        "failed to emit bashcomp script: {}",
+        String::from_utf8_lossy(&bashcomp_output.stderr)
+    );
+
+    let harness_root = TempDir::new().expect("create null sanitizing harness root");
+    let script_path = harness_root.path().join("bashcomp.bash");
+    fs::write(&script_path, &bashcomp_output.stdout).expect("write bashcomp script");
+
+    let bin_dir = harness_root.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("create null sanitizing harness bin dir");
+    symlink(chopper_bin(), bin_dir.join("chopper"))
+        .expect("symlink chopper into null sanitizing harness bin dir");
+
+    let home_dir = config_home.path().join("home");
+    fs::create_dir_all(&home_dir).expect("create test home dir");
+    let path_value = std::env::var("PATH").unwrap_or_default();
+    let output = Command::new("bash")
+        .arg("-lc")
+        .arg("source /usr/share/bash-completion/bash_completion; source \"$1\"; shift; COMP_WORDS=(\"$@\"); COMP_CWORD=\"$CHOPPER_TEST_CWORD\"; COMP_LINE=\"${COMP_WORDS[*]}\"; COMP_POINT=${#COMP_LINE}; _chopper_complete; printf '%s\\n' \"${COMPREPLY[@]}\"")
+        .arg("bash")
+        .arg(&script_path)
+        .args(["demo-null", "demo"])
+        .env("CHOPPER_TEST_CWORD", "1")
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env("XDG_CACHE_HOME", cache_home.path())
+        .env("XDG_DATA_DIRS", xdg_data_dir.display().to_string())
+        .env("HOME", &home_dir)
+        .env("PATH", format!("{}:{path_value}", bin_dir.display()))
+        .output()
+        .expect("run null sanitizing harness");
+    assert!(
+        output.status.success(),
+        "null sanitizing harness failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("ignored null byte in input"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>(),
+        vec!["demo-one", "demo-two"]
+    );
 }
 
 #[test]
