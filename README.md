@@ -1,7 +1,7 @@
 # chopper
 
-`chopper` is a command alias launcher and directory that provides
-unreasonable flexibility and reasonable performance
+`chopper` is a command alias launcher with excessive
+flexibility and reasonable performance
 
 It is designed for:
 
