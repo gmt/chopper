@@ -1,15 +1,16 @@
 # chopper
 
-`chopper` is a lightweight command alias launcher with a concrete per-alias DSL.
+`chopper` is a command alias launcher and directory that provides
+unreasonable flexibility and reasonable performance
 
 It is designed for:
 
 - small, easy-to-maintain alias files
 - explicit alias-local args/env config
 - optional stderr routing into a journald namespace
-- optional runtime reconciliation via Rhai
-- high-level Rhai facade APIs for platform/files/process/web automation
-- automatic manifest caching (no manual cache management needed)
+
+If those don't suffice there is an optional Rhai scripting layer
+that probably will.
 
 ---
 
@@ -79,7 +80,7 @@ chopper hello world
 
 ---
 
-## Minimal DSL example
+## Minimal scripted example
 
 ```toml
 exec = "kubectl"
@@ -173,7 +174,7 @@ feature enabled.
 Common falsey values that also keep features enabled: `0`, `false`, `no`,
 `off`.
 Truthy matching is ASCII-based; non-ASCII lookalikes (for example `ＴＲＵＥ`)
-are treated as unknown values and keep features enabled.
+are unknown values and therefore always true. This is probably a security problem.
 
 ---
 
@@ -270,28 +271,4 @@ For full daemon details and troubleshooting, see
 ## Detailed documentation
 
 For a full docs map, see [`doc/README.md`](doc/README.md).
-
-Documentation by audience:
-
-| You are... | Start here |
-| --- | --- |
-| Operator debugging behavior | [`doc/troubleshooting.md`](doc/troubleshooting.md) |
-| User authoring alias files | [`doc/config-reference.md`](doc/config-reference.md) |
-| Contributor changing code | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-
-Fast routing:
-
-- cli command details: [`doc/cli-reference.md`](doc/cli-reference.md)
-- Rhai facade API catalog: [`doc/rhai-facade-reference.md`](doc/rhai-facade-reference.md)
-- TUI usage: [`doc/tui-reference.md`](doc/tui-reference.md)
-- config field reference: [`doc/config-reference.md`](doc/config-reference.md)
-- copy/paste workflows: [`doc/examples.md`](doc/examples.md)
-- terminology lookup: [`doc/glossary.md`](doc/glossary.md)
-- troubleshooting: [`doc/troubleshooting.md`](doc/troubleshooting.md)
-- architecture overview: [`doc/architecture.md`](doc/architecture.md)
-- implementation decision rationale: [`doc/decision-log.md`](doc/decision-log.md)
-- local validation/testing commands: [`doc/testing.md`](doc/testing.md)
-- release prep checklist: [`doc/release-checklist.md`](doc/release-checklist.md)
-- complete operational semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
-
-Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+code/Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
