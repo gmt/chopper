@@ -13773,6 +13773,21 @@ fn direct_bashcomp_completes_alias_admin_subcommands_and_options() {
         "{set_flags:?}"
     );
 
+    let path_flags = run_direct_bash_completion(
+        &config_home,
+        &cache_home,
+        &["chopper", "--alias", "set", "foo-alias", "--path-p"],
+        4,
+    );
+    assert!(
+        path_flags.iter().any(|value| value == "--path-prepend-one"),
+        "{path_flags:?}"
+    );
+    assert!(
+        path_flags.iter().any(|value| value == "--path-prepend-all"),
+        "{path_flags:?}"
+    );
+
     let bool_value = run_direct_bash_completion(
         &config_home,
         &cache_home,
@@ -14591,6 +14606,73 @@ fn alias_set_command_updates_args_and_journal_fields() {
         get_stdout.contains("\"rate_limit_burst\": 500"),
         "{get_stdout}"
     );
+}
+
+#[test]
+fn alias_add_set_and_get_round_trip_path_flags() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "managedpath",
+            "--exec",
+            "echo",
+            "--path-remove-all",
+            "^/tmp/build-.*$",
+            "--path-append-one",
+            "/opt/tool/bin",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let set = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "set",
+            "managedpath",
+            "--path-prepend-one",
+            "/srv/bin",
+            "--path-remove-one",
+            "^/legacy$",
+        ],
+    );
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let get = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "get", "managedpath"],
+    );
+    assert!(
+        get.status.success(),
+        "{}",
+        String::from_utf8_lossy(&get.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&get.stdout);
+    assert!(stdout.contains("\"path\""), "{stdout}");
+    assert!(stdout.contains("\"remove_all\""), "{stdout}");
+    assert!(stdout.contains("^/tmp/build-.*$"), "{stdout}");
+    assert!(stdout.contains("\"append_one\""), "{stdout}");
+    assert!(stdout.contains("/opt/tool/bin"), "{stdout}");
+    assert!(stdout.contains("\"prepend_one\""), "{stdout}");
+    assert!(stdout.contains("/srv/bin"), "{stdout}");
+    assert!(stdout.contains("\"remove_one\""), "{stdout}");
+    assert!(stdout.contains("^/legacy$"), "{stdout}");
 }
 
 #[test]

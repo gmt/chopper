@@ -378,8 +378,12 @@ _chopper_complete_alias_admin_mutation() {
             COMPREPLY=($(compgen -c -- "$cur"))
             return 0
             ;;
-        --arg|--journal-identifier)
+        --arg|--journal-identifier|--path-remove-all|--path-remove-one)
             COMPREPLY=($(compgen -o default -- "$cur"))
+            return 0
+            ;;
+        --path-append-all|--path-append-one|--path-prepend-all|--path-prepend-one)
+            COMPREPLY=($(compgen -f -- "$cur"))
             return 0
             ;;
         --env-remove)
@@ -418,7 +422,7 @@ _chopper_complete_alias_admin_mutation() {
             ;;
     esac
 
-    local opts="--exec --arg --env --env-remove --journal-namespace --journal-stderr --journal-identifier --journal-user-scope --journal-ensure --journal-max-use --journal-rate-limit-interval-usec --journal-rate-limit-burst --journal-clear --no-wrapper-sync"
+    local opts="--exec --arg --env --env-remove --path-remove-all --path-remove-one --path-append-all --path-append-one --path-prepend-all --path-prepend-one --journal-namespace --journal-stderr --journal-identifier --journal-user-scope --journal-ensure --journal-max-use --journal-rate-limit-interval-usec --journal-rate-limit-burst --journal-clear --no-wrapper-sync"
     COMPREPLY=($(compgen -W "$opts" -- "$cur"))
 }
 
