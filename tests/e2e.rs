@@ -42,6 +42,21 @@ fn run_chopper_with(
     cmd.output().expect("failed to run chopper")
 }
 
+fn run_chopper_with_path(
+    config_home: &TempDir,
+    cache_home: &TempDir,
+    args: &[&str],
+    path: &str,
+) -> Output {
+    run_chopper_with(
+        chopper_bin(),
+        config_home,
+        cache_home,
+        args,
+        [("PATH", path.to_string())],
+    )
+}
+
 fn run_chopper_with_timeout(
     executable: PathBuf,
     config_home: &TempDir,
@@ -210,7 +225,11 @@ fn run_alias_bash_completion_with_timeout(
         .expect("failed to execute alias completion harness");
     let start = Instant::now();
     loop {
-        if child.try_wait().expect("failed to poll alias completion harness").is_some() {
+        if child
+            .try_wait()
+            .expect("failed to poll alias completion harness")
+            .is_some()
+        {
             break;
         }
         if start.elapsed() >= timeout {
@@ -608,7 +627,7 @@ fn direct_alias_invocation_works_when_invoked_as_uppercase_chopper() {
     fs::write(
         aliases_dir.join("fromupper.toml"),
         r#"
-exec = "sh"
+exec = "/bin/sh"
 args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
 "#,
     )
@@ -1334,7 +1353,7 @@ fn symlink_mode_does_not_treat_help_as_builtin() {
     fs::write(
         aliases_dir.join("helpcheck.toml"),
         r#"
-exec = "sh"
+exec = "/bin/sh"
 args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
 "#,
     )
@@ -12477,6 +12496,100 @@ CHOPPER_KEEP = "from_alias"
     assert!(stdout.contains("DROP="), "{stdout}");
     assert!(!stdout.contains("DROP=from_runtime"), "{stdout}");
     assert!(stdout.contains("KEEP=from_alias"), "{stdout}");
+}
+
+#[test]
+fn static_path_mutation_rewrites_path_in_configured_order() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let a = config_home.path().join("path-a");
+    let b = config_home.path().join("path-b");
+    let c = config_home.path().join("path-c");
+    let prepend = config_home.path().join("path-prepend");
+    let append = config_home.path().join("path-append");
+    for path in [&a, &b, &c, &prepend, &append] {
+        fs::create_dir_all(path).expect("create path dir");
+    }
+
+    fs::write(
+        aliases_dir.join("path-mutate.toml"),
+        format!(
+            r#"
+exec = "/usr/bin/printenv"
+args = ["PATH"]
+
+[path]
+remove_all = ['^{}$']
+append_one = ["{}"]
+prepend_one = ["{}"]
+"#,
+            regex::escape(&b.display().to_string()),
+            append.display(),
+            prepend.display(),
+        ),
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with_path(
+        &config_home,
+        &cache_home,
+        &["path-mutate"],
+        &format!("{}:{}:{}", a.display(), b.display(), c.display()),
+    );
+
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim_end(),
+        format!(
+            "{}:{}:{}:{}",
+            prepend.display(),
+            a.display(),
+            c.display(),
+            append.display()
+        )
+    );
+}
+
+#[test]
+fn static_path_mutation_invalid_regex_fails_at_runtime() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    fs::write(
+        aliases_dir.join("path-invalid-regex.toml"),
+        r#"
+exec = "/usr/bin/printenv"
+args = ["PATH"]
+
+[path]
+remove_all = ["("]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with_path(
+        &config_home,
+        &cache_home,
+        &["path-invalid-regex"],
+        "/usr/bin:/bin",
+    );
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("path.remove_all contains invalid regex `(`"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

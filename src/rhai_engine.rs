@@ -24,6 +24,10 @@ mod tests {
             .eval::<Map>("fs_stat(\".\")")
             .expect("completion profile should expose fs_stat");
         assert!(stat.contains_key("exists"));
+        let pathlist = engine
+            .eval::<String>("pathlist_join(pathlist_split(\"a::b\"))")
+            .expect("completion profile should expose pathlist helpers");
+        assert_eq!(pathlist, "a::b");
 
         let proc_call = engine.eval::<Map>("proc_run(\"sh\", [\"-c\", \"echo hi\"], 1000)");
         assert!(
@@ -51,5 +55,9 @@ mod tests {
             .eval::<Map>(expr)
             .expect("reconcile profile should expose process APIs");
         assert!(proc_call.contains_key("ok"));
+        let pathlist = engine
+            .eval::<String>("pathlist_remove_one(\"a:b\", \"^a$\")")
+            .expect("reconcile profile should expose pathlist helpers");
+        assert_eq!(pathlist, "b");
     }
 }

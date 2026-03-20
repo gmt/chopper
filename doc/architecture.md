@@ -32,7 +32,12 @@ High-level map of the runtime flow and main modules.
 - `src/manifest.rs`
   - core manifest data model (`Invocation`, `JournalConfig`, `ReconcileConfig`,
     `BashcompConfig`)
-  - deterministic merge helpers for args/env mutation
+  - deterministic merge helpers for args/env/PATH mutation
+
+- `src/path_mutation.rs`
+  - shared PATH/path-list mutation engine
+  - regex-based removals and canonical inode equivalence for prepend/append
+  - runtime PATH rewriting plus Rhai helper backing logic
 
 - `src/cache.rs`
   - manifest cache load/store

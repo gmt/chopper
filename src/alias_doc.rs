@@ -1,6 +1,7 @@
 use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
+use crate::path_mutation::PathMutationConfig;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,6 +16,8 @@ pub struct AliasDoc {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub env_remove: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathMutationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub journal: Option<AliasJournalDoc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,6 +116,9 @@ impl AliasDoc {
                     return Err(anyhow!("`env_remove` key `{key}` cannot contain NUL bytes"));
                 }
             }
+        }
+        if let Some(path) = &self.path {
+            path.validate("path")?;
         }
         if let Some(journal) = &self.journal {
             match journal_validation::normalize_namespace(&journal.namespace) {
@@ -254,6 +260,7 @@ mod tests {
         load_alias_doc, save_alias_doc, AliasBashcompDoc, AliasDoc, AliasJournalDoc,
         AliasReconcileDoc,
     };
+    use crate::path_mutation::PathMutationConfig;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -263,6 +270,14 @@ mod tests {
             args: vec!["hello".to_string()],
             env: HashMap::from([("A".to_string(), "1".to_string())]),
             env_remove: vec!["OLD".to_string()],
+            path: Some(PathMutationConfig {
+                remove_all: vec!["^/tmp".to_string()],
+                remove_one: Vec::new(),
+                append_all: Vec::new(),
+                append_one: vec!["/custom/bin".to_string()],
+                prepend_all: Vec::new(),
+                prepend_one: vec!["/preferred/bin".to_string()],
+            }),
             journal: Some(AliasJournalDoc {
                 namespace: "ops".to_string(),
                 stderr: true,
@@ -355,5 +370,22 @@ mod tests {
         });
         doc.validate()
             .expect("rhai function should be valid without legacy script field");
+    }
+
+    #[test]
+    fn alias_doc_validation_rejects_nul_in_path_entries() {
+        let mut doc = valid_doc();
+        doc.path = Some(PathMutationConfig {
+            prepend_one: vec!["bad\0path".to_string()],
+            ..PathMutationConfig::default()
+        });
+        let err = doc
+            .validate()
+            .expect_err("expected path validation failure");
+        assert!(
+            err.to_string()
+                .contains("field `path.prepend_one` entries cannot contain NUL bytes"),
+            "{err}"
+        );
     }
 }

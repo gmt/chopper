@@ -1,5 +1,8 @@
+use crate::path_mutation::{self, PathMutationConfig};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -8,6 +11,7 @@ pub struct Manifest {
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
     pub env_remove: Vec<String>,
+    pub path: Option<PathMutationConfig>,
     pub journal: Option<JournalConfig>,
     pub reconcile: Option<ReconcileConfig>,
     pub bashcomp: Option<BashcompConfig>,
@@ -20,6 +24,7 @@ impl Manifest {
             args: Vec::new(),
             env: HashMap::new(),
             env_remove: Vec::new(),
+            path: None,
             journal: None,
             reconcile: None,
             bashcomp: None,
@@ -45,12 +50,21 @@ impl Manifest {
         &self,
         runtime_args: &[String],
         patch: Option<RuntimePatch>,
-    ) -> Invocation {
+    ) -> Result<Invocation> {
         let mut args = self.args.clone();
         args.extend(runtime_args.iter().cloned());
 
         let mut env = self.env.clone();
         let mut env_remove = self.env_remove.clone();
+
+        if let Some(path_config) = self.path.as_ref() {
+            let inherited_path = env::var("PATH").ok();
+            let base_path =
+                effective_path_before_patch(inherited_path.as_deref(), &env, &env_remove);
+            let path_value = path_mutation::apply_runtime_path(base_path, path_config)?;
+            env_remove.retain(|remove_key| remove_key != "PATH");
+            env.insert("PATH".into(), path_value);
+        }
 
         if let Some(patch) = patch {
             if let Some(replace) = patch.replace_args {
@@ -70,14 +84,28 @@ impl Manifest {
             env.remove(key);
         }
 
-        Invocation {
+        Ok(Invocation {
             exec: self.exec.clone(),
             args,
             env,
             env_remove,
             journal: self.journal.clone(),
-        }
+        })
     }
+}
+
+fn effective_path_before_patch<'a>(
+    inherited_path: Option<&'a str>,
+    env: &'a HashMap<String, String>,
+    env_remove: &[String],
+) -> Option<&'a str> {
+    if let Some(path) = env.get("PATH") {
+        return Some(path.as_str());
+    }
+    if env_remove.iter().any(|key| key == "PATH") {
+        return None;
+    }
+    inherited_path
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,7 +168,10 @@ fn dedupe_preserving_order(values: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{Manifest, RuntimePatch};
+    use crate::path_mutation::PathMutationConfig;
+    use crate::test_support::ENV_LOCK;
     use std::collections::HashMap;
+    use std::env;
     use std::path::PathBuf;
 
     #[test]
@@ -157,7 +188,9 @@ mod tests {
             ..RuntimePatch::default()
         };
 
-        let invocation = manifest.build_invocation(&["runtime".into()], Some(patch));
+        let invocation = manifest
+            .build_invocation(&["runtime".into()], Some(patch))
+            .expect("build invocation");
 
         assert_eq!(invocation.args, vec!["base", "runtime", "patch"]);
         assert_eq!(invocation.env.get("A"), Some(&"1".to_string()));
@@ -176,7 +209,9 @@ mod tests {
             ..RuntimePatch::default()
         };
 
-        let invocation = manifest.build_invocation(&["runtime".into()], Some(patch));
+        let invocation = manifest
+            .build_invocation(&["runtime".into()], Some(patch))
+            .expect("build invocation");
         assert_eq!(invocation.args, vec!["replaced", "extra"]);
     }
 
@@ -191,7 +226,9 @@ mod tests {
             ..RuntimePatch::default()
         };
 
-        let invocation = manifest.build_invocation(&[], Some(patch));
+        let invocation = manifest
+            .build_invocation(&[], Some(patch))
+            .expect("build invocation");
         assert_eq!(invocation.env.get("PROMOTE"), Some(&"patched".to_string()));
         assert_eq!(invocation.env_remove, vec!["KEEP_REMOVED", "PATCH_REMOVED"]);
     }
@@ -205,7 +242,9 @@ mod tests {
             ..RuntimePatch::default()
         };
 
-        let invocation = manifest.build_invocation(&[], Some(patch));
+        let invocation = manifest
+            .build_invocation(&[], Some(patch))
+            .expect("build invocation");
         assert!(!invocation.env.contains_key("CLASH"));
         assert_eq!(invocation.env_remove, vec!["CLASH"]);
     }
@@ -221,9 +260,67 @@ mod tests {
             ..RuntimePatch::default()
         };
 
-        let invocation = manifest.build_invocation(&[], Some(patch));
+        let invocation = manifest
+            .build_invocation(&[], Some(patch))
+            .expect("build invocation");
         assert_eq!(invocation.env_remove, vec!["A", "B"]);
         assert!(!invocation.env.contains_key("A"));
         assert!(!invocation.env.contains_key("B"));
+    }
+
+    #[test]
+    fn static_path_mutation_overrides_removed_inherited_path() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let original_path = env::var("PATH").ok();
+        env::set_var("PATH", "/usr/bin:/bin");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.env_remove = vec!["PATH".into()];
+        manifest.path = Some(PathMutationConfig {
+            prepend_one: vec!["/custom/bin".into()],
+            ..PathMutationConfig::default()
+        });
+
+        let invocation = manifest
+            .build_invocation(&[], None)
+            .expect("build invocation");
+        assert_eq!(invocation.env.get("PATH"), Some(&"/custom/bin".to_string()));
+        assert!(invocation.env_remove.is_empty());
+
+        match original_path {
+            Some(value) => env::set_var("PATH", value),
+            None => env::remove_var("PATH"),
+        }
+    }
+
+    #[test]
+    fn patch_set_env_path_overrides_static_path_mutation() {
+        let _guard = ENV_LOCK.lock().expect("lock env mutex");
+        let original_path = env::var("PATH").ok();
+        env::set_var("PATH", "/usr/bin:/bin");
+
+        let mut manifest = Manifest::simple(PathBuf::from("echo"));
+        manifest.path = Some(PathMutationConfig {
+            prepend_one: vec!["/custom/bin".into()],
+            ..PathMutationConfig::default()
+        });
+
+        let patch = RuntimePatch {
+            set_env: HashMap::from([("PATH".into(), "/override/bin".into())]),
+            ..RuntimePatch::default()
+        };
+
+        let invocation = manifest
+            .build_invocation(&[], Some(patch))
+            .expect("build invocation");
+        assert_eq!(
+            invocation.env.get("PATH"),
+            Some(&"/override/bin".to_string())
+        );
+
+        match original_path {
+            Some(value) => env::set_var("PATH", value),
+            None => env::remove_var("PATH"),
+        }
     }
 }

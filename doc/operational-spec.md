@@ -143,6 +143,14 @@ env_remove = ["AWS_PROFILE"]     # optional, default []
 [env]                            # optional map<string,string>
 KUBECONFIG = "/home/me/.kube/config"
 
+[path]                           # optional PATH mutation block
+remove_all = ["^/tmp/build-.*$"] # optional regex array
+remove_one = ["^/opt/legacy$"]   # optional regex array
+append_all = ["/opt/tool/bin"]   # optional path array
+append_one = ["/usr/local/bin"]  # optional path array
+prepend_all = ["/opt/preferred"] # optional path array
+prepend_one = ["/srv/bin"]       # optional path array
+
 [journal]                        # optional
 namespace = "ops"                # required when [journal] is present
 stderr = true                    # optional, default true
@@ -178,6 +186,7 @@ rhai_function = "complete"       # optional; when set, enables Rhai completion v
 - `[env]` keys are trimmed and must remain unique after trimming.
 - `[env]` keys cannot contain `=` or NUL bytes.
 - `[env]` values cannot contain NUL bytes.
+- `[path]` array entries cannot contain NUL bytes.
 - `exec` cannot be `.` or `..`.
 - Relative `exec` forms like `./` or `.\` must include a path segment (for
   example `./bin/tool`).
@@ -217,10 +226,35 @@ All argument channels reject NUL bytes.
 1. process inherits parent environment
 2. alias `[env]` is injected
 3. alias `env_remove` is removed
-4. optional Rhai patch (`set_env`, then `remove_env`)
+4. optional static `[path]` mutations rewrite `PATH`
+5. optional Rhai patch (`set_env`, then `remove_env`)
 
 This means reconcile `set_env` can intentionally re-introduce a key that alias
 `env_remove` removed, while reconcile `remove_env` still has final precedence.
+If both `[path]` and reconcile set `PATH`, the reconcile value wins.
+
+### PATH mutation order
+
+When `[path]` is configured, `chopper` treats the effective `PATH` as a dense
+list of components and applies groups in this order:
+
+1. `remove_all`
+2. `remove_one`
+3. `append_all`
+4. `append_one`
+5. `prepend_all`
+6. `prepend_one`
+
+Within each array, entries are processed in the order written in TOML.
+
+- `remove_one` / `remove_all` treat each configured string as a regex matched
+  against raw PATH components.
+- `append_one` / `prepend_one` remove the first equivalent existing component
+  before inserting the configured path.
+- `append_all` / `prepend_all` remove every equivalent existing component
+  before inserting the configured path once.
+- Path equivalence uses canonical-path inode comparison. If either side cannot
+  be canonicalized/stat'ed, it is treated as non-equivalent.
 
 ---
 
@@ -358,6 +392,22 @@ Key semantics:
 ---
 
 ## Rhai facade APIs
+
+In addition to the platform/fs/process/web/soap facades, both Rhai profiles
+expose path-list helpers for colon-separated path strings:
+
+- `pathlist_split(list_string) -> [string]`
+- `pathlist_join(components_array) -> string`
+- `pathlist_prepend_one(list_string, path) -> string`
+- `pathlist_append_one(list_string, path) -> string`
+- `pathlist_prepend_all(list_string, path) -> string`
+- `pathlist_append_all(list_string, path) -> string`
+- `pathlist_remove_one(list_string, regex) -> string`
+- `pathlist_remove_all(list_string, regex) -> string`
+
+These helpers use the same semantics as static `[path]` mutations, except that
+the input/output format is always a colon-separated string chosen explicitly by
+the script.
 
 Rhai scripts can call facade functions for higher-level automation intent:
 

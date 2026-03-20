@@ -93,6 +93,12 @@ enum TomlField {
     Args,
     Env,
     EnvRemove,
+    PathRemoveAll,
+    PathRemoveOne,
+    PathAppendAll,
+    PathAppendOne,
+    PathPrependAll,
+    PathPrependOne,
     JournalEnabled,
     JournalNamespace,
     JournalStderr,
@@ -114,12 +120,18 @@ enum TomlField {
 }
 
 impl TomlField {
-    fn all() -> [Self; 22] {
+    fn all() -> [Self; 28] {
         [
             Self::Exec,
             Self::Args,
             Self::Env,
             Self::EnvRemove,
+            Self::PathRemoveAll,
+            Self::PathRemoveOne,
+            Self::PathAppendAll,
+            Self::PathAppendOne,
+            Self::PathPrependAll,
+            Self::PathPrependOne,
             Self::JournalEnabled,
             Self::JournalNamespace,
             Self::JournalStderr,
@@ -147,6 +159,12 @@ impl TomlField {
             Self::Args => "args",
             Self::Env => "env",
             Self::EnvRemove => "env_remove",
+            Self::PathRemoveAll => "path.remove_all",
+            Self::PathRemoveOne => "path.remove_one",
+            Self::PathAppendAll => "path.append_all",
+            Self::PathAppendOne => "path.append_one",
+            Self::PathPrependAll => "path.prepend_all",
+            Self::PathPrependOne => "path.prepend_one",
             Self::JournalEnabled => "journal.enabled",
             Self::JournalNamespace => "journal.namespace",
             Self::JournalStderr => "journal.stderr",
@@ -875,6 +893,16 @@ fn default_bashcomp_doc() -> crate::alias_doc::AliasBashcompDoc {
     }
 }
 
+fn default_path_doc() -> crate::path_mutation::PathMutationConfig {
+    crate::path_mutation::PathMutationConfig::default()
+}
+
+fn prune_empty_path_doc(doc: &mut crate::alias_doc::AliasDoc) {
+    if doc.path.as_ref().is_some_and(|path| path.is_empty()) {
+        doc.path = None;
+    }
+}
+
 fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> String {
     match field {
         TomlField::Exec => doc.exec.clone(),
@@ -889,6 +917,36 @@ fn toml_field_value(doc: &crate::alias_doc::AliasDoc, field: TomlField) -> Strin
             entries.join(", ")
         }
         TomlField::EnvRemove => doc.env_remove.join(", "),
+        TomlField::PathRemoveAll => doc
+            .path
+            .as_ref()
+            .map(|path| path.remove_all.join(", "))
+            .unwrap_or_default(),
+        TomlField::PathRemoveOne => doc
+            .path
+            .as_ref()
+            .map(|path| path.remove_one.join(", "))
+            .unwrap_or_default(),
+        TomlField::PathAppendAll => doc
+            .path
+            .as_ref()
+            .map(|path| path.append_all.join(", "))
+            .unwrap_or_default(),
+        TomlField::PathAppendOne => doc
+            .path
+            .as_ref()
+            .map(|path| path.append_one.join(", "))
+            .unwrap_or_default(),
+        TomlField::PathPrependAll => doc
+            .path
+            .as_ref()
+            .map(|path| path.prepend_all.join(", "))
+            .unwrap_or_default(),
+        TomlField::PathPrependOne => doc
+            .path
+            .as_ref()
+            .map(|path| path.prepend_one.join(", "))
+            .unwrap_or_default(),
         TomlField::JournalEnabled => doc.journal.is_some().to_string(),
         TomlField::JournalNamespace => doc
             .journal
@@ -1049,6 +1107,48 @@ fn apply_toml_field_input(
         }
         TomlField::EnvRemove => {
             doc.env_remove = split_csv(input);
+        }
+        TomlField::PathRemoveAll => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.remove_all = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
+        }
+        TomlField::PathRemoveOne => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.remove_one = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
+        }
+        TomlField::PathAppendAll => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.append_all = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
+        }
+        TomlField::PathAppendOne => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.append_one = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
+        }
+        TomlField::PathPrependAll => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.prepend_all = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
+        }
+        TomlField::PathPrependOne => {
+            doc.path = Some(doc.path.clone().unwrap_or_else(default_path_doc));
+            if let Some(path) = doc.path.as_mut() {
+                path.prepend_one = split_csv(input);
+            }
+            prune_empty_path_doc(doc);
         }
         TomlField::JournalEnabled
         | TomlField::JournalStderr
@@ -2051,6 +2151,60 @@ fn toml_property_entries(doc: &crate::alias_doc::AliasDoc) -> Vec<TomlPropertyEn
         TomlField::EnvRemove,
         !doc.env_remove.is_empty(),
     );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathRemoveAll,
+        doc.path
+            .as_ref()
+            .map(|value| !value.remove_all.is_empty())
+            .unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathRemoveOne,
+        doc.path
+            .as_ref()
+            .map(|value| !value.remove_one.is_empty())
+            .unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathAppendAll,
+        doc.path
+            .as_ref()
+            .map(|value| !value.append_all.is_empty())
+            .unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathAppendOne,
+        doc.path
+            .as_ref()
+            .map(|value| !value.append_one.is_empty())
+            .unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathPrependAll,
+        doc.path
+            .as_ref()
+            .map(|value| !value.prepend_all.is_empty())
+            .unwrap_or(false),
+    );
+    push_toml_entry(
+        &mut entries,
+        doc,
+        TomlField::PathPrependOne,
+        doc.path
+            .as_ref()
+            .map(|value| !value.prepend_one.is_empty())
+            .unwrap_or(false),
+    );
 
     push_toml_entry(
         &mut entries,
@@ -2706,6 +2860,51 @@ mod tests {
         super::toggle_toml_field(&mut doc, TomlField::ReconcileEnabled, "demo")
             .expect("toggle off");
         assert!(doc.reconcile.is_none());
+    }
+
+    #[test]
+    fn apply_toml_field_input_updates_path_nodes_and_prunes_when_empty() {
+        let mut doc = crate::alias_admin::minimal_alias_doc();
+        super::apply_toml_field_input(
+            &mut doc,
+            TomlField::PathPrependOne,
+            "/custom/bin, /fallback/bin",
+            "demo",
+        )
+        .expect("apply path field input");
+        assert_eq!(
+            doc.path.as_ref().map(|path| path.prepend_one.clone()),
+            Some(vec!["/custom/bin".to_string(), "/fallback/bin".to_string()])
+        );
+
+        super::apply_toml_field_input(&mut doc, TomlField::PathPrependOne, "", "demo")
+            .expect("clear path field input");
+        assert!(doc.path.is_none());
+    }
+
+    #[test]
+    fn path_nodes_appear_between_env_remove_and_journal_fields() {
+        let doc = crate::alias_admin::minimal_alias_doc();
+        let fields = super::toml_fields_in_display_order(&doc);
+        let env_remove_index = fields
+            .iter()
+            .position(|field| *field == TomlField::EnvRemove)
+            .expect("env_remove field");
+        let path_remove_all_index = fields
+            .iter()
+            .position(|field| *field == TomlField::PathRemoveAll)
+            .expect("path.remove_all field");
+        let path_prepend_one_index = fields
+            .iter()
+            .position(|field| *field == TomlField::PathPrependOne)
+            .expect("path.prepend_one field");
+        let journal_enabled_index = fields
+            .iter()
+            .position(|field| *field == TomlField::JournalEnabled)
+            .expect("journal.enabled field");
+
+        assert!(env_remove_index < path_remove_all_index);
+        assert!(path_prepend_one_index < journal_enabled_index);
     }
 
     #[test]

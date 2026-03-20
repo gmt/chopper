@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const CACHE_ENTRY_VERSION: u32 = 4;
+const CACHE_ENTRY_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceFingerprint {
@@ -163,6 +163,11 @@ fn validate_cached_manifest(manifest: &Manifest) -> Result<()> {
                 "cached manifest env_remove keys cannot contain duplicates"
             ));
         }
+    }
+
+    if let Some(path) = &manifest.path {
+        path.validate("cached manifest path")
+            .map_err(|err| anyhow!("{err}"))?;
     }
 
     if let Some(journal) = &manifest.journal {

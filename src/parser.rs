@@ -2,6 +2,7 @@ use crate::arg_validation::{self, ArgViolation};
 use crate::env_validation::{self, EnvKeyViolation, EnvValueViolation};
 use crate::journal_validation::{self, JournalIdentifierViolation, JournalNamespaceViolation};
 use crate::manifest::{BashcompConfig, JournalConfig, Manifest, ReconcileConfig};
+use crate::path_mutation::PathMutationConfig;
 use crate::rhai_wiring::shared_rhai_path_for_alias_doc;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
@@ -68,6 +69,10 @@ fn parse_toml(content: &str, path: &Path) -> Result<Manifest> {
     let mut manifest = Manifest::simple(exec).with_args(parsed.args);
     manifest.env = normalize_env_map(parsed.env)?;
     manifest.env_remove = normalize_env_remove(parsed.env_remove)?;
+    if let Some(path) = parsed.path.filter(|config| !config.is_empty()) {
+        path.validate("path")?;
+        manifest.path = Some(path);
+    }
 
     if let Some(journal) = parsed.journal {
         let namespace = match journal_validation::normalize_namespace(&journal.namespace) {
@@ -363,6 +368,7 @@ struct AliasConfig {
     env: HashMap<String, String>,
     #[serde(default)]
     env_remove: Vec<String>,
+    path: Option<PathMutationConfig>,
     journal: Option<JournalConfigInput>,
     reconcile: Option<ReconcileConfigInput>,
     bashcomp: Option<BashcompConfigInput>,
@@ -478,6 +484,46 @@ function = "reconcile"
                 .expect("reconcile config")
                 .script,
             temp.path().join("svc.rhai")
+        );
+    }
+
+    #[test]
+    fn parses_path_mutation_config() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            r#"
+exec = "echo"
+
+[path]
+remove_all = ["^/tmp"]
+append_one = ["/custom/bin"]
+"#,
+        )
+        .expect("write toml");
+
+        let manifest = parse(&config).expect("parse toml config");
+        let path = manifest.path.expect("path config");
+        assert_eq!(path.remove_all, vec!["^/tmp"]);
+        assert_eq!(path.append_one, vec!["/custom/bin"]);
+    }
+
+    #[test]
+    fn rejects_path_entries_containing_nul_bytes() {
+        let temp = TempDir::new().expect("create tempdir");
+        let config = temp.path().join("svc.toml");
+        fs::write(
+            &config,
+            "exec = \"echo\"\n[path]\nprepend_one = [\"bad\\u0000path\"]\n",
+        )
+        .expect("write toml");
+
+        let err = parse(&config).expect_err("expected parse failure");
+        assert!(
+            err.to_string()
+                .contains("field `path.prepend_one` entries cannot contain NUL bytes"),
+            "{err}"
         );
     }
 

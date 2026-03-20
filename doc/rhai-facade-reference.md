@@ -34,6 +34,22 @@ various platforms.
 - `can_execute_without_confirmation(path) -> bool`
 - `can_execute_with_confirmation(path) -> bool`
 
+## Path-list helpers
+
+- `pathlist_split(list_string) -> [string]`
+- `pathlist_join(components_array) -> string`
+- `pathlist_prepend_one(list_string, path) -> string`
+- `pathlist_append_one(list_string, path) -> string`
+- `pathlist_prepend_all(list_string, path) -> string`
+- `pathlist_append_all(list_string, path) -> string`
+- `pathlist_remove_one(list_string, regex) -> string`
+- `pathlist_remove_all(list_string, regex) -> string`
+
+These functions operate on colon-separated path-list strings. Prepend/append
+deduplication uses canonical-path inode comparison; if either side cannot be
+canonicalized/stat'ed, it is treated as non-equivalent. Remove operations treat
+their operand as a regex matched against raw component strings.
+
 `executable_intent(path)` returns:
 
 - `exists`
@@ -113,6 +129,7 @@ fn reconcile(ctx) {
 
   let p = platform_info();
   out["set_env"] = #{ "RHAI_PLATFORM_OS": p["os"] };
+  out["set_env"]["PATH"] = pathlist_prepend_one(ctx.runtime_env["PATH"], "/srv/tools/bin");
 
   if fs_exists("config/extra.args") {
     let extra = fs_read_text("config/extra.args");

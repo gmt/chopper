@@ -14,6 +14,8 @@ mod journal_broker_client;
 mod journal_validation;
 mod manifest;
 mod parser;
+mod path_mutation;
+mod path_mutation_validation;
 mod path_validation;
 mod reconcile;
 mod rhai_api_catalog;
@@ -70,7 +72,7 @@ fn main() -> Result<()> {
     };
 
     let patch = reconcile::maybe_reconcile(&manifest, &invocation.passthrough_args)?;
-    let resolved = manifest.build_invocation(&invocation.passthrough_args, patch);
+    let resolved = manifest.build_invocation(&invocation.passthrough_args, patch)?;
     executor::run(resolved)
 }
 
