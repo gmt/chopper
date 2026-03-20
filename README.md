@@ -12,6 +12,12 @@ It is designed for:
 If those don't suffice there is an optional Rhai scripting layer
 that probably will.
 
+It was originally named to be a helicopter parent for your
+child processes, but that's not really accurate, it gets out of
+the way and lets them play freely, after launch. However, it does
+slice and dice plenty, before it sends them on their way, so
+somehow it wound up being apropos despite this.
+
 ---
 
 ## Section map
