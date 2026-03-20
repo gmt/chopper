@@ -4,16 +4,58 @@ use broker::dbus_interface::{JournalBroker, BUS_NAME, OBJECT_PATH};
 use std::process;
 
 fn main() {
-    let verbose = std::env::args().any(|a| a == "--verbose" || a == "-v");
+    match parse_action(std::env::args()) {
+        BrokerAction::Help => {
+            print_help();
+            return;
+        }
+        BrokerAction::Version => {
+            println!("chopper-journal-broker {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        BrokerAction::Run { verbose } => {
+            if verbose {
+                eprintln!("chopper-journal-broker: starting on system bus as {BUS_NAME}");
+            }
 
-    if verbose {
-        eprintln!("chopper-journal-broker: starting on system bus as {BUS_NAME}");
+            if let Err(err) = run_broker(verbose) {
+                eprintln!("chopper-journal-broker: fatal: {err}");
+                process::exit(1);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrokerAction {
+    Help,
+    Version,
+    Run { verbose: bool },
+}
+
+fn parse_action(args: impl IntoIterator<Item = String>) -> BrokerAction {
+    let mut verbose = false;
+
+    for arg in args.into_iter().skip(1) {
+        match arg.as_str() {
+            "-h" | "--help" => return BrokerAction::Help,
+            "-V" | "--version" => return BrokerAction::Version,
+            "-v" | "--verbose" => verbose = true,
+            _ => {}
+        }
     }
 
-    if let Err(err) = run_broker(verbose) {
-        eprintln!("chopper-journal-broker: fatal: {err}");
-        process::exit(1);
-    }
+    BrokerAction::Run { verbose }
+}
+
+fn print_help() {
+    println!("Usage:");
+    println!("  chopper-journal-broker [options]");
+    println!();
+    println!("Options:");
+    println!("  -h, --help                   Show this help");
+    println!("  -V, --version                Show version");
+    println!("  -v, --verbose                Log broker startup to stderr");
 }
 
 fn run_broker(verbose: bool) -> anyhow::Result<()> {
@@ -38,5 +80,51 @@ fn run_broker(verbose: bool) -> anyhow::Result<()> {
     // receives a signal (SIGTERM from systemd, etc.).
     loop {
         std::thread::park();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_action, BrokerAction};
+
+    fn parse(raw: &[&str]) -> BrokerAction {
+        parse_action(raw.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn help_short_circuits_before_run() {
+        assert_eq!(parse(&["chopper-journal-broker", "-h"]), BrokerAction::Help);
+    }
+
+    #[test]
+    fn version_long_circuits_before_run() {
+        assert_eq!(
+            parse(&["chopper-journal-broker", "--version"]),
+            BrokerAction::Version
+        );
+    }
+
+    #[test]
+    fn verbose_runs_broker() {
+        assert_eq!(
+            parse(&["chopper-journal-broker", "--verbose"]),
+            BrokerAction::Run { verbose: true }
+        );
+    }
+
+    #[test]
+    fn help_wins_over_verbose() {
+        assert_eq!(
+            parse(&["chopper-journal-broker", "--verbose", "--help"]),
+            BrokerAction::Help
+        );
+    }
+
+    #[test]
+    fn unknown_args_are_ignored_for_now() {
+        assert_eq!(
+            parse(&["chopper-journal-broker", "--mystery"]),
+            BrokerAction::Run { verbose: false }
+        );
     }
 }

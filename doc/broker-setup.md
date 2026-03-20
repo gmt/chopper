@@ -3,6 +3,10 @@
 The `chopper-journal-broker` daemon is a D-Bus system service that creates and
 manages journald namespace instances on behalf of unprivileged users.
 
+It also supports `--help` and `--version` as safe metadata flags. Those return
+immediately without touching D-Bus, which makes install verification much less
+awkward than launching the daemon directly.
+
 ## Overview
 
 When an alias has `journal.ensure = true`, chopper calls the broker via D-Bus
