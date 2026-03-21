@@ -185,6 +185,8 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!(
                 "Includes exec, args, env, env_remove, path, journal, reconcile, and bashcomp fields."
             );
+            println!("When present, path includes remove_all, remove_one, append_all, append_one,");
+            println!("prepend_all, and prepend_one.");
             println!();
             println!("Example:");
             println!("  chopper --alias get mygrep");

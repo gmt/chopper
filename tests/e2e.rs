@@ -619,6 +619,30 @@ fn help_flag_prints_usage_when_invoked_as_uppercase_chopper() {
 }
 
 #[test]
+fn alias_get_help_mentions_path_mutation_fields() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let output = run_chopper(&config_home, &cache_home, &["--alias", "get", "--help"]);
+    assert!(
+        output.status.success(),
+        "alias get help failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Usage: chopper --alias get <alias>"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("remove_all"), "{stdout}");
+    assert!(stdout.contains("remove_one"), "{stdout}");
+    assert!(stdout.contains("append_all"), "{stdout}");
+    assert!(stdout.contains("append_one"), "{stdout}");
+    assert!(stdout.contains("prepend_all"), "{stdout}");
+    assert!(stdout.contains("prepend_one"), "{stdout}");
+}
+
+#[test]
 fn direct_alias_invocation_works_when_invoked_as_uppercase_chopper() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
