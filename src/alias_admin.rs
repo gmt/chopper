@@ -7,9 +7,55 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AliasMutationMode {
+    Add,
+    Set,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RemoveMode {
     Clean,
     Dirty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathField {
+    RemoveAll,
+    RemoveOne,
+    AppendAll,
+    AppendOne,
+    PrependAll,
+    PrependOne,
+}
+
+impl PathField {
+    fn toml_name(self) -> &'static str {
+        match self {
+            PathField::RemoveAll => "path.remove_all",
+            PathField::RemoveOne => "path.remove_one",
+            PathField::AppendAll => "path.append_all",
+            PathField::AppendOne => "path.append_one",
+            PathField::PrependAll => "path.prepend_all",
+            PathField::PrependOne => "path.prepend_one",
+        }
+    }
+
+    fn flag_name(self) -> &'static str {
+        match self {
+            PathField::RemoveAll => "--path-remove-all",
+            PathField::RemoveOne => "--path-remove-one",
+            PathField::AppendAll => "--path-append-all",
+            PathField::AppendOne => "--path-append-one",
+            PathField::PrependAll => "--path-prepend-all",
+            PathField::PrependOne => "--path-prepend-one",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathFieldReplacement {
+    field: PathField,
+    values: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +70,7 @@ struct MutationInput {
     path_append_one: Vec<String>,
     path_prepend_all: Vec<String>,
     path_prepend_one: Vec<String>,
+    path_replacement: Option<PathFieldReplacement>,
     journal_namespace: Option<String>,
     journal_stderr: Option<bool>,
     journal_identifier: Option<String>,
@@ -48,6 +95,7 @@ impl MutationInput {
             && self.path_append_one.is_empty()
             && self.path_prepend_all.is_empty()
             && self.path_prepend_one.is_empty()
+            && self.path_replacement.is_none()
             && self.journal_namespace.is_none()
             && self.journal_stderr.is_none()
             && self.journal_identifier.is_none()
@@ -101,13 +149,13 @@ fn run_alias_action_inner(raw_args: &[String]) -> Result<()> {
             if raw_args.get(1).map(String::as_str) == Some("--help") {
                 return print_alias_subcommand_help("add");
             }
-            run_add_or_set(true, &raw_args[1..])
+            run_add_or_set(AliasMutationMode::Add, &raw_args[1..])
         }
         "set" => {
             if raw_args.get(1).map(String::as_str) == Some("--help") {
                 return print_alias_subcommand_help("set");
             }
-            run_add_or_set(false, &raw_args[1..])
+            run_add_or_set(AliasMutationMode::Set, &raw_args[1..])
         }
         "remove" => {
             if raw_args.get(1).map(String::as_str) == Some("--help") {
@@ -156,6 +204,8 @@ fn print_alias_help() {
     println!("  --path-append-one PATH     Append PATH after removing first equivalent entry (repeatable)");
     println!("  --path-prepend-all PATH    Prepend PATH after removing all equivalent entries (repeatable)");
     println!("  --path-prepend-one PATH    Prepend PATH after removing first equivalent entry (repeatable)");
+    println!("                             With `set`, a path option replaces that field from the rest of argv.");
+    println!("                             Place it last; use `--` before values if helpful.");
     println!("  --journal-namespace <ns>   systemd journal namespace (enables journaling)");
     println!("  --journal-stderr true|false  Capture stderr to journal (default: true)");
     println!("  --journal-identifier <id>  Journal syslog identifier override");
@@ -247,12 +297,13 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
                 "  --env KEY=VALUE            Add or update an environment variable (repeatable)"
             );
             println!("  --env-remove KEY           Add a key to the runtime env-remove list (repeatable)");
-            println!("  --path-remove-all REGEX    Append to path.remove_all (repeatable)");
-            println!("  --path-remove-one REGEX    Append to path.remove_one (repeatable)");
-            println!("  --path-append-all PATH     Append to path.append_all (repeatable)");
-            println!("  --path-append-one PATH     Append to path.append_one (repeatable)");
-            println!("  --path-prepend-all PATH    Append to path.prepend_all (repeatable)");
-            println!("  --path-prepend-one PATH    Append to path.prepend_one (repeatable)");
+            println!("  --path-remove-all [--] ... Replace path.remove_all with regexes from the rest of argv");
+            println!("  --path-remove-one [--] ... Replace path.remove_one with regexes from the rest of argv");
+            println!("  --path-append-all [--] ... Replace path.append_all with paths from the rest of argv");
+            println!("  --path-append-one [--] ... Replace path.append_one with paths from the rest of argv");
+            println!("  --path-prepend-all [--] ... Replace path.prepend_all with paths from the rest of argv");
+            println!("  --path-prepend-one [--] ... Replace path.prepend_one with paths from the rest of argv");
+            println!("                             Path replacement options consume the rest of argv and may be empty to clear.");
             println!("  --journal-namespace <ns>   Set/update the journal namespace");
             println!("  --journal-stderr true|false  Update stderr capture setting");
             println!("  --journal-identifier <id>  Update the syslog identifier (empty string clears it)");
@@ -266,6 +317,9 @@ fn print_alias_subcommand_help(sub: &str) -> Result<()> {
             println!("Examples:");
             println!("  chopper --alias set mygrep --exec rg");
             println!("  chopper --alias set mygrep --env GREP_COLORS=always --env-remove OLD_VAR");
+            println!(
+                "  chopper --alias set mygrep --path-append-one -- /usr/local/bin /opt/tools/bin"
+            );
             println!("  chopper --alias set mygrep --journal-clear");
         }
         "remove" => {
@@ -323,9 +377,9 @@ fn run_get(alias: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
+fn run_add_or_set(mode: AliasMutationMode, raw_args: &[String]) -> Result<()> {
     if raw_args.is_empty() {
-        if is_add {
+        if mode == AliasMutationMode::Add {
             return Err(anyhow!(
                 "usage: chopper --alias add <alias> --exec <command> ..."
             ));
@@ -335,9 +389,9 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
 
     let alias = &raw_args[0];
     validate_alias(alias)?;
-    let mutation = parse_mutation_args(&raw_args[1..])?;
+    let mutation = parse_mutation_args(&raw_args[1..], mode)?;
 
-    if !is_add && mutation.is_empty() {
+    if mode == AliasMutationMode::Set && mutation.is_empty() {
         return Err(anyhow!("no changes requested for alias `{alias}`"));
     }
 
@@ -349,7 +403,7 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    if is_add {
+    if mode == AliasMutationMode::Add {
         if crate::find_config(alias).is_some() {
             return Err(anyhow!(
                 "alias `{alias}` already exists; use `set` to modify"
@@ -393,6 +447,7 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
         )
     })?;
     let path_mutation = path_doc_from_mutation(&mutation);
+    let mut replaced_path_field = None;
 
     if let Some(exec) = mutation.exec {
         doc.exec = exec;
@@ -421,6 +476,15 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
         if path.is_empty() {
             doc.path = None;
         }
+    }
+    if let Some(replacement) = mutation.path_replacement {
+        let path = doc.path.get_or_insert_with(PathMutationConfig::default);
+        let previous_values = path_field_values(path, replacement.field).to_vec();
+        replace_path_field(path, replacement.field, replacement.values.clone());
+        if path.is_empty() {
+            doc.path = None;
+        }
+        replaced_path_field = Some((replacement, previous_values));
     }
     if mutation.journal_clear {
         doc.journal = None;
@@ -483,6 +547,9 @@ fn run_add_or_set(is_add: bool, raw_args: &[String]) -> Result<()> {
 
     save_alias_doc(&existing_path, &doc)?;
     emit_wrapper_warnings(alias);
+    if let Some((replacement, previous_values)) = replaced_path_field {
+        emit_path_replacement_summary(alias, &replacement, &previous_values);
+    }
     println!("updated alias `{alias}` at {}", existing_path.display());
     Ok(())
 }
@@ -603,7 +670,7 @@ fn emit_wrapper_warnings(alias: &str) {
     emit_warnings(crate::wrapper_sync::wrapper_health_warnings(alias));
 }
 
-fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
+fn parse_mutation_args(raw_args: &[String], mode: AliasMutationMode) -> Result<MutationInput> {
     let mut exec = None;
     let mut args = Vec::new();
     let mut env_set = Vec::new();
@@ -614,6 +681,7 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
     let mut path_append_one = Vec::new();
     let mut path_prepend_all = Vec::new();
     let mut path_prepend_one = Vec::new();
+    let mut path_replacement = None;
     let mut journal_namespace = None;
     let mut journal_stderr = None;
     let mut journal_identifier = None;
@@ -657,6 +725,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-remove-all" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::RemoveAll,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-remove-all requires a regex"))?;
@@ -664,6 +739,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-remove-one" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::RemoveOne,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-remove-one requires a regex"))?;
@@ -671,6 +753,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-append-all" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::AppendAll,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-append-all requires a path"))?;
@@ -678,6 +767,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-append-one" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::AppendOne,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-append-one requires a path"))?;
@@ -685,6 +781,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-prepend-all" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::PrependAll,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-prepend-all requires a path"))?;
@@ -692,6 +795,13 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
                 idx += 2;
             }
             "--path-prepend-one" => {
+                if mode == AliasMutationMode::Set {
+                    path_replacement = Some(parse_path_replacement(
+                        PathField::PrependOne,
+                        &raw_args[idx + 1..],
+                    ));
+                    break;
+                }
                 let value = raw_args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--path-prepend-one requires a path"))?;
@@ -781,6 +891,7 @@ fn parse_mutation_args(raw_args: &[String]) -> Result<MutationInput> {
         path_append_one,
         path_prepend_all,
         path_prepend_one,
+        path_replacement,
         journal_namespace,
         journal_stderr,
         journal_identifier,
@@ -803,6 +914,14 @@ fn mutation_has_path_changes(mutation: &MutationInput) -> bool {
         || !mutation.path_prepend_one.is_empty()
 }
 
+fn parse_path_replacement(field: PathField, raw_values: &[String]) -> PathFieldReplacement {
+    let values = match raw_values.first().map(String::as_str) {
+        Some("--") => raw_values[1..].to_vec(),
+        _ => raw_values.to_vec(),
+    };
+    PathFieldReplacement { field, values }
+}
+
 fn path_doc_from_mutation(mutation: &MutationInput) -> Option<PathMutationConfig> {
     if !mutation_has_path_changes(mutation) {
         return None;
@@ -815,6 +934,51 @@ fn path_doc_from_mutation(mutation: &MutationInput) -> Option<PathMutationConfig
         prepend_all: mutation.path_prepend_all.clone(),
         prepend_one: mutation.path_prepend_one.clone(),
     })
+}
+
+fn path_field_values(path: &PathMutationConfig, field: PathField) -> &[String] {
+    match field {
+        PathField::RemoveAll => &path.remove_all,
+        PathField::RemoveOne => &path.remove_one,
+        PathField::AppendAll => &path.append_all,
+        PathField::AppendOne => &path.append_one,
+        PathField::PrependAll => &path.prepend_all,
+        PathField::PrependOne => &path.prepend_one,
+    }
+}
+
+fn replace_path_field(path: &mut PathMutationConfig, field: PathField, values: Vec<String>) {
+    match field {
+        PathField::RemoveAll => path.remove_all = values,
+        PathField::RemoveOne => path.remove_one = values,
+        PathField::AppendAll => path.append_all = values,
+        PathField::AppendOne => path.append_one = values,
+        PathField::PrependAll => path.prepend_all = values,
+        PathField::PrependOne => path.prepend_one = values,
+    }
+}
+
+fn emit_path_replacement_summary(
+    alias: &str,
+    replacement: &PathFieldReplacement,
+    previous: &[String],
+) {
+    eprintln!(
+        "new value of {}: {}",
+        replacement.field.toml_name(),
+        serde_json::to_string(&replacement.values).unwrap_or_else(|_| "[]".to_string())
+    );
+    let mut restore_args = vec![
+        "chopper".to_string(),
+        "--alias".to_string(),
+        "set".to_string(),
+        alias.to_string(),
+        replacement.field.flag_name().to_string(),
+        "--".to_string(),
+    ];
+    restore_args.extend(previous.iter().cloned());
+    eprintln!("restore previous value with:");
+    eprintln!("{}", shell_words::join(restore_args));
 }
 
 fn build_journal_from_mutation(
@@ -1040,6 +1204,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 mod tests {
     use super::{
         create_alias, duplicate_alias, load_or_seed_alias_doc, parse_mutation_args, rename_alias,
+        AliasMutationMode, PathField,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -1048,31 +1213,34 @@ mod tests {
 
     #[test]
     fn parses_add_mutation_flags() {
-        let mutation = parse_mutation_args(&[
-            "--exec".into(),
-            "echo".into(),
-            "--arg".into(),
-            "hello".into(),
-            "--env".into(),
-            "A=1".into(),
-            "--env-remove".into(),
-            "OLD".into(),
-            "--path-remove-all".into(),
-            "^/tmp".into(),
-            "--path-append-one".into(),
-            "/custom/bin".into(),
-            "--journal-namespace".into(),
-            "ops".into(),
-            "--journal-stderr".into(),
-            "false".into(),
-            "--journal-identifier".into(),
-            "svc".into(),
-            "--journal-user-scope".into(),
-            "true".into(),
-            "--journal-ensure".into(),
-            "true".into(),
-            "--no-wrapper-sync".into(),
-        ])
+        let mutation = parse_mutation_args(
+            &[
+                "--exec".into(),
+                "echo".into(),
+                "--arg".into(),
+                "hello".into(),
+                "--env".into(),
+                "A=1".into(),
+                "--env-remove".into(),
+                "OLD".into(),
+                "--path-remove-all".into(),
+                "^/tmp".into(),
+                "--path-append-one".into(),
+                "/custom/bin".into(),
+                "--journal-namespace".into(),
+                "ops".into(),
+                "--journal-stderr".into(),
+                "false".into(),
+                "--journal-identifier".into(),
+                "svc".into(),
+                "--journal-user-scope".into(),
+                "true".into(),
+                "--journal-ensure".into(),
+                "true".into(),
+                "--no-wrapper-sync".into(),
+            ],
+            AliasMutationMode::Add,
+        )
         .expect("mutation parse");
         assert_eq!(mutation.exec.as_deref(), Some("echo"));
         assert_eq!(mutation.args, vec!["hello"]);
@@ -1086,6 +1254,45 @@ mod tests {
         assert_eq!(mutation.journal_user_scope, Some(true));
         assert_eq!(mutation.journal_ensure, Some(true));
         assert!(mutation.no_wrapper_sync);
+    }
+
+    #[test]
+    fn parses_set_path_replacement_with_optional_separator() {
+        let mutation = parse_mutation_args(
+            &[
+                "--env".into(),
+                "A=1".into(),
+                "--path-append-one".into(),
+                "--".into(),
+                "/usr/local/bin".into(),
+                "/opt/tools/bin".into(),
+            ],
+            AliasMutationMode::Set,
+        )
+        .expect("mutation parse");
+
+        assert_eq!(mutation.env_set, vec![("A".into(), "1".into())]);
+        assert_eq!(
+            mutation.path_replacement,
+            Some(super::PathFieldReplacement {
+                field: PathField::AppendOne,
+                values: vec!["/usr/local/bin".into(), "/opt/tools/bin".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn parses_set_path_replacement_with_empty_tail_to_clear() {
+        let mutation = parse_mutation_args(&["--path-remove-all".into()], AliasMutationMode::Set)
+            .expect("mutation parse");
+
+        assert_eq!(
+            mutation.path_replacement,
+            Some(super::PathFieldReplacement {
+                field: PathField::RemoveAll,
+                values: Vec::new(),
+            })
+        );
     }
 
     #[test]

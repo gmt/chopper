@@ -14665,16 +14665,31 @@ fn alias_add_set_and_get_round_trip_path_flags() {
             "--alias",
             "set",
             "managedpath",
+            "--arg",
+            "after",
             "--path-prepend-one",
+            "--",
             "/srv/bin",
-            "--path-remove-one",
-            "^/legacy$",
+            "/srv/extra/bin",
         ],
     );
     assert!(
         set.status.success(),
         "{}",
         String::from_utf8_lossy(&set.stderr)
+    );
+    let set_stderr = String::from_utf8_lossy(&set.stderr);
+    assert!(
+        set_stderr.contains("new value of path.prepend_one: [\"/srv/bin\",\"/srv/extra/bin\"]"),
+        "{set_stderr}"
+    );
+    assert!(
+        set_stderr.contains("restore previous value with:"),
+        "{set_stderr}"
+    );
+    assert!(
+        set_stderr.contains("chopper --alias set managedpath --path-prepend-one --"),
+        "{set_stderr}"
     );
 
     let get = run_chopper(
@@ -14695,8 +14710,62 @@ fn alias_add_set_and_get_round_trip_path_flags() {
     assert!(stdout.contains("/opt/tool/bin"), "{stdout}");
     assert!(stdout.contains("\"prepend_one\""), "{stdout}");
     assert!(stdout.contains("/srv/bin"), "{stdout}");
-    assert!(stdout.contains("\"remove_one\""), "{stdout}");
-    assert!(stdout.contains("^/legacy$"), "{stdout}");
+    assert!(stdout.contains("/srv/extra/bin"), "{stdout}");
+    assert!(stdout.contains("\"remove_one\": []"), "{stdout}");
+}
+
+#[test]
+fn alias_set_path_flag_replaces_and_can_clear_field() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+
+    let add = run_chopper(
+        &config_home,
+        &cache_home,
+        &[
+            "--alias",
+            "add",
+            "clearpath",
+            "--exec",
+            "echo",
+            "--path-append-one",
+            "/opt/tool/bin",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let clear = run_chopper(
+        &config_home,
+        &cache_home,
+        &["--alias", "set", "clearpath", "--path-append-one", "--"],
+    );
+    assert!(
+        clear.status.success(),
+        "{}",
+        String::from_utf8_lossy(&clear.stderr)
+    );
+    let clear_stderr = String::from_utf8_lossy(&clear.stderr);
+    assert!(
+        clear_stderr.contains("new value of path.append_one: []"),
+        "{clear_stderr}"
+    );
+    assert!(
+        clear_stderr.contains("chopper --alias set clearpath --path-append-one -- /opt/tool/bin"),
+        "{clear_stderr}"
+    );
+
+    let get = run_chopper(&config_home, &cache_home, &["--alias", "get", "clearpath"]);
+    assert!(
+        get.status.success(),
+        "{}",
+        String::from_utf8_lossy(&get.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&get.stdout);
+    assert!(stdout.contains("\"path\": null"), "{stdout}");
 }
 
 #[test]
