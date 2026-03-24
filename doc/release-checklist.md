@@ -2,6 +2,9 @@
 
 Use this checklist before cutting a release tag.
 
+For the standard patch-release flow, you can usually let
+`scripts/plbump.sh` drive the mechanics once the repo is clean and ready.
+
 ---
 
 ## Code quality gates

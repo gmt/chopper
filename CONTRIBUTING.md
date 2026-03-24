@@ -22,6 +22,25 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 Releases are automated on GitHub Actions.
 
+The low-friction path is:
+
+```bash
+scripts/plbump.sh
+```
+
+That script assumes the current committed `Cargo.toml` version is the release
+version, runs the local release checks, tags and pushes the current branch, and
+then bumps/stages `Cargo.toml` and `Cargo.lock` to the next patch version.
+
+If you want the script to refresh compatible dependency versions during the
+release cut, use:
+
+```bash
+scripts/plbump.sh --update-deps
+```
+
+Manual flow:
+
 1. Update `Cargo.toml` to the intended release version.
 2. Ensure the working tree is clean and the release checklist passes.
 3. Push a matching tag such as `v0.99.1`.
