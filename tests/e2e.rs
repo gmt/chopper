@@ -1,3 +1,4 @@
+use nix::unistd::geteuid;
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::process::CommandExt;
@@ -3051,10 +3052,14 @@ user_scope = true
         String::from_utf8_lossy(&output.stderr)
     );
 
+    let expected_namespace = format!(
+        "--namespace=u{}-test-user-ops-ns.prod-2026",
+        geteuid().as_raw()
+    );
     let captured_args_text =
         fs::read_to_string(&captured_args).expect("read captured systemd-cat args");
     assert!(
-        captured_args_text.contains("--namespace=u1000-test-user-ops-ns.prod-2026"),
+        captured_args_text.contains(&expected_namespace),
         "derived user-scoped namespace should be forwarded: {captured_args_text}"
     );
 }
