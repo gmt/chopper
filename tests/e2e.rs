@@ -11702,12 +11702,19 @@ ensure = true
 
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let merged_path = format!("{}:{existing_path}", fake_bin.path().display());
+    let missing_system_bus = config_home.path().join("missing-system-bus.sock");
     let output = run_chopper_with(
         chopper_bin(),
         &config_home,
         &cache_home,
         &["journal-ensure-fail"],
-        [("PATH", merged_path)],
+        [
+            ("PATH", merged_path),
+            (
+                "DBUS_SYSTEM_BUS_ADDRESS",
+                format!("unix:path={}", missing_system_bus.display()),
+            ),
+        ],
     );
 
     assert!(!output.status.success(), "command unexpectedly succeeded");
