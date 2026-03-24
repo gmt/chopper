@@ -35,9 +35,11 @@ Use this checklist before cutting a release tag.
 ## Packaging / release prep
 
 - [ ] `Cargo.toml` version is correct for release
-- [ ] changelog/release notes drafted (if used)
+- [ ] release tag `vX.Y.Z` is prepared to match `Cargo.toml`
+- [ ] changelog/release notes drafted (optional; GitHub can auto-generate notes)
 - [ ] git working tree is clean
 - [ ] release commit/tag message prepared
+- [ ] pushing the release tag will trigger GitHub Actions to run checks, build the Linux bundle, and publish the GitHub Release
 
 ---
 

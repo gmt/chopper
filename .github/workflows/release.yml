@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate release tag matches Cargo.toml
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [[ -z "${cargo_version}" ]]; then
+            echo "failed to parse package version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ "${cargo_version}" != "${tag_version}" ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${cargo_version}" >&2
+            exit 1
+          fi
+
+          echo "version=${cargo_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test -- --nocapture
+
+      - name: Package release artifacts
+        run: |
+          scripts/package-release.sh \
+            --version "${{ steps.version.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu \
+            --output-dir release-artifacts
+
+      - name: Verify packaged archive contents
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="release-artifacts/chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz"
+
+          tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/bin/chopper"
+          tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/bin/chopper-journal-broker"
+          tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/scripts/install-journal-broker.sh"
+          tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/README.md"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/*.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true

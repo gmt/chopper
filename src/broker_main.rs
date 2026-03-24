@@ -5,14 +5,8 @@ use std::process;
 
 fn main() {
     match parse_action(std::env::args()) {
-        BrokerAction::Help => {
-            print_help();
-            return;
-        }
-        BrokerAction::Version => {
-            println!("chopper-journal-broker {}", env!("CARGO_PKG_VERSION"));
-            return;
-        }
+        BrokerAction::Help => print_help(),
+        BrokerAction::Version => println!("chopper-journal-broker {}", env!("CARGO_PKG_VERSION")),
         BrokerAction::Run { verbose } => {
             if verbose {
                 eprintln!("chopper-journal-broker: starting on system bus as {BUS_NAME}");

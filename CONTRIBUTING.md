@@ -18,6 +18,18 @@ cargo test -- --nocapture
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+## Releases
+
+Releases are automated on GitHub Actions.
+
+1. Update `Cargo.toml` to the intended release version.
+2. Ensure the working tree is clean and the release checklist passes.
+3. Push a matching tag such as `v0.99.1`.
+
+That tag triggers the GitHub release workflow, which validates the tag/version
+match, runs `fmt`/`clippy`/`test`, builds the Linux release bundle, and
+publishes a GitHub Release with generated notes.
+
 ## Change expectations
 
 - Keep aliases simple by default; advanced behavior should remain opt-in.

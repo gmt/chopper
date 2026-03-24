@@ -636,10 +636,8 @@ fn remove_alias_with_mode(
                 removed_any = true;
             }
             crate::cache::prune_alias(alias);
-            if !no_wrapper_sync {
-                if crate::wrapper_sync::remove_wrapper(alias, symlink_path)? {
-                    removed_any = true;
-                }
+            if !no_wrapper_sync && crate::wrapper_sync::remove_wrapper(alias, symlink_path)? {
+                removed_any = true;
             }
         }
         RemoveMode::Dirty => {

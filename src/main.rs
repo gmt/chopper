@@ -292,7 +292,7 @@ fn run_print_exec(alias: &str) -> i32 {
         None => {
             // No config; try PATH lookup like normal execution
             let resolved = exec_resolution::resolve_command_path(alias);
-            if resolved == PathBuf::from(alias) {
+            if resolved == std::path::Path::new(alias) {
                 return 1;
             }
             manifest::Manifest::simple(resolved)
