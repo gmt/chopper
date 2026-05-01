@@ -15,8 +15,9 @@ Symptoms:
 Checks:
 
 1. Confirm the alias file location:
-   - `~/.config/chopper/aliases/<alias>.toml` (preferred), or
-   - `~/.config/chopper/<alias>.toml`
+   - `~/.config/chopper/<alias>/exe.toml` (preferred), or
+   - `~/.config/chopper/aliases/<alias>.toml` (legacy), or
+   - `~/.config/chopper/<alias>.toml` (legacy)
 2. If using an override:
    - check `CHOPPER_CONFIG_DIR`
    - run `chopper --print-config-dir` to confirm effective root

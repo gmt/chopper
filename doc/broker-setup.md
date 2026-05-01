@@ -108,7 +108,8 @@ busctl --system introspect \
   /com/chopperproject/JournalBroker1
 
 # Test with an alias
-cat > ~/.config/chopper/aliases/test-broker.toml <<'EOF'
+mkdir -p ~/.config/chopper/test-broker
+cat > ~/.config/chopper/test-broker/exe.toml <<'EOF'
 exec = "sh"
 args = ["-c", "echo test; echo err >&2"]
 

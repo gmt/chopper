@@ -53,6 +53,9 @@ Then invoke:
 chopper <alias> [args...]
 ```
 
+Executable alias wrappers use the narrow `chopper-exe` runner; `chopper`
+remains the control-plane entrypoint for administration, TUI, and compatibility.
+
 ---
 
 ## Quickstart
@@ -62,7 +65,7 @@ chopper <alias> [args...]
 Create a file at:
 
 ```text
-~/.config/chopper/aliases/hello.toml
+~/.config/chopper/hello/exe.toml
 ```
 
 with:
@@ -121,7 +124,7 @@ chopper <alias> [args...]
 ### Symlinked alias
 
 ```bash
-ln -s /path/to/chopper /usr/local/bin/kpods
+ln -s /path/to/chopper-exe /usr/local/bin/kpods
 kpods [args...]
 ```
 

@@ -21,13 +21,13 @@ Starter files for common setups:
   - example reconcile script using platform/fs/process facade APIs
 
 Copy these into your config root (typically
-`${XDG_CONFIG_HOME:-~/.config}/chopper/aliases`) and adapt as needed.
+`${XDG_CONFIG_HOME:-~/.config}/chopper/<alias>/exe.toml`) and adapt as needed.
 
 Quick copy example:
 
 ```bash
-mkdir -p ~/.config/chopper/aliases
-cp doc/templates/basic-alias.toml ~/.config/chopper/aliases/hello.toml
+mkdir -p ~/.config/chopper/hello
+cp doc/templates/basic-alias.toml ~/.config/chopper/hello/exe.toml
 chopper hello
 ```
 

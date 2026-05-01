@@ -51,8 +51,9 @@ ${XDG_CONFIG_HOME:-~/.config}/chopper
 
 Lookup order:
 
-1. `aliases/<name>.toml`
-2. `<name>.toml`
+1. `<name>/exe.toml`
+2. `aliases/<name>.toml` (legacy)
+3. `<name>.toml` (legacy)
 
 ---
 

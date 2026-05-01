@@ -11,17 +11,23 @@ Direct mode:
 ```bash
 chopper <alias> [args...]
 chopper <alias> -- [args...]
+chopper-exe <alias> [args...]
 ```
+
+`chopper` is the control-plane entrypoint and delegates executable alias
+launches to `chopper-exe`. `chopper-exe` is the narrow hot-path runner used by
+managed wrapper symlinks.
 
 Symlink mode:
 
 ```bash
-ln -s /path/to/chopper /usr/local/bin/myalias
+ln -s /path/to/chopper-exe /usr/local/bin/myalias
 myalias [args...]
 ```
 
-In symlink mode, executable basename is used as alias name and built-ins are
-not treated specially.
+In symlink mode, executable basename is used as alias name and built-ins are not
+treated specially. Older symlinks that still point at `chopper` are delegated to
+`chopper-exe` for compatibility.
 
 ---
 
@@ -57,14 +63,20 @@ source <(chopper --bashcomp)
 chopper --bashcomp > ~/.local/share/bash-completion/completions/chopper
 ```
 
+The emitted completion code marks completion-time subprocesses with
+`CHOPPER_BASHCOMP=1`; alias completions also receive
+`CHOPPER_BASHCOMP_ALIAS` and `CHOPPER_BASHCOMP_TARGET` when those values are
+known.
+
 ### Introspection
 
 ```bash
 chopper --list-aliases
 ```
 
-Lists all configured alias names (one per line). Scans both the `aliases/`
-subdirectory and the config root.
+Lists all configured executable alias names (one per line). Scans canonical
+`<alias>/exe.toml` entries plus legacy `aliases/<alias>.toml` and
+`<alias>.toml` files.
 
 ```bash
 chopper --print-exec <alias>
@@ -101,7 +113,7 @@ chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>]
 
 Notes:
 
-- `add` creates `aliases/<alias>.toml`.
+- `add` creates `<alias>/exe.toml`.
 - `set` updates TOML alias documents.
 - use `chopper --list-aliases` to enumerate aliases.
 - `add` / `set` journal flags include:

@@ -49,13 +49,16 @@ When the user TABs on an unknown command, `_completion_loader` fires. It calls
 `__load_completion <command>`, which searches for completion files named
 `<command>`, `<command>.bash`, or `_<command>` in a cascade of directories:
 
-1. `$BASH_COMPLETION_USER_DIR/completions/`
+1. Each entry in `$BASH_COMPLETION_USER_DIR` with `completions` appended
 2. Directories from `$XDG_DATA_DIRS` with `bash-completion/completions` appended
 3. `$BASH_COMPLETION_COMPAT_DIR` (defaults to `/etc/bash_completion.d`)
 
 The user completion directory defaults to:
 
     ${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}/completions/
+
+Modern bash-completion treats `BASH_COMPLETION_USER_DIR` as a colon-separated
+list of base directories, not a single final `completions` directory.
 
 Once a file is sourced, it registers a real compspec (e.g.,
 `complete -F _comp_cmd_kubectl kubectl`), and completion retries with the
@@ -76,9 +79,11 @@ using the standard framework.
 
 ### `BASH_COMPLETION_USER_DIR`
 
-User-writable completion directory. Files placed here are discovered by the
+Colon-separated list of user-writable completion base directories. Files
+placed in each base directory's `completions/` child are discovered by the
 lazy-loader on first TAB for the matching command name. This is the right
-place for chopper to project per-alias completion shims.
+place for chopper to project per-alias completion shims; chopper uses the
+first existing writable candidate.
 
 ### `_command_offset N`
 
@@ -191,8 +196,8 @@ Nix has known gaps with bash completion for wrapped binaries:
 - Workaround: manually extend `XDG_DATA_DIRS` in shell hooks.
 
 Lesson for chopper: do not rely on `XDG_DATA_DIRS` propagation. Project
-completion shims directly into `BASH_COMPLETION_USER_DIR` where we control
-the path.
+completion shims directly into the first writable `BASH_COMPLETION_USER_DIR`
+entry where we control the path.
 
 ---
 
@@ -226,7 +231,7 @@ The completion system must handle these scenarios without manual intervention:
 | Alias retargeted to different exec | Next completion (or new shell) picks up new target |
 | Underlying command has no completer | Falls back to filename completion via `-o default` |
 | bash-completion framework not installed | Uses `compgen -o default` fallback |
-| `BASH_COMPLETION_USER_DIR` not writable | Shim projection silently skipped |
+| No user completion directory is writable | Shim projection silently skipped |
 | Rapid successive TAB presses | Session cache prevents repeated subprocess calls |
 
 Implementation strategy:
@@ -272,13 +277,28 @@ When `bashcomp.disabled = true`, the completion function returns immediately
 zero blocking. This is critical for aliases that wrap commands with
 pathologically slow or broken completion.
 
+### Completion context environment
+
+Commands invoked from chopper-managed completion run with
+`CHOPPER_BASHCOMP=1`. When the alias and target are known, chopper also sets
+`CHOPPER_BASHCOMP_ALIAS` and `CHOPPER_BASHCOMP_TARGET` for the duration of the
+completion call. These variables are scoped to completion subprocesses and
+delegated completion functions; normal alias execution keeps the regular
+runtime environment model.
+
 ### Shim projection is best-effort
 
-Writing per-alias completion shims into `BASH_COMPLETION_USER_DIR` is
-opportunistic. If the directory does not exist or is not writable, projection
-is silently skipped. The main `_chopper_complete` function works regardless,
-as long as `complete -F _chopper_complete <alias>` is registered (which the
-sourced `--bashcomp` script handles directly).
+Writing per-alias completion shims into the first writable user completion
+directory is opportunistic. If no candidate directory exists and is writable,
+projection is silently skipped. The main `_chopper_complete` function works
+regardless, as long as `complete -F _chopper_complete <alias>` is registered
+(which the sourced `--bashcomp` script handles directly).
+
+When chopper is trying to find an underlying command's own completion file, it
+skips empty files, chopper-generated shims, full `chopper --bashcomp` output
+saved under an alias name, and one-line files that source `chopper --bashcomp`.
+Those files cannot provide the target command's native completer and can
+otherwise shadow the real completion file later in the search path.
 
 ### Rhai-based completion (`--complete`)
 

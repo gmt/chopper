@@ -71,7 +71,8 @@ Editing actions:
   - `Space` opens a method chooser from compatible `fn <name>(ctx)` handlers
   - selecting a method rewires TOML and opens editor at that handler
   - `Enter` opens editor at current/default handler, seeding one if missing
-- Shared Rhai file path is deterministic per alias: `<alias>.rhai` beside `<alias>.toml`.
+- Shared Rhai file path is deterministic per alias document: for canonical
+  executable aliases, `exe.rhai` beside `exe.toml`.
 - On editor close, TUI re-scans handlers and auto-syncs wiring:
   - removed configured method -> field is cleared (auto-unwire)
   - single-method rename detection rewires automatically
@@ -88,7 +89,8 @@ If neither `nvim` nor `vim` exists in `PATH`, TUI editing returns an error.
 - Alias discovery uses the same alias lookup/config roots as the rest of
   chopper.
 - TUI editing resolves alias files using the same lookup order as runtime
-  invocation (`aliases/<name>.toml`, `<name>.toml`).
+  invocation (`<name>/exe.toml`, then legacy `aliases/<name>.toml` and
+  `<name>.toml`).
 - Legacy `reconcile.script` / `bashcomp.rhai_script` values may still appear in old files, but wiring is method-first.
 - Rendering is handled by ratatui on top of crossterm, using an alternate
   screen for interactive drawing.

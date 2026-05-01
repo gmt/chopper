@@ -34,6 +34,7 @@ For a concise overview and quickstart, see the root `README.md`.
 
 ```bash
 chopper <alias> [args...]
+chopper-exe <alias> [args...]
 ```
 
 You may insert `--` to separate chopper parsing from alias args:
@@ -72,7 +73,7 @@ treated as regular alias parsing input and therefore should not be provided.
 1. **Symlinked alias**:
 
 ```bash
-ln -s /path/to/chopper /usr/local/bin/kpods
+ln -s /path/to/chopper-exe /usr/local/bin/kpods
 kpods [args...]
 ```
 
@@ -82,6 +83,10 @@ The symlink basename is used verbatim (including dots like `kpods.prod`).
 Built-in flags such as `--help`, `-h`, `--version`, and `-V` are treated as
 normal passthrough arguments in symlink mode, including print-path flags such
 as `--print-config-dir` and `--print-cache-dir`.
+
+`chopper` remains compatible with legacy symlinks that point at the control
+binary: non-built-in invocations are delegated to `chopper-exe`. New
+auto-managed wrapper symlinks point directly at `chopper-exe`.
 
 For non-path-like `exec` values (PATH lookup mode), `chopper` skips PATH hits
 that resolve to the currently running `chopper` binary (for example a wrapper
@@ -118,8 +123,9 @@ XDG/default resolution.
 
 Lookup order for alias `foo`:
 
-1. `aliases/foo.toml`
-2. `foo.toml`
+1. `foo/exe.toml`
+2. `aliases/foo.toml` (legacy)
+3. `foo.toml` (legacy)
 
 Only regular files are considered valid alias configs in this lookup. Symlinks
 that resolve to regular files are accepted.
@@ -364,7 +370,7 @@ chopper --alias remove <alias> [--mode clean|dirty] [--symlink-path <path>] [--n
 
 Key semantics:
 
-- `add` writes TOML alias configs under `aliases/<alias>.toml`.
+- `add` writes TOML executable alias configs under `<alias>/exe.toml`.
 - `add` also creates/refreshes an alias wrapper symlink by default.
 - `set` updates existing TOML alias configs.
 - journal mutation flags:
@@ -579,7 +585,22 @@ chopper --bashcomp > ~/.local/share/bash-completion/completions/chopper
 ```
 
 The script registers completion handlers for all configured aliases and
-projects per-alias shims into `BASH_COMPLETION_USER_DIR` (best-effort).
+projects per-alias shims into the first writable `BASH_COMPLETION_USER_DIR`
+entry's `completions/` directory (best-effort). If `BASH_COMPLETION_USER_DIR`
+is unset, it falls back to the standard
+`${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions` location.
+
+Completion-time subprocesses and delegated completion functions receive
+`CHOPPER_BASHCOMP=1`. When chopper knows the active alias and resolved target,
+it also provides `CHOPPER_BASHCOMP_ALIAS` and `CHOPPER_BASHCOMP_TARGET`.
+These variables are scoped to completion work and are not part of normal alias
+execution.
+
+When searching for an underlying command's native completion file, chopper
+skips empty files, chopper-generated shims, full `chopper --bashcomp` output
+saved under an alias-specific filename, and one-line files that source
+`chopper --bashcomp`. Configuration diagnostics warn about these shadowing
+files so they can be deleted or replaced intentionally.
 
 See [`bashcomp-design.md`](bashcomp-design.md) for the full design rationale.
 

@@ -5,7 +5,7 @@ Quick definitions for recurring terms in the documentation.
 ## Alias
 
 A named launch target resolved by `chopper`, usually backed by a TOML file
-under `aliases/<name>.toml`.
+under `<name>/exe.toml`.
 
 ## Direct mode
 

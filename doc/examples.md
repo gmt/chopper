@@ -91,7 +91,7 @@ user_scope = false
 
 ## 5) Reconcile runtime args with Rhai
 
-`aliases/kpods.toml`:
+`kpods/exe.toml`:
 
 ```toml
 exec = "kubectl"
@@ -101,7 +101,7 @@ args = ["get", "pods"]
 function = "reconcile"
 ```
 
-`aliases/kpods.rhai`:
+`kpods/exe.rhai`:
 
 ```rhai
 fn reconcile(ctx) {
