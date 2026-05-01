@@ -9,7 +9,7 @@ struct FileIdentity {
     ino: u64,
 }
 
-pub(crate) fn resolve_command_path(command: &str) -> PathBuf {
+pub fn resolve_command_path(command: &str) -> PathBuf {
     let Ok(candidates) = which::which_all(command) else {
         return PathBuf::from(command);
     };

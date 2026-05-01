@@ -1,53 +1,15 @@
-mod alias_admin;
-mod alias_admin_parse;
-mod alias_doc;
-mod alias_paths;
-mod alias_validation;
-mod arg_validation;
-mod cache;
-mod completion;
-mod config_diagnostics;
-mod env_util;
-mod env_validation;
-mod exec_resolution;
-mod journal_validation;
-mod manifest;
-mod parser;
-mod path_mutation;
-mod path_mutation_validation;
-mod path_validation;
-mod rhai_api_catalog;
-mod rhai_engine;
-mod rhai_facade;
-mod rhai_facade_validation;
-mod rhai_wiring;
-mod runner_resolution;
-mod string_validation;
 #[cfg(test)]
 mod test_support;
-mod tui;
-mod tui_nvim;
-mod wrapper_sync;
 
 use anyhow::{anyhow, Result};
+use chopper::{
+    alias_admin, alias_paths, cache, completion, config_diagnostics, env_util, exec_resolution,
+    manifest, parser, runner_resolution, tui,
+};
 use std::env;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-
-pub(crate) fn config_dir() -> PathBuf {
-    if let Some(override_path) = env_util::env_path_override("CHOPPER_CONFIG_DIR") {
-        return override_path;
-    }
-
-    directories::ProjectDirs::from("", "", "chopper")
-        .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".chopper"))
-}
-
-pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
-    alias_paths::find_exec_config(&config_dir(), name)
-}
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -187,7 +149,7 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("chopper {}", env!("CARGO_PKG_VERSION"));
         }
         BuiltinAction::PrintConfigDir => {
-            println!("{}", config_dir().display());
+            println!("{}", chopper::config_dir().display());
         }
         BuiltinAction::PrintCacheDir => {
             println!("{}", cache::cache_dir().display());
@@ -236,7 +198,7 @@ fn parse_tui_options(raw_args: &[String]) -> Result<tui::TuiOptions> {
 }
 
 fn run_list_aliases() {
-    let cfg = config_dir();
+    let cfg = chopper::config_dir();
     let aliases = alias_paths::discover_exec_aliases(&cfg).unwrap_or_default();
     for alias in aliases {
         println!("{alias}");
@@ -244,7 +206,7 @@ fn run_list_aliases() {
 }
 
 fn emit_config_scan_warnings() {
-    let cfg = config_dir();
+    let cfg = chopper::config_dir();
     let mut warnings = config_diagnostics::scan_extension_warnings(&cfg);
     warnings.extend(config_diagnostics::scan_bashcomp_file_warnings(&cfg));
     warnings.sort();
@@ -255,7 +217,7 @@ fn emit_config_scan_warnings() {
 }
 
 fn run_print_exec(alias: &str) -> i32 {
-    let config_path = find_config(alias);
+    let config_path = chopper::find_config(alias);
     let manifest = match config_path {
         Some(path) => match load_manifest(alias, &path) {
             Ok(m) => m,
@@ -275,7 +237,7 @@ fn run_print_exec(alias: &str) -> i32 {
 }
 
 fn run_print_bashcomp_mode(alias: &str) -> i32 {
-    let config_path = find_config(alias);
+    let config_path = chopper::find_config(alias);
     let manifest = match config_path {
         Some(path) => match load_manifest(alias, &path) {
             Ok(m) => m,
@@ -324,7 +286,7 @@ fn run_complete_builtin(raw_args: &[String]) -> i32 {
     };
     let words: Vec<String> = raw_args[words_start..].to_vec();
 
-    let config_path = find_config(alias);
+    let config_path = chopper::find_config(alias);
     let manifest = match config_path {
         Some(path) => match load_manifest(alias, &path) {
             Ok(m) => m,
@@ -396,11 +358,9 @@ fn is_direct_chopper_name(exe_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cache_enabled, config_dir, detect_builtin_action, find_config, parse_tui_options,
-        BuiltinAction,
-    };
+    use super::{cache_enabled, detect_builtin_action, parse_tui_options, BuiltinAction};
     use crate::test_support::ENV_LOCK;
+    use chopper::{config_dir, find_config};
     use std::env;
     use std::fs;
     use std::os::unix::fs::symlink;

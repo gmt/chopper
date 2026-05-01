@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 pub(crate) const CHOPPER_EXE_PATH_ENV: &str = "CHOPPER_EXE_PATH";
 
-pub(crate) fn resolve_chopper_exe() -> Result<PathBuf> {
+pub fn resolve_chopper_exe() -> Result<PathBuf> {
     if let Some(path) = env::var_os(CHOPPER_EXE_PATH_ENV).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
     }
@@ -33,6 +33,6 @@ fn chopper_exe_file_name() -> &'static str {
     }
 }
 
-pub(crate) fn current_exe_for_skip_hint() -> Option<PathBuf> {
+pub fn current_exe_for_skip_hint() -> Option<PathBuf> {
     env::current_exe().ok()
 }

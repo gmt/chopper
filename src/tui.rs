@@ -21,7 +21,7 @@ const SPLIT_MIN_HEIGHT: u16 = 3;
 type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TuiOptions;
+pub struct TuiOptions;
 
 impl Default for TuiOptions {
     fn default() -> Self {

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::Path;
 
-pub(crate) fn scan_extension_warnings(config_root: &Path) -> Vec<String> {
+pub fn scan_extension_warnings(config_root: &Path) -> Vec<String> {
     let mut warnings = Vec::new();
     collect_extension_warnings(&config_root.join("aliases"), &mut warnings);
     collect_extension_warnings(config_root, &mut warnings);
@@ -14,7 +14,7 @@ pub(crate) fn scan_extension_warnings(config_root: &Path) -> Vec<String> {
     warnings
 }
 
-pub(crate) fn scan_bashcomp_file_warnings(config_root: &Path) -> Vec<String> {
+pub fn scan_bashcomp_file_warnings(config_root: &Path) -> Vec<String> {
     let aliases = collect_alias_names(config_root);
     let dirs = bash_completion_dirs();
     let mut warnings = Vec::new();

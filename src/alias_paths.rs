@@ -1,17 +1,15 @@
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub(crate) const EXEC_ALIAS_FILE: &str = "exe.toml";
-pub(crate) const LEGACY_ALIASES_DIR: &str = "aliases";
+const EXEC_ALIAS_FILE: &str = "exe.toml";
+const LEGACY_ALIASES_DIR: &str = "aliases";
 
 pub(crate) fn default_exec_config_path(config_root: &Path, alias: &str) -> PathBuf {
     config_root.join(alias).join(EXEC_ALIAS_FILE)
 }
 
-pub(crate) fn exec_config_candidates(config_root: &Path, alias: &str) -> [PathBuf; 3] {
+fn exec_config_candidates(config_root: &Path, alias: &str) -> [PathBuf; 3] {
     [
         default_exec_config_path(config_root, alias),
         config_root
@@ -21,13 +19,13 @@ pub(crate) fn exec_config_candidates(config_root: &Path, alias: &str) -> [PathBu
     ]
 }
 
-pub(crate) fn find_exec_config(config_root: &Path, alias: &str) -> Option<PathBuf> {
+pub fn find_exec_config(config_root: &Path, alias: &str) -> Option<PathBuf> {
     exec_config_candidates(config_root, alias)
         .into_iter()
         .find(|path| path.is_file())
 }
 
-pub(crate) fn discover_exec_aliases(config_root: &Path) -> Result<Vec<String>> {
+pub fn discover_exec_aliases(config_root: &Path) -> Result<Vec<String>> {
     let mut aliases = BTreeSet::new();
     discover_canonical_exec_aliases(config_root, &mut aliases)?;
     discover_legacy_aliases_in_dir(&config_root.join(LEGACY_ALIASES_DIR), &mut aliases)?;

@@ -1,6 +1,4 @@
-mod broker;
-
-use broker::dbus_interface::{JournalBroker, BUS_NAME, OBJECT_PATH};
+use chopper::broker::dbus_interface::{JournalBroker, BUS_NAME, OBJECT_PATH};
 use std::process;
 
 fn main() {

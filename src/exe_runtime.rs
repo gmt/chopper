@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
-pub(crate) fn run(args: &[String]) -> Result<()> {
+pub fn run(args: &[String]) -> Result<()> {
     let invocation = parse_invocation(args)?;
 
     let config_path = find_config(&invocation.alias);
