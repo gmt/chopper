@@ -18,22 +18,33 @@ cargo test -- --nocapture
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-## Releases
+## Pull requests
+
+For normal contributions, open a pull request against the main branch. You do
+not need release credentials, local maintainer scripts, or any machine-specific
+setup beyond the Rust toolchain.
+
+Before opening a PR:
+
+- Keep the change focused and explain the user-visible behavior it affects.
+- Add or update tests for behavior changes.
+- Update docs when behavior changes.
+- Run formatting, tests, and clippy locally when practical.
+
+## Maintainer releases
 
 Releases are automated on GitHub Actions.
 
-The low-friction path is:
+The low-friction maintainer path is:
 
 ```bash
 scripts/plbump.sh
 ```
 
-That script assumes the current committed `Cargo.toml` version is the release
-version if it already leads `Cargo.lock`; otherwise it bumps `Cargo.toml` to
-the next patch version only when the current matched version is already tagged,
-syncs `Cargo.lock`, folds the current worktree into the release commit, runs the
-local release build/checks, tags and pushes the current branch, and then
-bumps/stages `Cargo.toml` for the next patch cycle.
+This script is for maintainers with push/tag permissions. It assumes the
+current branch is the release branch, may fold the current worktree into the
+release commit, creates and pushes a tag, and then stages the next patch
+version. Contributors should not need to run it.
 
 If you want the script to refresh compatible dependency versions during the
 release cut, use:
@@ -76,9 +87,3 @@ publishes a GitHub Release with generated notes.
 - Behavioral semantics: [`doc/operational-spec.md`](doc/operational-spec.md)
 - Testing workflow: [`doc/testing.md`](doc/testing.md)
 - Release prep: [`doc/release-checklist.md`](doc/release-checklist.md)
-
-## Before opening a PR
-
-- Ensure formatting/lints/tests pass locally.
-- Add or update tests for behavior changes.
-- Confirm doc links and examples still match current behavior.
