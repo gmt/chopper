@@ -403,7 +403,9 @@ mod tests {
 
         env::set_var("CHOPPER_CONFIG_DIR", temp.path());
         let found = find_config("demo").expect("expected symlinked config");
-        assert_eq!(found, alias_symlink);
+        assert_eq!(found, temp.path().join("demo/exe.toml"));
+        assert!(alias_symlink.exists());
+        assert_eq!(fs::canonicalize(found).expect("canonical config"), target);
         env::remove_var("CHOPPER_CONFIG_DIR");
     }
 

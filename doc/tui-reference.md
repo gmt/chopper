@@ -90,7 +90,8 @@ If neither `nvim` nor `vim` exists in `PATH`, TUI editing returns an error.
   chopper.
 - TUI editing resolves alias files using the same lookup order as runtime
   invocation (`<name>/exe.toml`, then legacy `aliases/<name>.toml` and
-  `<name>.toml`).
+  `<name>.toml`). Legacy TOML configs get canonical symlinks on lookup when no
+  canonical config already exists.
 - Legacy `reconcile.script` / `bashcomp.rhai_script` values may still appear in old files, but wiring is method-first.
 - Rendering is handled by ratatui on top of crossterm, using an alternate
   screen for interactive drawing.

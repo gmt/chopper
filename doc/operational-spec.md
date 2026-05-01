@@ -127,6 +127,12 @@ Lookup order for alias `foo`:
 2. `aliases/foo.toml` (legacy)
 3. `foo.toml` (legacy)
 
+When a legacy TOML config is selected and `foo/exe.toml` does not already
+exist, chopper creates a canonical symlink at `foo/exe.toml` before use. The
+legacy file remains in place so existing edit paths and relative-path behavior
+continue to work. Legacy symlinked configs get a canonical symlink to the same
+resolved target.
+
 Only regular files are considered valid alias configs in this lookup. Symlinks
 that resolve to regular files are accepted.
 

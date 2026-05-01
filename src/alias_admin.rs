@@ -1298,7 +1298,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_and_rename_alias_preserve_file_kind() {
+    fn duplicate_and_rename_legacy_aliases_use_canonical_layout() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let temp = TempDir::new().expect("tempdir");
         let cfg = temp.path();
@@ -1307,17 +1307,13 @@ mod tests {
         env::set_var("CHOPPER_CONFIG_DIR", cfg);
 
         let duplicate_path = duplicate_alias("source", "copy").expect("duplicate alias");
-        assert_eq!(
-            duplicate_path.file_name().and_then(|v| v.to_str()),
-            Some("copy.toml")
-        );
+        assert_eq!(duplicate_path, temp.path().join("copy/exe.toml"));
         assert!(duplicate_path.is_file());
+        assert!(cfg.join("source.toml").is_file());
+        assert!(cfg.join("source/exe.toml").is_file());
 
         let renamed_path = rename_alias("copy", "renamed").expect("rename alias");
-        assert_eq!(
-            renamed_path.file_name().and_then(|v| v.to_str()),
-            Some("renamed.toml")
-        );
+        assert_eq!(renamed_path, temp.path().join("renamed/exe.toml"));
         assert!(renamed_path.is_file());
         assert!(!duplicate_path.exists());
 

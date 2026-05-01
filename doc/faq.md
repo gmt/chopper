@@ -55,6 +55,10 @@ Lookup order:
 2. `aliases/<name>.toml` (legacy)
 3. `<name>.toml` (legacy)
 
+Legacy TOML configs automatically get canonical `<name>/exe.toml` symlinks on
+lookup. The original files remain in place, preserving existing edit paths and
+relative-path behavior.
+
 ---
 
 ## See also

@@ -76,7 +76,8 @@ chopper --list-aliases
 
 Lists all configured executable alias names (one per line). Scans canonical
 `<alias>/exe.toml` entries plus legacy `aliases/<alias>.toml` and
-`<alias>.toml` files.
+`<alias>.toml` files. Legacy TOML configs get canonical `<alias>/exe.toml`
+symlinks when discovered and no canonical config already exists.
 
 ```bash
 chopper --print-exec <alias>

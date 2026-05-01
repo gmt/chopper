@@ -14577,6 +14577,46 @@ fn canonical_alias_config_runs_from_alias_directory() {
 }
 
 #[test]
+fn legacy_alias_config_auto_upgrades_before_invocation() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let chopper_dir = config_home.path().join("chopper");
+    let aliases_dir = chopper_dir.join("aliases");
+    let bin_dir = aliases_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create legacy bin dir");
+
+    write_executable_script(
+        &bin_dir.join("runner"),
+        "#!/usr/bin/env bash\nprintf 'UPGRADED=%s\\n' \"$*\"\n",
+    );
+    fs::write(
+        aliases_dir.join("legacyrun.toml"),
+        "exec = \"bin/runner\"\nargs = [\"base\"]\n",
+    )
+    .expect("write legacy alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["legacyrun", "runtime"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("UPGRADED=base runtime"), "{stdout}");
+
+    let canonical = chopper_dir.join("legacyrun/exe.toml");
+    assert!(canonical.is_file(), "canonical alias should be created");
+    assert!(
+        aliases_dir.join("legacyrun.toml").is_file(),
+        "legacy alias should remain as canonical symlink target"
+    );
+    assert_eq!(
+        fs::canonicalize(&canonical).expect("canonical config target"),
+        aliases_dir.join("legacyrun.toml")
+    );
+}
+
+#[test]
 fn alias_add_creates_wrapper_in_first_candidate_directory_on_path() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
