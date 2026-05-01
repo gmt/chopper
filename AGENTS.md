@@ -41,10 +41,12 @@ Project-level guidance for AI agents working on this codebase.
   If you change journal broker behavior (`journal.ensure`, D-Bus interface,
   namespace policy, service hardening), update both `doc/broker-setup.md` and
   the install artifacts under `dist/` in the same PR. Standard commit flow
-  is to commit, tag and push, then bump patchlevel and stage the modified
+  is to commit, tag and push a stable release, then bump to the next
+  `<major>.<minor>.<patch>-pre.<prelevel>` marker and stage the modified
   Cargo.toml. If we get lazy or opt to batch multiple commits into one
-  patchlevel revision, you may find an untagged Cargo.toml, maybe checked in,
-  maybe in-tree. Just add it to the finally commit and tag when ready to bump.
+  patchlevel revision, you may find an untagged prerelease Cargo.toml, maybe
+  checked in, maybe in-tree. Just add it to the final commit and tag when
+  ready to bump.
 
 ---
 

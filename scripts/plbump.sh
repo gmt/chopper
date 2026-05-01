@@ -17,8 +17,8 @@ usage() {
 Usage: scripts/plbump.sh [options]
 
 Cut a patch release, push the current branch and matching tag, then bump
-Cargo.toml to the next patch version and stage it for the next development
-cycle.
+Cargo.toml to the next patch prerelease version and stage it for the next
+development cycle.
 
 The script assumes:
   - the current branch is the branch you want to push
@@ -31,8 +31,10 @@ Dirty worktrees:
   - unresolved merge conflicts still abort the run
 
 Release version selection:
-  - if Cargo.toml and Cargo.lock disagree on the chopper package version,
-    Cargo.toml wins and is treated as the release version
+  - if Cargo.toml is MAJOR.MINOR.PATCH-pre.N, the script releases
+    MAJOR.MINOR.PATCH
+  - if Cargo.toml and Cargo.lock otherwise disagree on the chopper package
+    version, Cargo.toml wins and is treated as the release version
   - if they match and that version is already tagged, the script bumps
     Cargo.toml to the next patch version and uses that as the release version
   - if they match and that version is not tagged yet, the script releases the
@@ -178,6 +180,30 @@ increment_patch_version() {
   printf '%s.%s.%s' "${major}" "${minor}" "$((patch + 1))"
 }
 
+release_base_version() {
+  local version="$1"
+  if [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)-pre\.([0-9]+)$ ]]; then
+    printf '%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    return
+  fi
+  if [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "${version}"
+    return
+  fi
+  echo "expected version in MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-pre.N form, got: ${version}" >&2
+  exit 1
+}
+
+pre_version() {
+  local version="$1"
+  local prelevel="${2:-0}"
+  if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "expected stable base version in MAJOR.MINOR.PATCH form, got: ${version}" >&2
+    exit 1
+  fi
+  printf '%s-pre.%s' "${version}" "${prelevel}"
+}
+
 local_tag_exists() {
   local version="$1"
   git rev-parse -q --verify "refs/tags/v${version}" >/dev/null 2>&1
@@ -207,10 +233,14 @@ stash_unstaged_for_index_mode() {
   fi
 }
 
-RELEASE_VERSION="${CURRENT_VERSION}"
+CURRENT_BASE_VERSION="$(release_base_version "${CURRENT_VERSION}")"
+NEXT_PRELEVEL=0
+RELEASE_VERSION="${CURRENT_BASE_VERSION}"
 AUTO_BUMPED_RELEASE=0
 VERSION_SOURCE="existing-toml-mismatch"
-if [[ "${CURRENT_VERSION}" == "${LOCK_VERSION}" ]]; then
+if [[ "${CURRENT_VERSION}" != "${CURRENT_BASE_VERSION}" ]]; then
+  VERSION_SOURCE="prerelease-toml"
+elif [[ "${CURRENT_VERSION}" == "${LOCK_VERSION}" ]]; then
   VERSION_SOURCE="existing-untagged-match"
   if local_tag_exists "${CURRENT_VERSION}"; then
     RELEASE_VERSION="$(increment_patch_version "${CURRENT_VERSION}")"
@@ -219,7 +249,7 @@ if [[ "${CURRENT_VERSION}" == "${LOCK_VERSION}" ]]; then
   fi
 fi
 
-NEXT_VERSION="$(increment_patch_version "${RELEASE_VERSION}")"
+NEXT_VERSION="$(pre_version "$(increment_patch_version "${RELEASE_VERSION}")" "${NEXT_PRELEVEL}")"
 RELEASE_TAG="v${RELEASE_VERSION}"
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
@@ -249,13 +279,13 @@ if [[ "${INDEX_MODE}" -eq 1 ]]; then
   fi
 fi
 
-if [[ "${CURRENT_VERSION}" == "${LOCK_VERSION}" ]] && remote_tag_exists "${CURRENT_VERSION}"; then
+if [[ "${CURRENT_VERSION}" == "${CURRENT_BASE_VERSION}" && "${CURRENT_VERSION}" == "${LOCK_VERSION}" ]] && remote_tag_exists "${CURRENT_VERSION}"; then
   RELEASE_VERSION="$(increment_patch_version "${CURRENT_VERSION}")"
   AUTO_BUMPED_RELEASE=1
   VERSION_SOURCE="auto-bumped-from-existing-tag"
 fi
 
-NEXT_VERSION="$(increment_patch_version "${RELEASE_VERSION}")"
+NEXT_VERSION="$(pre_version "$(increment_patch_version "${RELEASE_VERSION}")" "${NEXT_PRELEVEL}")"
 RELEASE_TAG="v${RELEASE_VERSION}"
 
 if local_tag_exists "${RELEASE_VERSION}"; then
@@ -284,7 +314,7 @@ bump_manifest_version() {
   mv "${tmpfile}" Cargo.toml
 }
 
-if [[ "${AUTO_BUMPED_RELEASE}" -eq 1 ]]; then
+if [[ "${CURRENT_VERSION}" != "${RELEASE_VERSION}" || "${AUTO_BUMPED_RELEASE}" -eq 1 ]]; then
   bump_manifest_version "${RELEASE_VERSION}"
 fi
 
@@ -318,4 +348,4 @@ git add Cargo.toml
 
 echo "Released ${RELEASE_VERSION} from ${BRANCH} and pushed ${RELEASE_TAG} to ${REMOTE}."
 echo "Bumped Cargo.toml to ${NEXT_VERSION} and staged it for the next commit."
-echo "Cargo.lock remains at ${RELEASE_VERSION} intentionally so the next plbump run can detect the pending patch release."
+echo "Cargo.lock remains at ${RELEASE_VERSION} intentionally so the next plbump run can cut the pending stable release from the prerelease marker."

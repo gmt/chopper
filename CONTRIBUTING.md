@@ -43,8 +43,14 @@ scripts/plbump.sh
 
 This script is for maintainers with push/tag permissions. It assumes the
 current branch is the release branch, may fold the current worktree into the
-release commit, creates and pushes a tag, and then stages the next patch
-version. Contributors should not need to run it.
+release commit, creates and pushes a stable `vMAJOR.MINOR.PATCH` tag, and
+then stages the next patch prerelease marker such as `0.99.7-pre.0`.
+Contributors should not need to run it.
+
+Between releases, `Cargo.toml` normally carries a prerelease version such as
+`0.99.6-pre.0`. Branch pushes and prerelease tags run the check workflow but
+do not publish a GitHub Release. Stable tags such as `v0.99.6` run checks,
+build release artifacts, and publish the GitHub Release.
 
 If you want the script to refresh compatible dependency versions during the
 release cut, use:
@@ -65,7 +71,7 @@ from the current index, then restores the unstaged worktree afterward.
 
 Manual flow:
 
-1. Update `Cargo.toml` to the intended release version.
+1. Update `Cargo.toml` to the intended stable release version.
 2. Ensure the working tree is clean and the release checklist passes.
 3. Push a matching tag such as `v0.99.1`.
 

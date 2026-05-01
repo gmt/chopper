@@ -37,13 +37,13 @@ For the standard patch-release flow, you can usually let
 
 ## Packaging / release prep
 
-- [ ] `Cargo.toml` version is correct for release
+- [ ] `Cargo.toml` version is the stable release version, not a `-pre.N` marker
 - [ ] packaged archives include `bin/chopper`, `bin/chopper-exe`, and `bin/chopper-journal-broker`
-- [ ] release tag `vX.Y.Z` is prepared to match `Cargo.toml`
+- [ ] stable release tag `vX.Y.Z` is prepared to match `Cargo.toml`
 - [ ] changelog/release notes drafted (optional; GitHub can auto-generate notes)
 - [ ] git working tree is clean
 - [ ] release commit/tag message prepared
-- [ ] pushing the release tag will trigger GitHub Actions to run checks, build the Linux bundle, and publish the GitHub Release
+- [ ] pushing the stable release tag will trigger GitHub Actions to run checks, build the Linux bundle, and publish the GitHub Release
 
 ---
 
