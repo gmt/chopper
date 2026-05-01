@@ -3,7 +3,7 @@ use crate::alias_doc::{load_alias_doc, save_alias_doc, AliasDoc, AliasJournalDoc
 use crate::alias_validation;
 use crate::path_mutation::PathMutationConfig;
 use anyhow::{anyhow, Context, Result};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,9 +395,7 @@ fn run_add_or_set(mode: AliasMutationMode, raw_args: &[String]) -> Result<()> {
         return Err(anyhow!("no changes requested for alias `{alias}`"));
     }
 
-    let target_path = crate::config_dir()
-        .join("aliases")
-        .join(format!("{alias}.toml"));
+    let target_path = default_toml_path(alias);
     if let Some(parent) = target_path.parent() {
         fs_err::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -633,6 +631,11 @@ fn remove_alias_with_mode(
                 fs_err::remove_file(&config_path).with_context(|| {
                     format!("failed to remove alias config {}", config_path.display())
                 })?;
+                crate::alias_paths::try_remove_empty_alias_dir(
+                    &crate::config_dir(),
+                    alias,
+                    &config_path,
+                );
                 removed_any = true;
             }
             crate::cache::prune_alias(alias);
@@ -1029,17 +1032,11 @@ fn build_journal_from_mutation(
 }
 
 pub(crate) fn discover_aliases() -> Result<Vec<String>> {
-    let cfg = crate::config_dir();
-    let mut aliases = BTreeSet::new();
-    discover_aliases_in_dir(&cfg.join("aliases"), &mut aliases)?;
-    discover_aliases_in_dir(&cfg, &mut aliases)?;
-    Ok(aliases.into_iter().collect())
+    crate::alias_paths::discover_exec_aliases(&crate::config_dir())
 }
 
 pub(crate) fn default_toml_path(alias: &str) -> PathBuf {
-    crate::config_dir()
-        .join("aliases")
-        .join(format!("{alias}.toml"))
+    crate::alias_paths::default_exec_config_path(&crate::config_dir(), alias)
 }
 
 pub(crate) fn minimal_alias_doc() -> AliasDoc {
@@ -1099,7 +1096,7 @@ pub(crate) fn duplicate_alias(source_alias: &str, target_alias: &str) -> Result<
     }
     let source_path = crate::find_config(source_alias)
         .ok_or_else(|| anyhow!("source alias `{source_alias}` does not exist"))?;
-    let target_path = sibling_alias_path_for_target(&source_path, target_alias);
+    let target_path = sibling_alias_path_for_target(&source_path, source_alias, target_alias);
     if let Some(parent) = target_path.parent() {
         fs_err::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1127,7 +1124,7 @@ pub(crate) fn rename_alias(source_alias: &str, target_alias: &str) -> Result<Pat
     }
     let source_path = crate::find_config(source_alias)
         .ok_or_else(|| anyhow!("source alias `{source_alias}` does not exist"))?;
-    let target_path = sibling_alias_path_for_target(&source_path, target_alias);
+    let target_path = sibling_alias_path_for_target(&source_path, source_alias, target_alias);
     if let Some(parent) = target_path.parent() {
         fs_err::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1144,36 +1141,17 @@ pub(crate) fn rename_alias(source_alias: &str, target_alias: &str) -> Result<Pat
     Ok(target_path)
 }
 
-fn sibling_alias_path_for_target(source_path: &Path, target_alias: &str) -> PathBuf {
-    let parent = source_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(crate::config_dir);
-    parent.join(format!("{target_alias}.toml"))
-}
-
-fn discover_aliases_in_dir(dir: &Path, aliases: &mut BTreeSet<String>) -> Result<()> {
-    let entries = match fs_err::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err).with_context(|| format!("failed to read {}", dir.display())),
-    };
-    for entry in entries {
-        let entry = entry.with_context(|| format!("failed to read {}", dir.display()))?;
-        let path = entry.path();
-        if path.is_dir() {
-            continue;
-        }
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        let Some(alias) = file_name.strip_suffix(".toml") else {
-            continue;
-        };
-        if !alias.is_empty() {
-            aliases.insert(alias.to_string());
-        }
-    }
-    Ok(())
+fn sibling_alias_path_for_target(
+    source_path: &Path,
+    source_alias: &str,
+    target_alias: &str,
+) -> PathBuf {
+    crate::alias_paths::target_path_like_source(
+        &crate::config_dir(),
+        source_path,
+        source_alias,
+        target_alias,
+    )
 }
 
 fn validate_alias(alias: &str) -> Result<()> {
@@ -1299,9 +1277,23 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         env::set_var("CHOPPER_CONFIG_DIR", temp.path());
         let path = create_alias("newalias").expect("create alias");
+        assert_eq!(path, temp.path().join("newalias/exe.toml"));
         assert!(path.is_file(), "expected created file {}", path.display());
         let content = fs::read_to_string(&path).expect("read created alias file");
         assert!(content.contains("exec"), "{content}");
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
+    fn canonical_aliases_use_alias_directory_exe_toml() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+
+        let path = create_alias("canonical").expect("create alias");
+
+        assert_eq!(path, temp.path().join("canonical/exe.toml"));
+        assert!(crate::find_config("canonical").is_some());
         env::remove_var("CHOPPER_CONFIG_DIR");
     }
 
@@ -1333,13 +1325,32 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_and_rename_canonical_aliases_use_target_alias_directory() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let temp = TempDir::new().expect("tempdir");
+        env::set_var("CHOPPER_CONFIG_DIR", temp.path());
+
+        create_alias("source").expect("create source alias");
+        let duplicate_path = duplicate_alias("source", "copy").expect("duplicate alias");
+        assert_eq!(duplicate_path, temp.path().join("copy/exe.toml"));
+        assert!(duplicate_path.is_file());
+
+        let renamed_path = rename_alias("copy", "renamed").expect("rename alias");
+        assert_eq!(renamed_path, temp.path().join("renamed/exe.toml"));
+        assert!(renamed_path.is_file());
+        assert!(!duplicate_path.exists());
+
+        env::remove_var("CHOPPER_CONFIG_DIR");
+    }
+
+    #[test]
     fn load_or_seed_alias_doc_builds_default_for_missing_alias() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let temp = TempDir::new().expect("tempdir");
         env::set_var("CHOPPER_CONFIG_DIR", temp.path());
         let (doc, path) = load_or_seed_alias_doc("missing").expect("seed alias doc");
         assert_eq!(doc.exec, "echo");
-        assert!(path.ends_with("missing.toml"));
+        assert_eq!(path, temp.path().join("missing/exe.toml"));
         env::remove_var("CHOPPER_CONFIG_DIR");
     }
 }

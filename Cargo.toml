@@ -10,6 +10,10 @@ name = "chopper"
 path = "src/main.rs"
 
 [[bin]]
+name = "chopper-exe"
+path = "src/chopper_exe.rs"
+
+[[bin]]
 name = "chopper-journal-broker"
 path = "src/broker_main.rs"
 

@@ -1550,23 +1550,11 @@ fn is_method_field(field: TomlField) -> bool {
 }
 
 fn resolve_alias_path(alias: &str) -> Option<PathBuf> {
-    let cfg = crate::config_dir();
-    [
-        cfg.join("aliases").join(format!("{alias}.toml")),
-        cfg.join(format!("{alias}.toml")),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
+    crate::find_config(alias)
 }
 
 fn resolve_toml_path(alias: &str) -> Option<PathBuf> {
-    let cfg = crate::config_dir();
-    [
-        cfg.join("aliases").join(format!("{alias}.toml")),
-        cfg.join(format!("{alias}.toml")),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
+    crate::find_config(alias)
 }
 
 fn collect_alias_artifacts(alias: &str) -> AliasArtifacts {

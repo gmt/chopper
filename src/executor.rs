@@ -205,10 +205,14 @@ fn validate_no_recursive_self_exec(invocation: &Invocation) -> Result<()> {
         Ok(path) => path,
         Err(_) => return Ok(()),
     };
-    let current_identity = executable_identity(&current_exe);
+    let mut blocked_identities = vec![executable_identity(&current_exe)];
+    if let Some(extra_paths) = env::var_os("CHOPPER_SKIP_EXEC_IDENTITY") {
+        blocked_identities
+            .extend(env::split_paths(&extra_paths).map(|path| executable_identity(&path)));
+    }
     let invocation_identity = executable_identity(&invocation.exec);
 
-    if current_identity == invocation_identity {
+    if blocked_identities.contains(&invocation_identity) {
         return Err(anyhow!(
             "execution path `{}` resolves to the running chopper binary \
              (recursion guard); set `exec` to the real target binary path \

@@ -12,6 +12,10 @@ fn chopper_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_chopper"))
 }
 
+fn chopper_exe_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_chopper-exe"))
+}
+
 fn run_chopper(config_home: &TempDir, cache_home: &TempDir, args: &[&str]) -> Output {
     run_chopper_with(
         chopper_bin(),
@@ -36,7 +40,8 @@ fn run_chopper_with(
     cmd.args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
-        .env("HOME", &home_dir);
+        .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin());
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
@@ -74,6 +79,7 @@ fn run_chopper_with_timeout(
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
         .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     for (key, value) in env_vars {
@@ -117,7 +123,8 @@ fn run_chopper_with_cwd_and_argv0(
         .args(args)
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
-        .env("HOME", &home_dir);
+        .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin());
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
@@ -158,6 +165,7 @@ fn run_direct_bash_completion(
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
         .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin())
         .env("PATH", format!("{}:{path_value}", bin_dir.display()))
         .output()
         .expect("failed to execute completion harness");
@@ -214,6 +222,7 @@ fn run_alias_bash_completion_with_timeout(
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("XDG_CACHE_HOME", cache_home.path())
         .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin())
         .env("PATH", format!("{}:{path_value}", bin_dir.display()))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -676,6 +685,72 @@ args = ["-c", "printf 'ARGS=%s\n' \"$*\"", "_"]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn chopper_exe_direct_alias_invocation_works() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("directexe.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'EXE_ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let output = run_chopper_with(
+        chopper_exe_bin(),
+        &config_home,
+        &cache_home,
+        &["directexe", "runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "chopper-exe direct invocation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EXE_ARGS=runtime"), "{stdout}");
+}
+
+#[test]
+fn chopper_exe_symlink_alias_invocation_works() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+    fs::write(
+        aliases_dir.join("linkexe.toml"),
+        r#"
+exec = "/bin/sh"
+args = ["-c", "printf 'LINK_ARGS=%s\n' \"$*\"", "_"]
+"#,
+    )
+    .expect("write alias config");
+
+    let bin_dir = TempDir::new().expect("create bin dir");
+    let symlink_path = bin_dir.path().join("linkexe");
+    symlink(chopper_exe_bin(), &symlink_path).expect("create chopper-exe symlink");
+
+    let output = run_chopper_with(
+        symlink_path,
+        &config_home,
+        &cache_home,
+        &["runtime"],
+        std::iter::empty::<(&str, String)>(),
+    );
+    assert!(
+        output.status.success(),
+        "chopper-exe symlink invocation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("LINK_ARGS=runtime"), "{stdout}");
 }
 
 #[test]
@@ -13892,6 +13967,88 @@ fn alias_bashcomp_same_basename_recovers_underlying_completer_without_recursing(
 }
 
 #[test]
+fn alias_bashcomp_ignores_empty_user_completion_shadow_and_keeps_searching() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+    let (home_completion_dir, xdg_data_dir) =
+        write_same_basename_completion_fixture(&config_home, &fixture_root);
+    fs::write(home_completion_dir.join("demo"), "").expect("write empty shadow completion");
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo", "d"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(completions, vec!["demo-result"]);
+}
+
+#[test]
+fn alias_bashcomp_honors_colon_separated_user_completion_dirs() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target_dir = fixture_root.path().join("bin");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    let target_path = target_dir.join("demo");
+    fs::write(&target_path, "#!/bin/sh\nexit 0\n").expect("write target command");
+    let mut perms = fs::metadata(&target_path)
+        .expect("stat target command")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&target_path, perms).expect("chmod target command");
+
+    fs::write(
+        aliases_dir.join("demo.toml"),
+        format!("exec = \"{}\"\n", target_path.display()),
+    )
+    .expect("write demo alias");
+
+    let first_user_base = fixture_root.path().join("first-user");
+    let first_completion_dir = first_user_base.join("completions");
+    fs::create_dir_all(&first_completion_dir).expect("create first completion dir");
+
+    let second_user_base = fixture_root.path().join("second-user");
+    let second_completion_dir = second_user_base.join("completions");
+    fs::create_dir_all(&second_completion_dir).expect("create second completion dir");
+    fs::write(
+        second_completion_dir.join("demo"),
+        "_demo_complete() { COMPREPLY=(demo-from-second-user-dir); }\ncomplete -F _demo_complete demo\n",
+    )
+    .expect("write real completion file");
+
+    let user_dirs = std::env::join_paths([&first_user_base, &second_user_base])
+        .expect("join user completion dirs")
+        .to_string_lossy()
+        .into_owned();
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo", "d"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("BASH_COMPLETION_USER_DIR", user_dirs)],
+    );
+    assert_eq!(completions, vec!["demo-from-second-user-dir"]);
+
+    let projected_shim = first_completion_dir.join("demo");
+    let shim_text = fs::read_to_string(&projected_shim).expect("read projected shim");
+    assert!(
+        shim_text.contains("Auto-generated by chopper"),
+        "{shim_text}"
+    );
+}
+
+#[test]
 fn alias_bashcomp_same_basename_stays_flat_after_repeated_sourcing() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -13938,6 +14095,7 @@ fn alias_bashcomp_same_basename_stays_flat_after_repeated_sourcing() {
         .env("XDG_CACHE_HOME", cache_home.path())
         .env("XDG_DATA_DIRS", xdg_data_dir.display().to_string())
         .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin())
         .env("PATH", format!("{}:{path_value}", bin_dir.display()))
         .output()
         .expect("run repeated sourcing compspec inspection");
@@ -13989,6 +14147,7 @@ fn alias_bashcomp_sanitizes_null_bytes_from_underlying_completion_shellouts() {
         .env("XDG_CACHE_HOME", cache_home.path())
         .env("XDG_DATA_DIRS", xdg_data_dir.display().to_string())
         .env("HOME", &home_dir)
+        .env("CHOPPER_EXE_PATH", chopper_exe_bin())
         .env("PATH", format!("{}:{path_value}", bin_dir.display()))
         .output()
         .expect("run null sanitizing harness");
@@ -14012,6 +14171,81 @@ fn alias_bashcomp_sanitizes_null_bytes_from_underlying_completion_shellouts() {
 }
 
 #[test]
+fn alias_bashcomp_projects_environment_into_underlying_completion_shellouts() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let fixture_root = TempDir::new().expect("create fixture root");
+
+    let aliases_dir = config_home.path().join("chopper/aliases");
+    fs::create_dir_all(&aliases_dir).expect("create aliases dir");
+
+    let target_dir = fixture_root.path().join("bin");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    let target_path = target_dir.join("demo-env");
+    write_executable_script(
+        &target_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--complete-env\" ]; then printf '%s\\n' \"bashcomp=$CHOPPER_BASHCOMP\" \"alias=$CHOPPER_BASHCOMP_ALIAS\" \"target=$CHOPPER_BASHCOMP_TARGET\"; fi\n",
+    );
+
+    fs::write(
+        aliases_dir.join("demo-env.toml"),
+        format!("exec = \"{}\"\n", target_path.display()),
+    )
+    .expect("write alias config");
+
+    let home_completion_dir = config_home
+        .path()
+        .join("home/.local/share/bash-completion/completions");
+    fs::create_dir_all(&home_completion_dir).expect("create home completion dir");
+
+    let xdg_data_dir = fixture_root.path().join("share-env");
+    let real_completion_path = xdg_data_dir.join("bash-completion/completions/demo-env");
+    fs::create_dir_all(real_completion_path.parent().expect("completion parent"))
+        .expect("create real completion dir");
+    fs::write(
+        &real_completion_path,
+        "_demo_env_complete() { COMPREPLY=($(compgen -W \"$(demo-env --complete-env)\" -- \"${COMP_WORDS[$COMP_CWORD]}\")); }\ncomplete -F _demo_env_complete demo-env\n",
+    )
+    .expect("write env completion file");
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo-env", "bash"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(completions, vec!["bashcomp=1"]);
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo-env", "alias"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(completions, vec!["alias=demo-env"]);
+
+    let completions = run_alias_bash_completion_with_timeout(
+        &config_home,
+        &cache_home,
+        &["demo-env", "target"],
+        1,
+        1,
+        Duration::from_secs(5),
+        [("XDG_DATA_DIRS", xdg_data_dir.display().to_string())],
+    );
+    assert_eq!(
+        completions,
+        vec![format!("target={}", target_path.display())]
+    );
+}
+
+#[test]
 fn list_aliases_enumerates_config_files() {
     let config_home = TempDir::new().expect("create config home");
     let cache_home = TempDir::new().expect("create cache home");
@@ -14022,6 +14256,8 @@ fn list_aliases_enumerates_config_files() {
     fs::write(aliases_dir.join("alpha.toml"), "exec = \"echo\"\n").expect("write alpha");
     fs::write(aliases_dir.join("beta.toml"), "exec = \"echo\"\n").expect("write beta");
     fs::write(config_dir.join("gamma.toml"), "exec = \"echo\"\n").expect("write gamma");
+    fs::create_dir_all(config_dir.join("delta")).expect("create canonical alias dir");
+    fs::write(config_dir.join("delta/exe.toml"), "exec = \"echo\"\n").expect("write delta");
 
     let output = run_chopper(&config_home, &cache_home, &["--list-aliases"]);
     assert!(
@@ -14034,6 +14270,7 @@ fn list_aliases_enumerates_config_files() {
     assert!(aliases.contains(&"alpha"), "missing alpha: {stdout}");
     assert!(aliases.contains(&"beta"), "missing beta: {stdout}");
     assert!(aliases.contains(&"gamma"), "missing gamma: {stdout}");
+    assert!(aliases.contains(&"delta"), "missing delta: {stdout}");
 }
 
 #[test]
@@ -14302,6 +14539,41 @@ fn alias_add_command_creates_runnable_alias() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("hello-managed"), "{stdout}");
+
+    let config_path = config_home.path().join("chopper/managed/exe.toml");
+    assert!(
+        config_path.is_file(),
+        "managed alias should be written to canonical path"
+    );
+    assert!(
+        !config_home
+            .path()
+            .join("chopper/aliases/managed.toml")
+            .exists(),
+        "managed alias should not be written to legacy aliases/ path"
+    );
+}
+
+#[test]
+fn canonical_alias_config_runs_from_alias_directory() {
+    let config_home = TempDir::new().expect("create config home");
+    let cache_home = TempDir::new().expect("create cache home");
+    let config_dir = config_home.path().join("chopper/canon");
+    fs::create_dir_all(&config_dir).expect("create canonical alias dir");
+    fs::write(
+        config_dir.join("exe.toml"),
+        "exec = \"echo\"\nargs = [\"canonical-ok\"]\n",
+    )
+    .expect("write canonical alias config");
+
+    let output = run_chopper(&config_home, &cache_home, &["canon"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("canonical-ok"), "{stdout}");
 }
 
 #[test]
@@ -14348,6 +14620,10 @@ fn alias_add_creates_wrapper_in_first_candidate_directory_on_path() {
     assert!(
         metadata.file_type().is_symlink(),
         "expected symlink wrapper"
+    );
+    assert_eq!(
+        fs::read_link(&wrapper_path).expect("read wrapper target"),
+        chopper_exe_bin()
     );
 
     let run = run_chopper_with(
@@ -14804,7 +15080,7 @@ fn alias_remove_clean_deletes_config_and_disables_lookup() {
         String::from_utf8_lossy(&add.stderr)
     );
 
-    let config_path = config_home.path().join("chopper/aliases/managedclean.toml");
+    let config_path = config_home.path().join("chopper/managedclean/exe.toml");
     assert!(config_path.exists());
 
     let remove = run_chopper(
@@ -14896,7 +15172,7 @@ fn alias_remove_dirty_only_removes_symlink_and_can_reactivate() {
         "dirty remove should delete symlink only"
     );
 
-    let config_path = config_home.path().join("chopper/aliases/dirtyalias.toml");
+    let config_path = config_home.path().join("chopper/dirtyalias/exe.toml");
     assert!(
         config_path.exists(),
         "dirty remove should preserve alias config"

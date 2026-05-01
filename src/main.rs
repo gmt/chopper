@@ -1,6 +1,7 @@
 mod alias_admin;
 mod alias_admin_parse;
 mod alias_doc;
+mod alias_paths;
 mod alias_validation;
 mod arg_validation;
 mod cache;
@@ -9,20 +10,18 @@ mod config_diagnostics;
 mod env_util;
 mod env_validation;
 mod exec_resolution;
-mod executor;
-mod journal_broker_client;
 mod journal_validation;
 mod manifest;
 mod parser;
 mod path_mutation;
 mod path_mutation_validation;
 mod path_validation;
-mod reconcile;
 mod rhai_api_catalog;
 mod rhai_engine;
 mod rhai_facade;
 mod rhai_facade_validation;
 mod rhai_wiring;
+mod runner_resolution;
 mod string_validation;
 #[cfg(test)]
 mod test_support;
@@ -32,7 +31,9 @@ mod wrapper_sync;
 
 use anyhow::{anyhow, Result};
 use std::env;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
+use std::process::Command;
 
 pub(crate) fn config_dir() -> PathBuf {
     if let Some(override_path) = env_util::env_path_override("CHOPPER_CONFIG_DIR") {
@@ -45,13 +46,7 @@ pub(crate) fn config_dir() -> PathBuf {
 }
 
 pub(crate) fn find_config(name: &str) -> Option<PathBuf> {
-    let cfg = config_dir();
-    [
-        cfg.join("aliases").join(format!("{name}.toml")),
-        cfg.join(format!("{name}.toml")),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
+    alias_paths::find_exec_config(&config_dir(), name)
 }
 
 fn main() -> Result<()> {
@@ -61,19 +56,32 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let invocation = parse_invocation(&args)?;
+    delegate_to_chopper_exe(&args)
+}
 
-    let config_path = find_config(&invocation.alias);
-    let manifest = match config_path {
-        Some(path) => load_manifest(&invocation.alias, &path)?,
-        None => {
-            manifest::Manifest::simple(exec_resolution::resolve_command_path(&invocation.alias))
+fn delegate_to_chopper_exe(args: &[String]) -> Result<()> {
+    let runner = runner_resolution::resolve_chopper_exe()?;
+    let mut command = Command::new(&runner);
+
+    if let Some(skip_path) = runner_resolution::current_exe_for_skip_hint() {
+        command.env("CHOPPER_SKIP_EXEC_IDENTITY", skip_path);
+    }
+
+    if is_direct_invocation_executable(args) {
+        command.args(&args[1..]);
+    } else {
+        if let Some(arg0) = args.first() {
+            command.arg0(arg0);
         }
-    };
+        command.args(&args[1..]);
+    }
 
-    let patch = reconcile::maybe_reconcile(&manifest, &invocation.passthrough_args)?;
-    let resolved = manifest.build_invocation(&invocation.passthrough_args, patch)?;
-    executor::run(resolved)
+    let err = command.exec();
+    Err(anyhow!(
+        "failed to delegate executable alias invocation to {}: {}",
+        runner.display(),
+        err
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +157,7 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("Usage:");
             println!("  chopper <alias> [args...]");
             println!("  chopper <alias> -- [args...]");
+            println!("  chopper-exe <alias> [args...]");
             println!("  <symlinked-alias> [args...]");
             println!();
             println!("Built-ins:");
@@ -184,6 +193,7 @@ fn run_builtin_action(action: BuiltinAction) {
             println!("{}", cache::cache_dir().display());
         }
         BuiltinAction::Bashcomp => {
+            emit_config_scan_warnings();
             print!("{}", include_str!("bashcomp.bash"));
         }
         BuiltinAction::ListAliases => {
@@ -227,32 +237,8 @@ fn parse_tui_options(raw_args: &[String]) -> Result<tui::TuiOptions> {
 
 fn run_list_aliases() {
     let cfg = config_dir();
-    let mut aliases = std::collections::BTreeSet::new();
-
-    // Scan aliases/ subdirectory
-    let aliases_dir = cfg.join("aliases");
-    if let Ok(entries) = std::fs::read_dir(&aliases_dir) {
-        for entry in entries.flatten() {
-            if let Some(name) = alias_name_from_dir_entry(&entry) {
-                aliases.insert(name);
-            }
-        }
-    }
-
-    // Scan config root
-    if let Ok(entries) = std::fs::read_dir(&cfg) {
-        for entry in entries.flatten() {
-            // Skip the aliases/ subdirectory itself
-            if entry.file_name() == "aliases" {
-                continue;
-            }
-            if let Some(name) = alias_name_from_dir_entry(&entry) {
-                aliases.insert(name);
-            }
-        }
-    }
-
-    for alias in &aliases {
+    let aliases = alias_paths::discover_exec_aliases(&cfg).unwrap_or_default();
+    for alias in aliases {
         println!("{alias}");
     }
 }
@@ -260,26 +246,12 @@ fn run_list_aliases() {
 fn emit_config_scan_warnings() {
     let cfg = config_dir();
     let mut warnings = config_diagnostics::scan_extension_warnings(&cfg);
+    warnings.extend(config_diagnostics::scan_bashcomp_file_warnings(&cfg));
     warnings.sort();
     warnings.dedup();
     for warning in warnings {
         eprintln!("warning: {warning}");
     }
-}
-
-fn alias_name_from_dir_entry(entry: &std::fs::DirEntry) -> Option<String> {
-    let path = entry.path();
-    // Accept regular files and symlinks that resolve to regular files.
-    if !path.is_file() {
-        return None;
-    }
-    let name = entry.file_name();
-    let name = name.to_str()?;
-    let alias = name.strip_suffix(".toml")?;
-    if alias.is_empty() {
-        return None;
-    }
-    Some(alias.to_string())
 }
 
 fn run_print_exec(alias: &str) -> i32 {
@@ -391,77 +363,6 @@ fn cache_enabled() -> bool {
     !env_util::env_flag_enabled("CHOPPER_DISABLE_CACHE")
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct InvocationInput {
-    alias: String,
-    passthrough_args: Vec<String>,
-}
-
-fn parse_invocation(args: &[String]) -> Result<InvocationInput> {
-    let exe_name = invocation_executable_name(args);
-
-    if is_direct_invocation_executable(args) {
-        if args.len() < 2 {
-            return Err(anyhow!(
-                "missing alias name; use `chopper <alias> [args...]` or `chopper --help`"
-            ));
-        }
-        let alias = args[1].clone();
-        validate_alias_name(&alias)?;
-        let passthrough_args = normalize_passthrough(&args[2..]);
-        validate_passthrough_args(&passthrough_args)?;
-        Ok(InvocationInput {
-            alias,
-            passthrough_args,
-        })
-    } else {
-        validate_alias_name(&exe_name)?;
-        let passthrough_args = normalize_passthrough(&args[1..]);
-        validate_passthrough_args(&passthrough_args)?;
-        Ok(InvocationInput {
-            alias: exe_name,
-            passthrough_args,
-        })
-    }
-}
-
-fn validate_passthrough_args(args: &[String]) -> Result<()> {
-    for arg in args {
-        if matches!(
-            crate::arg_validation::validate_arg_value(arg),
-            Err(crate::arg_validation::ArgViolation::ContainsNul)
-        ) {
-            return Err(anyhow!("runtime arguments cannot contain NUL bytes"));
-        }
-    }
-    Ok(())
-}
-
-fn validate_alias_name(alias: &str) -> Result<()> {
-    use crate::alias_validation::AliasViolation;
-
-    match crate::alias_validation::validate_alias_identifier(alias) {
-        Ok(()) => Ok(()),
-        Err(AliasViolation::Empty) => Err(anyhow!("alias name cannot be empty")),
-        Err(AliasViolation::ContainsNul) => {
-            Err(anyhow!("alias name cannot contain NUL bytes"))
-        }
-        Err(AliasViolation::IsSeparator) => Err(anyhow!(
-            "alias name cannot be `--`; expected `chopper <alias> -- [args...]`"
-        )),
-        Err(AliasViolation::StartsWithDash) => Err(anyhow!(
-            "alias name cannot start with `-`; choose a non-flag alias name"
-        )),
-        Err(AliasViolation::ContainsWhitespace) => {
-            Err(anyhow!("alias name cannot contain whitespace"))
-        }
-        Err(AliasViolation::IsDotToken) => Err(anyhow!("alias name cannot be `.` or `..`")),
-        Err(AliasViolation::ContainsPathSeparator) => Err(anyhow!(
-            "alias name cannot contain path separators; use symlink mode or command PATH resolution instead"
-        )),
-    }
-}
-
 fn invocation_executable_name(args: &[String]) -> String {
     let raw = args.first().map(String::as_str).unwrap_or("chopper");
     let basename = if raw.contains('/') {
@@ -493,19 +394,11 @@ fn is_direct_chopper_name(exe_name: &str) -> bool {
     exe_name.eq_ignore_ascii_case("chopper")
 }
 
-fn normalize_passthrough(args: &[String]) -> Vec<String> {
-    if args.first().map(String::as_str) == Some("--") {
-        args[1..].to_vec()
-    } else {
-        args.to_vec()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_enabled, config_dir, detect_builtin_action, find_config, parse_invocation,
-        parse_tui_options, validate_alias_name, BuiltinAction,
+        cache_enabled, config_dir, detect_builtin_action, find_config, parse_tui_options,
+        BuiltinAction,
     };
     use crate::test_support::ENV_LOCK;
     use std::env;
@@ -513,49 +406,6 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::path::PathBuf;
     use tempfile::TempDir;
-
-    #[test]
-    fn supports_direct_invocation_mode() {
-        let invocation = parse_invocation(&[
-            "chopper".to_string(),
-            "kpods".to_string(),
-            "--tail=100".to_string(),
-        ])
-        .expect("valid invocation");
-        assert_eq!(invocation.alias, "kpods");
-        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
-    }
-
-    #[test]
-    fn supports_symlink_invocation_mode() {
-        let invocation = parse_invocation(&[
-            "kubectl-prod".to_string(),
-            "get".to_string(),
-            "pods".to_string(),
-        ])
-        .expect("valid invocation");
-        assert_eq!(invocation.alias, "kubectl-prod");
-        assert_eq!(invocation.passthrough_args, vec!["get", "pods"]);
-    }
-
-    #[test]
-    fn strips_double_dash_separator() {
-        let invocation = parse_invocation(&[
-            "chopper".to_string(),
-            "kpods".to_string(),
-            "--".to_string(),
-            "--tail=100".to_string(),
-        ])
-        .expect("valid invocation");
-        assert_eq!(invocation.passthrough_args, vec!["--tail=100"]);
-    }
-
-    #[test]
-    fn rejects_invalid_alias_identifiers() {
-        assert!(validate_alias_name("-alias").is_err());
-        assert!(validate_alias_name("bad alias").is_err());
-        assert!(validate_alias_name("bad/alias").is_err());
-    }
 
     #[test]
     fn cache_enabled_by_default() {

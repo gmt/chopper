@@ -21,7 +21,7 @@ pub(crate) fn resolve_command_path(command: &str) -> PathBuf {
             .unwrap_or_else(|| PathBuf::from(command));
     }
 
-    let current_exe_identity = current_exe_identity();
+    let skip_identities = skip_identities();
     let mut first_hit: Option<PathBuf> = None;
 
     for candidate in candidates {
@@ -35,7 +35,7 @@ pub(crate) fn resolve_command_path(command: &str) -> PathBuf {
         // NOTE: once we support same-named aliases in multiple PATH locations,
         // this may be too naive: legitimate multi-wrapper chains can exist and
         // selecting the "right" layer may require richer wrapper metadata.
-        if is_same_binary_identity(current_exe_identity, &candidate) {
+        if matches_any_binary_identity(&skip_identities, &candidate) {
             continue;
         }
         return candidate;
@@ -48,16 +48,28 @@ fn is_direct_chopper_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("chopper")
 }
 
-fn current_exe_identity() -> Option<FileIdentity> {
-    let current = env::current_exe().ok()?;
-    file_identity(&current)
+fn skip_identities() -> Vec<FileIdentity> {
+    let mut identities = Vec::new();
+    if let Ok(current) = env::current_exe() {
+        if let Some(identity) = file_identity(&current) {
+            identities.push(identity);
+        }
+    }
+    if let Some(extra_paths) = env::var_os("CHOPPER_SKIP_EXEC_IDENTITY") {
+        for path in env::split_paths(&extra_paths) {
+            if let Some(identity) = file_identity(&path) {
+                identities.push(identity);
+            }
+        }
+    }
+    identities
 }
 
-fn is_same_binary_identity(self_identity: Option<FileIdentity>, path: &Path) -> bool {
-    let Some(self_identity) = self_identity else {
+fn matches_any_binary_identity(skip_identities: &[FileIdentity], path: &Path) -> bool {
+    let Some(identity) = file_identity(path) else {
         return false;
     };
-    file_identity(path) == Some(self_identity)
+    skip_identities.contains(&identity)
 }
 
 fn file_identity(path: &Path) -> Option<FileIdentity> {

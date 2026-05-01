@@ -53,7 +53,7 @@ pub(crate) fn ensure_wrapper(alias: &str) -> Result<Vec<String>> {
         )
     })?;
 
-    let target = env::current_exe().context("failed to resolve current chopper executable path")?;
+    let target = crate::runner_resolution::resolve_chopper_exe()?;
 
     match fs_err::symlink_metadata(&location.wrapper_path) {
         Ok(metadata) => {
@@ -225,6 +225,7 @@ mod tests {
     struct EnvRestore {
         home: Option<OsString>,
         path: Option<OsString>,
+        chopper_exe_path: Option<OsString>,
     }
 
     impl EnvRestore {
@@ -232,6 +233,7 @@ mod tests {
             Self {
                 home: env::var_os("HOME"),
                 path: env::var_os("PATH"),
+                chopper_exe_path: env::var_os(crate::runner_resolution::CHOPPER_EXE_PATH_ENV),
             }
         }
     }
@@ -246,7 +248,23 @@ mod tests {
                 Some(value) => env::set_var("PATH", value),
                 None => env::remove_var("PATH"),
             }
+            match &self.chopper_exe_path {
+                Some(value) => env::set_var(crate::runner_resolution::CHOPPER_EXE_PATH_ENV, value),
+                None => env::remove_var(crate::runner_resolution::CHOPPER_EXE_PATH_ENV),
+            }
         }
+    }
+
+    fn install_fake_chopper_exe(temp: &TempDir) -> std::path::PathBuf {
+        let path = temp.path().join("chopper-exe");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write fake chopper-exe");
+        let mut perms = fs::metadata(&path)
+            .expect("fake runner metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).expect("chmod fake chopper-exe");
+        env::set_var(crate::runner_resolution::CHOPPER_EXE_PATH_ENV, &path);
+        path
     }
 
     #[test]
@@ -292,6 +310,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let home = temp.path().join("home");
         let local_bin = home.join(".local/bin");
+        let runner = install_fake_chopper_exe(&temp);
 
         env::set_var("HOME", &home);
         env::set_var("PATH", "/usr/bin:/bin");
@@ -305,6 +324,7 @@ mod tests {
         let wrapper = local_bin.join("ensured");
         let metadata = fs::symlink_metadata(&wrapper).expect("wrapper metadata");
         assert!(metadata.file_type().is_symlink());
+        assert_eq!(fs::read_link(&wrapper).expect("read wrapper link"), runner);
     }
 
     #[test]
@@ -317,6 +337,7 @@ mod tests {
         let shadow_dir = temp.path().join("shadow");
         fs::create_dir_all(&local_bin).expect("local bin");
         fs::create_dir_all(&shadow_dir).expect("shadow dir");
+        install_fake_chopper_exe(&temp);
 
         env::set_var("HOME", &home);
         env::set_var(
