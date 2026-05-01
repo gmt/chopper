@@ -289,7 +289,10 @@ if [[ "${AUTO_BUMPED_RELEASE}" -eq 1 ]]; then
 fi
 
 run_lock_refresh
-cargo build --release --bin chopper --bin chopper-journal-broker
+cargo build --release \
+  --bin chopper \
+  --bin chopper-exe \
+  --bin chopper-journal-broker
 
 if [[ "${SKIP_CHECKS}" -eq 0 ]]; then
   cargo fmt --check

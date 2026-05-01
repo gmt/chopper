@@ -220,11 +220,12 @@ rm -f ~/.cargo/bin/chopper-journal-broker
 cargo uninstall --bin chopper-journal-broker || true
 ```
 
-2) Build/install both binaries to `/usr/local/bin`:
+2) Build/install the runtime binaries to `/usr/local/bin`:
 
 ```bash
-cargo build --release --bin chopper --bin chopper-journal-broker
+cargo build --release --bin chopper --bin chopper-exe --bin chopper-journal-broker
 sudo install -m 0755 target/release/chopper /usr/local/bin/chopper
+sudo install -m 0755 target/release/chopper-exe /usr/local/bin/chopper-exe
 sudo install -m 0755 target/release/chopper-journal-broker /usr/local/bin/chopper-journal-broker
 ```
 

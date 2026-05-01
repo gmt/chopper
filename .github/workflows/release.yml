@@ -74,6 +74,7 @@ jobs:
           archive="release-artifacts/chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz"
 
           tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/bin/chopper"
+          tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/bin/chopper-exe"
           tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/bin/chopper-journal-broker"
           tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/scripts/install-journal-broker.sh"
           tar -tzf "${archive}" | grep -Fx "chopper-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu/README.md"

@@ -13,7 +13,7 @@ usage() {
 Usage: scripts/package-release.sh --version <semver> [options]
 
 Builds the chopper release binaries and assembles a GitHub-release-friendly
-archive containing both binaries, install helpers, and dist/ assets.
+archive containing binaries, install helpers, and dist/ assets.
 
 Options:
   --version <semver>       Release version without leading "v" (required)
@@ -101,10 +101,13 @@ fi
 
 cd "${REPO_ROOT}"
 
-cargo build --locked --release --target "${TARGET}" --bin chopper --bin chopper-journal-broker
+cargo build --locked --release --target "${TARGET}" \
+  --bin chopper \
+  --bin chopper-exe \
+  --bin chopper-journal-broker
 
 BIN_DIR="${REPO_ROOT}/target/${TARGET}/release"
-for binary in chopper chopper-journal-broker; do
+for binary in chopper chopper-exe chopper-journal-broker; do
   if [[ ! -x "${BIN_DIR}/${binary}" ]]; then
     echo "expected built binary not found: ${BIN_DIR}/${binary}" >&2
     exit 1
@@ -122,6 +125,7 @@ STAGE_DIR="${tmpdir}/${ARCHIVE_STEM}"
 mkdir -p "${STAGE_DIR}/bin" "${STAGE_DIR}/scripts" "${OUTPUT_DIR}"
 
 install -m 0755 "${BIN_DIR}/chopper" "${STAGE_DIR}/bin/chopper"
+install -m 0755 "${BIN_DIR}/chopper-exe" "${STAGE_DIR}/bin/chopper-exe"
 install -m 0755 "${BIN_DIR}/chopper-journal-broker" "${STAGE_DIR}/bin/chopper-journal-broker"
 cp -R "${REPO_ROOT}/dist" "${STAGE_DIR}/dist"
 install -m 0755 "${REPO_ROOT}/scripts/install-journal-broker.sh" "${STAGE_DIR}/scripts/install-journal-broker.sh"
