@@ -1,6 +1,6 @@
 [package]
 name = "chopper"
-version = "0.99.4"
+version = "0.99.5"
 edition = "2021"
 description = "Meta-wrapper with Rhai-powered configuration"
 default-run = "chopper"
