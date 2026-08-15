@@ -262,6 +262,36 @@ at runtime (with session caching). This solves the early-binding vs
 late-binding tension: the completion script is static and never stale, while
 the data it operates on is always current.
 
+### Completer resolution: exec target first, then the alias name
+
+`_chopper_resolve_compfunc` picks which native completer to delegate to:
+
+1. the completer registered for the exec target's basename (alias `k` ->
+   `kubectl` -> `_kubectl`), then
+2. the completer registered for the alias name itself, when that differs from
+   the target basename.
+
+Case 2 covers aliases whose exec target is a private wrapper script with no
+completer of its own, but whose *name* matches a real command that does ship
+one -- e.g. alias `paru` -> `paru-audit-wrapper`, where only the stock `_paru`
+exists. Without the fallback, bash-completion's lazy loader hands back its
+generic file-completion stub for the wrapper and package-name completion is
+silently lost.
+
+Two consequences of that:
+
+- bash-completion's generic stubs (`_comp_complete_minimal`, `_minimal`,
+  `_comp_complete_longopt`, `_longopt`) are treated as "no completer found" so
+  the search keeps going instead of stopping at a fallback that knows nothing.
+- `COMP_WORDS[0]` is rewritten to whichever command name the chosen completer
+  expects, and the shadow function that injects `CHOPPER_BASHCOMP=1` and calls
+  the real exec target is defined under that same name (so `_paru`'s
+  `paru -Pc` reaches the wrapper with the completion hint set). Wrappers should
+  short-circuit to the underlying binary when `CHOPPER_BASHCOMP=1`.
+
+The resolved `<func>:<command name>` pair is session-cached per alias in
+`_chopper_cache_compfunc` and cleared by `_chopper_cache_bust`.
+
 ### Session-scoped caching
 
 Completion state is stored in shell variables (`_CHOPPER_EXEC_<alias>`,

@@ -17,11 +17,13 @@
 # _chopper_cache_mode[alias] = disabled|passthrough|custom|rhai|normal
 declare -gA _chopper_cache_exec=()
 declare -gA _chopper_cache_mode=()
+declare -gA _chopper_cache_compfunc=()
 
 # Bust the session cache (call this to pick up config changes mid-session).
 _chopper_cache_bust() {
     _chopper_cache_exec=()
     _chopper_cache_mode=()
+    _chopper_cache_compfunc=()
 }
 
 # ---------------------------------------------------------------------------
@@ -213,6 +215,60 @@ _chopper_find_nonself_compfunc() {
     return 1
 }
 
+# bash-completion registers a generic fallback (file completion) when it cannot
+# find a real completer for a command. Treat those as "no completer" so we can
+# keep looking rather than delegate to something that knows nothing.
+_chopper_is_generic_compfunc() {
+    case "$1" in
+        _comp_complete_minimal|_minimal|_comp_complete_longopt|_longopt)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# Resolve which native completer should handle an alias, and for which command
+# name. Sets REPLY="<func>" and REPLY2="<command name the func expects>".
+#
+# Order:
+#   1. the exec target's own completer (e.g. alias `k` -> kubectl)
+#   2. the alias name's own completer, when it differs from the target
+#      (e.g. alias `paru` -> wrapper script `paru-audit-wrapper`; there is no
+#      completer for the wrapper, but the stock paru completer exists)
+_chopper_resolve_compfunc() {
+    local alias_name="$1"
+    local target_basename="$2"
+    local func=""
+    REPLY=""
+    REPLY2=""
+
+    if [[ -n "${_chopper_cache_compfunc[$alias_name]+set}" ]]; then
+        func="${_chopper_cache_compfunc[$alias_name]%%:*}"
+        if [[ -n "$func" ]] && declare -F "$func" &>/dev/null; then
+            REPLY="$func"
+            REPLY2="${_chopper_cache_compfunc[$alias_name]#*:}"
+            return 0
+        fi
+        unset '_chopper_cache_compfunc[$alias_name]'
+    fi
+
+    if _chopper_find_nonself_compfunc "$target_basename" && ! _chopper_is_generic_compfunc "$REPLY"; then
+        _chopper_cache_compfunc[$alias_name]="$REPLY:$target_basename"
+        REPLY2="$target_basename"
+        return 0
+    fi
+
+    if [[ "$alias_name" != "$target_basename" ]] &&
+       _chopper_find_nonself_compfunc "$alias_name" && ! _chopper_is_generic_compfunc "$REPLY"; then
+        _chopper_cache_compfunc[$alias_name]="$REPLY:$alias_name"
+        REPLY2="$alias_name"
+        return 0
+    fi
+
+    REPLY=""
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Internal: find the registered completion function for a command
 # ---------------------------------------------------------------------------
@@ -301,29 +357,36 @@ _chopper_complete() {
     local _chopper_orig_line="$COMP_LINE"
     local _chopper_orig_point="$COMP_POINT"
 
-    # Rewrite completion context to reference the underlying command.
-    COMP_WORDS[0]="$target_basename"
-    COMP_LINE="${target_basename}${COMP_LINE#"${_chopper_orig_words[0]}"}"
-    COMP_POINT=$(( COMP_POINT - ${#_chopper_orig_words[0]} + ${#target_basename} ))
-
     local underlying_func=""
-    if _chopper_find_nonself_compfunc "$target_basename"; then
+    local comp_cmd="$target_basename"
+    if _chopper_resolve_compfunc "$alias_name" "$target_basename"; then
         underlying_func="$REPLY"
+        comp_cmd="$REPLY2"
     fi
 
+    # Rewrite completion context to reference the command whose completer we
+    # are about to run (the exec target, or the alias name itself when only
+    # the alias has a native completer).
+    COMP_WORDS[0]="$comp_cmd"
+    COMP_LINE="${comp_cmd}${COMP_LINE#"${_chopper_orig_words[0]}"}"
+    COMP_POINT=$(( COMP_POINT - ${#_chopper_orig_words[0]} + ${#comp_cmd} ))
+
     if [[ -n "$underlying_func" ]]; then
-        _chopper_saved_target_func=$(declare -f "$target_basename" 2>/dev/null) || true
+        # Shadow the command name the completer will shell out to (e.g. the
+        # paru completer runs `paru -Pc`) so it hits the real exec target with
+        # the CHOPPER_BASHCOMP hint set, bypassing reconcile.
+        _chopper_saved_target_func=$(declare -f "$comp_cmd" 2>/dev/null) || true
         local _chopper_completion_alias_name="$alias_name"
         local _chopper_completion_target="$target"
         eval '
-            '"$target_basename"'() {
+            '"$comp_cmd"'() {
                 CHOPPER_BASHCOMP=1 CHOPPER_BASHCOMP_ALIAS="$_chopper_completion_alias_name" CHOPPER_BASHCOMP_TARGET="$_chopper_completion_target" "'"$target"'" "$@" | tr -d '"'"'\000'"'"'
                 return ${PIPESTATUS[0]}
             }
         '
         # Call the underlying completer with rewritten context.
         "$underlying_func"
-        unset -f "$target_basename" 2>/dev/null || true
+        unset -f "$comp_cmd" 2>/dev/null || true
         if [[ -n "$_chopper_saved_target_func" ]]; then
             eval "$_chopper_saved_target_func" 2>/dev/null || true
         fi
